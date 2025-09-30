@@ -1,38 +1,50 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { apiFetch } from '../lib/api';
+import { BaseUser, Drink } from '../types/api';
+import { useLocalization } from '../context/LocalizationContext';
 
 export default function ProfileScreen({ navigation }: any) {
   const { user, logout } = useAuth();
+  const { t, locale, availableLocales } = useLocalization();
 
-  const { data: profileData } = useQuery({
-    queryKey: ['/api/users', user?.uid],
+  const { data: profileData } = useQuery<BaseUser>({
+    queryKey: ['users.detail', user?.uid],
     enabled: !!user,
+    queryFn: () => apiFetch<BaseUser>(`/api/users/${user?.uid}`),
   });
 
-  const { data: userDrinks = [] } = useQuery({
-    queryKey: ['/api/drinks/user', user?.uid],
+  const { data: userDrinks = [] } = useQuery<Drink[]>({
+    queryKey: ['drinks.byUser', user?.uid],
     enabled: !!user,
+    queryFn: () => apiFetch<Drink[]>(`/api/drinks/user/${user?.uid}`),
   });
 
-  const { data: friendsCount = 0 } = useQuery({
-    queryKey: ['/api/friends/count'],
+  const { data: friendsCount = 0 } = useQuery<number>({
+    queryKey: ['friends.count'],
     enabled: !!user,
+    queryFn: () => apiFetch<number>('/api/friends/count'),
   });
+
+  const currentLanguage = useMemo(
+    () => availableLocales.find((item) => item.code === locale)?.label ?? locale.toUpperCase(),
+    [availableLocales, locale]
+  );
 
   const handleLogout = () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      t('profile.logout'),
+      t('profile.logoutConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
+        { text: t('profile.cancel'), style: 'cancel' },
+        {
+          text: t('profile.logout'),
           style: 'destructive',
-          onPress: logout
+          onPress: logout,
         },
       ]
     );
@@ -43,9 +55,9 @@ export default function ProfileScreen({ navigation }: any) {
     : profileData?.email || user?.email || 'User';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
+        <Text style={styles.headerTitle}>{t('profile.title')}</Text>
         <TouchableOpacity onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={24} color="#EF4444" />
         </TouchableOpacity>
@@ -61,19 +73,22 @@ export default function ProfileScreen({ navigation }: any) {
           
           <Text style={styles.displayName}>{displayName}</Text>
           <Text style={styles.email}>{profileData?.email || user?.email}</Text>
+          {profileData?.bio ? (
+            <Text style={styles.bio}>{profileData.bio}</Text>
+          ) : null}
 
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{userDrinks.length}</Text>
-              <Text style={styles.statLabel}>Posts</Text>
+              <Text style={styles.statLabel}>{t('profile.posts')}</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{friendsCount}</Text>
-              <Text style={styles.statLabel}>Friends</Text>
+              <Text style={styles.statLabel}>{t('profile.drinkPartners')}</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>0</Text>
-              <Text style={styles.statLabel}>Following</Text>
+              <Text style={styles.statLabel}>{t('profile.following')}</Text>
             </View>
           </View>
 
@@ -81,22 +96,22 @@ export default function ProfileScreen({ navigation }: any) {
             style={styles.editButton}
             onPress={() => navigation.navigate('EditProfile')}
           >
-            <Text style={styles.editButtonText}>Edit Profile</Text>
+            <Text style={styles.editButtonText}>{t('profile.edit')}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Drinks</Text>
+          <Text style={styles.sectionTitle}>{t('profile.posts')}</Text>
           
           {userDrinks.length === 0 ? (
             <View style={styles.emptyDrinks}>
               <Ionicons name="wine-outline" size={48} color="#6B7280" />
-              <Text style={styles.emptyDrinksText}>No drinks posted yet</Text>
+              <Text style={styles.emptyDrinksText}>{t('profile.emptyDrinks')}</Text>
               <TouchableOpacity
                 style={styles.createPostButton}
                 onPress={() => navigation.navigate('CreatePost')}
               >
-                <Text style={styles.createPostButtonText}>Create First Post</Text>
+                <Text style={styles.createPostButtonText}>{t('profile.createFirstPost')}</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -118,11 +133,11 @@ export default function ProfileScreen({ navigation }: any) {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Settings</Text>
-          
+          <Text style={styles.sectionTitle}>{t('profile.settings')}</Text>
+
           <TouchableOpacity style={styles.settingItem}>
             <Ionicons name="person-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.settingText}>Account Settings</Text>
+            <Text style={styles.settingText}>Account settings</Text>
             <Ionicons name="chevron-forward" size={20} color="#6B7280" />
           </TouchableOpacity>
 
@@ -140,8 +155,17 @@ export default function ProfileScreen({ navigation }: any) {
 
           <TouchableOpacity style={styles.settingItem}>
             <Ionicons name="help-circle-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.settingText}>Help & Support</Text>
+            <Text style={styles.settingText}>Help & support</Text>
             <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => navigation.navigate('LanguageSettings')}
+          >
+            <Ionicons name="globe-outline" size={24} color="#FFFFFF" />
+            <Text style={styles.settingText}>{t('profile.language')}</Text>
+            <Text style={styles.settingValue}>{currentLanguage}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -202,6 +226,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#9CA3AF',
     marginBottom: 24,
+  },
+  bio: {
+    fontSize: 14,
+    color: '#D1D5DB',
+    marginBottom: 16,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -295,5 +326,10 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginLeft: 16,
     flex: 1,
+  },
+  settingValue: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginRight: 8,
   },
 });

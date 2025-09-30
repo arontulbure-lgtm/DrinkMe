@@ -1,47 +1,85 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { apiFetch } from '../lib/api';
+import { useLocalization } from '../context/LocalizationContext';
+
+interface SelectedImage {
+  uri: string;
+  base64: string;
+}
 
 export default function CreatePostScreen({ navigation }: any) {
   const [drinkName, setDrinkName] = useState('');
   const [description, setDescription] = useState('');
   const [rating, setRating] = useState(5);
   const [location, setLocation] = useState('');
+  const [photo, setPhoto] = useState<SelectedImage | null>(null);
   const { getJwtToken } = useAuth();
   const queryClient = useQueryClient();
+  const { t } = useLocalization();
 
   const createPostMutation = useMutation({
     mutationFn: async (postData: any) => {
       const token = await getJwtToken();
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/drinks`, {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      return apiFetch('/api/drinks', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify(postData),
       });
-      if (!response.ok) throw new Error('Failed to create post');
-      return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/drinks'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/drinks/partners'] });
-      Alert.alert('Success', 'Your drink has been posted!', [
-        { text: 'OK', onPress: () => navigation.goBack() }
+      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
+      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
+      setDrinkName('');
+      setDescription('');
+      setLocation('');
+      setRating(5);
+      setPhoto(null);
+      Alert.alert(t('createPost.title'), t('createPost.success'), [
+        { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     },
     onError: () => {
-      Alert.alert('Error', 'Failed to create post. Please try again.');
+      Alert.alert(t('createPost.title'), t('createPost.error'));
     },
   });
 
+  const handlePickPhoto = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t('createPost.title'), t('scanner.permissionLibrary'));
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      quality: 0.8,
+      base64: true,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri && result.assets[0].base64) {
+      setPhoto({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+    }
+  };
+
   const handleCreatePost = () => {
     if (!drinkName.trim() || !description.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      Alert.alert(t('createPost.title'), t('createPost.fieldsError'));
+      return;
+    }
+
+    if (!photo?.base64) {
+      Alert.alert(t('createPost.title'), t('createPost.photoRequired'));
       return;
     }
 
@@ -50,60 +88,51 @@ export default function CreatePostScreen({ navigation }: any) {
       description: description.trim(),
       rating,
       location: location.trim() || null,
-      isAlcoholic: true, // Default for now
+      isAlcoholic: true,
+      imageData: photo.base64,
     });
   };
 
-  const renderStarRating = () => {
-    return (
-      <View style={styles.ratingContainer}>
-        <Text style={styles.ratingLabel}>Rating</Text>
-        <View style={styles.starsContainer}>
-          {[1, 2, 3, 4, 5].map((star) => (
-            <TouchableOpacity
-              key={star}
-              onPress={() => setRating(star)}
-              style={styles.starButton}
-            >
-              <Ionicons
-                name={star <= rating ? "star" : "star-outline"}
-                size={32}
-                color={star <= rating ? "#FFD700" : "#6B7280"}
-              />
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={styles.ratingText}>{rating} star{rating !== 1 ? 's' : ''}</Text>
+  const renderStarRating = () => (
+    <View style={styles.ratingContainer}>
+      <Text style={styles.ratingLabel}>{t('createPost.rating')}</Text>
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <TouchableOpacity key={star} onPress={() => setRating(star)} style={styles.starButton}>
+            <Ionicons
+              name={star <= rating ? 'star' : 'star-outline'}
+              size={32}
+              color={star <= rating ? '#FFD700' : '#6B7280'}
+            />
+          </TouchableOpacity>
+        ))}
       </View>
-    );
-  };
+      <Text style={styles.ratingText}>{`${rating}/5`}</Text>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.cancelButton}>Cancel</Text>
+          <Text style={styles.cancelButton}>{t('createPost.cancel')}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>New Post</Text>
-        <TouchableOpacity 
-          onPress={handleCreatePost}
-          disabled={createPostMutation.isPending}
-        >
-          <Text style={[
-            styles.postButton,
-            createPostMutation.isPending && styles.postButtonDisabled
-          ]}>
-            {createPostMutation.isPending ? 'Posting...' : 'Post'}
+        <Text style={styles.headerTitle}>{t('createPost.title')}</Text>
+        <TouchableOpacity onPress={handleCreatePost} disabled={createPostMutation.isPending}>
+          <Text
+            style={[styles.postButton, createPostMutation.isPending && styles.postButtonDisabled]}
+          >
+            {createPostMutation.isPending ? t('createPost.submitting') : t('createPost.submit')}
           </Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.label}>Drink Name *</Text>
+          <Text style={styles.label}>{t('createPost.nameLabel')}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Enter drink name"
+            placeholder={t('createPost.namePlaceholder')}
             placeholderTextColor="#6B7280"
             value={drinkName}
             onChangeText={setDrinkName}
@@ -111,10 +140,10 @@ export default function CreatePostScreen({ navigation }: any) {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.label}>Description *</Text>
+          <Text style={styles.label}>{t('createPost.descriptionLabel')}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Describe your drink experience..."
+            placeholder={t('createPost.descriptionPlaceholder')}
             placeholderTextColor="#6B7280"
             value={description}
             onChangeText={setDescription}
@@ -127,10 +156,10 @@ export default function CreatePostScreen({ navigation }: any) {
         {renderStarRating()}
 
         <View style={styles.section}>
-          <Text style={styles.label}>Location</Text>
+          <Text style={styles.label}>{t('createPost.location')}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Where did you have this drink?"
+            placeholder={t('createPost.locationPlaceholder')}
             placeholderTextColor="#6B7280"
             value={location}
             onChangeText={setLocation}
@@ -138,26 +167,28 @@ export default function CreatePostScreen({ navigation }: any) {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.helpText}>
-            Share your drink experience with the DrinkMe community! 
-            Add photos, rate your drink, and let others know where they can find it.
-          </Text>
+          <Text style={styles.helpText}>{t('createPost.helperText')}</Text>
+        </View>
+
+        <View style={styles.photoSection}>
+          <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto}>
+            <Ionicons name="camera" size={20} color="#8B5FBF" />
+            <Text style={styles.photoButtonText}>
+              {photo ? t('createPost.changePhoto') : t('createPost.addPhoto')}
+            </Text>
+          </TouchableOpacity>
+          {photo?.uri && <Image source={{ uri: photo.uri }} style={styles.preview} />}
         </View>
 
         <View style={styles.bottomActions}>
           <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="camera-outline" size={24} color="#8B5FBF" />
-            <Text style={styles.actionText}>Add Photo</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton}>
             <Ionicons name="location-outline" size={24} color="#8B5FBF" />
-            <Text style={styles.actionText}>Add Location</Text>
+            <Text style={styles.actionText}>{t('createPost.addLocation')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.actionButton}>
             <Ionicons name="pricetag-outline" size={24} color="#8B5FBF" />
-            <Text style={styles.actionText}>Add Tags</Text>
+            <Text style={styles.actionText}>{t('createPost.addTags')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -217,7 +248,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   textArea: {
-    height: 100,
+    height: 120,
     textAlignVertical: 'top',
   },
   ratingContainer: {
@@ -246,6 +277,30 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     lineHeight: 20,
     fontStyle: 'italic',
+  },
+  photoSection: {
+    marginBottom: 24,
+    gap: 12,
+  },
+  photoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1F2937',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  photoButtonText: {
+    color: '#8B5FBF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  preview: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: '#111827',
   },
   bottomActions: {
     flexDirection: 'row',

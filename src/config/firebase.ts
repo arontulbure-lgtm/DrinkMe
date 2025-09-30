@@ -15,7 +15,6 @@ const firebaseConfig = {
   messagingSenderId: Constants.expoConfig?.extra?.firebaseMessagingSenderId,
   appId: Constants.expoConfig?.extra?.firebaseAppId,
 };
-console.log("Firebase Config:", firebaseConfig);
 const app = initializeApp(firebaseConfig);
 
 // ✅ Auth cu persistență pe mobil
