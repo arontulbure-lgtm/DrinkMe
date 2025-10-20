@@ -30,7 +30,6 @@ export default {
       favicon: "./assets/favicon.png"
     },
     plugins: [
-      "expo-barcode-scanner",
       "expo-secure-store"
     ],
     extra: {
@@ -44,5 +43,4 @@ export default {
     }
   }
 };
-
 

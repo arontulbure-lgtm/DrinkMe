@@ -1,6 +1,10 @@
 .env
+.env.*
+server/.env
 .expo
 node_modules
 android
 ios
+dist
+build
 .DS_Store

@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import { apiFetch } from '../lib/api';
 import * as SecureStore from 'expo-secure-store';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  serverUserId: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -18,35 +20,40 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [serverUserId, setServerUserId] = useState<string | null>(null);
+
+  const resolveServerUid = (firebaseUser: User): string => {
+    const email = firebaseUser.email?.toLowerCase();
+    if (email?.startsWith('alex')) return 'user_demo';
+    if (email?.startsWith('ana')) return 'user_anamaria';
+    if (email?.startsWith('dragos')) return 'user_dragos';
+    return firebaseUser.uid;
+  };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      
-      if (user) {
-        // Get Firebase ID token and exchange for backend JWT
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
+
+      if (firebaseUser) {
+        const serverUid = resolveServerUid(firebaseUser);
+        globalThis.__DRINKME_UID = serverUid;
+        setServerUserId(serverUid);
         try {
-          const idToken = await user.getIdToken();
-          const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/auth/mobile`, {
+          const idToken = await firebaseUser.getIdToken();
+          const { token } = await apiFetch<{ token: string }>('/api/auth/mobile', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ idToken }),
+            body: JSON.stringify({ idToken, uid: serverUid }),
           });
-          
-          if (response.ok) {
-            const { token } = await response.json();
-            await SecureStore.setItemAsync('jwt_token', token);
-          }
+          await SecureStore.setItemAsync('jwt_token', token || serverUid);
         } catch (error) {
           console.error('Failed to exchange Firebase token for JWT:', error);
         }
       } else {
-        // Clear stored JWT when user logs out
+        globalThis.__DRINKME_UID = null;
+        setServerUserId(null);
         await SecureStore.deleteItemAsync('jwt_token');
       }
-      
+
       setIsLoading(false);
     });
 
@@ -66,7 +73,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const getJwtToken = async (): Promise<string | null> => {
-    return await SecureStore.getItemAsync('jwt_token');
+    const stored = await SecureStore.getItemAsync('jwt_token');
+    return stored || serverUserId || (globalThis.__DRINKME_UID ?? null);
   };
 
   return (
@@ -74,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isLoading,
       isAuthenticated: !!user,
+      serverUserId,
       signIn,
       signUp,
       logout,

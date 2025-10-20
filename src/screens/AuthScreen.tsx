@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import { useLocalization } from '../context/LocalizationContext';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -9,10 +10,11 @@ export default function AuthScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { signIn, signUp } = useAuth();
+  const { t } = useLocalization();
 
   const handleAuth = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert(t('auth.errorTitle'), t('auth.errorMessage'));
       return;
     }
 
@@ -31,17 +33,17 @@ export default function AuthScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>DrinkMe</Text>
+        <Text style={styles.title}>{t('auth.title')}</Text>
         <Text style={styles.subtitle}>
-          {isSignUp ? 'Create your account' : 'Welcome back'}
+          {isSignUp ? t('auth.subtitleSignUp') : t('auth.subtitleSignIn')}
         </Text>
 
         <View style={styles.form}>
           <TextInput
             style={styles.input}
-            placeholder="Email"
+            placeholder={t('auth.emailPlaceholder')}
             placeholderTextColor="#6B7280"
             value={email}
             onChangeText={setEmail}
@@ -51,7 +53,7 @@ export default function AuthScreen() {
           
           <TextInput
             style={styles.input}
-            placeholder="Password"
+            placeholder={t('auth.passwordPlaceholder')}
             placeholderTextColor="#6B7280"
             value={password}
             onChangeText={setPassword}
@@ -64,7 +66,7 @@ export default function AuthScreen() {
             disabled={isLoading}
           >
             <Text style={styles.buttonText}>
-              {isLoading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+              {isLoading ? t('auth.loading') : isSignUp ? t('auth.signUp') : t('auth.signIn')}
             </Text>
           </TouchableOpacity>
 
@@ -73,9 +75,7 @@ export default function AuthScreen() {
             onPress={() => setIsSignUp(!isSignUp)}
           >
             <Text style={styles.linkText}>
-              {isSignUp 
-                ? 'Already have an account? Sign In' 
-                : "Don't have an account? Sign Up"}
+              {isSignUp ? t('auth.toggleToSignIn') : t('auth.toggleToSignUp')}
             </Text>
           </TouchableOpacity>
         </View>

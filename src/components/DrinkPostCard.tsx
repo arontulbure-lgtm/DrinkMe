@@ -1,39 +1,30 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Drink } from '../types/api';
+import { useLocalization } from '../context/LocalizationContext';
 
 interface DrinkPostCardProps {
-  drink: {
-    id: number;
-    name: string;
-    description: string;
-    rating: number;
-    location?: string;
-    user?: {
-      firstName?: string;
-      lastName?: string;
-      email: string;
-    };
-    createdAt: string;
-  };
-  onLike: () => void;
-  onComment: () => void;
+  drink: Drink;
+  onCheer: () => void;
+  onComment?: () => void;
   onSave: () => void;
   isLiked?: boolean;
   isSaved?: boolean;
-  likesCount?: number;
+  cheersCount?: number;
 }
 
-export default function DrinkPostCard({ 
-  drink, 
-  onLike, 
-  onComment, 
+export default function DrinkPostCard({
+  drink,
+  onCheer,
+  onComment,
   onSave,
   isLiked = false,
   isSaved = false,
-  likesCount = 0
+  cheersCount = 0,
 }: DrinkPostCardProps) {
-  const displayName = drink.user?.firstName 
+  const { t } = useLocalization();
+  const displayName = drink.user?.firstName
     ? `${drink.user.firstName} ${drink.user.lastName || ''}`
     : drink.user?.email?.split('@')[0] || 'Unknown User';
 
@@ -41,36 +32,32 @@ export default function DrinkPostCard({
     const date = new Date(dateString);
     const now = new Date();
     const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
+
     if (diffInMinutes < 1) return 'Just now';
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
     if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
     return `${Math.floor(diffInMinutes / 1440)}d ago`;
   };
 
-  const renderStars = (rating: number) => {
-    return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <Ionicons
-            key={star}
-            name={star <= rating ? "star" : "star-outline"}
-            size={16}
-            color={star <= rating ? "#FFD700" : "#6B7280"}
-          />
-        ))}
-      </View>
-    );
-  };
+  const renderStars = (rating: number) => (
+    <View style={styles.starsContainer}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Ionicons
+          key={star}
+          name={star <= rating ? 'star' : 'star-outline'}
+          size={16}
+          color={star <= rating ? '#FFD700' : '#6B7280'}
+        />
+      ))}
+    </View>
+  );
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.userInfo}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {displayName[0]?.toUpperCase() || '?'}
-            </Text>
+            <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
           </View>
           <View style={styles.userDetails}>
             <Text style={styles.username}>{displayName}</Text>
@@ -86,6 +73,9 @@ export default function DrinkPostCard({
       </View>
 
       <View style={styles.content}>
+        {drink.imageUrl ? (
+          <Image source={{ uri: drink.imageUrl }} style={styles.image} />
+        ) : null}
         <Text style={styles.drinkName}>{drink.name}</Text>
         <View style={styles.ratingContainer}>
           {renderStars(drink.rating)}
@@ -95,25 +85,29 @@ export default function DrinkPostCard({
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.actionButton} onPress={onLike}>
-          <Ionicons 
-            name={isLiked ? "heart" : "heart-outline"} 
-            size={24} 
-            color={isLiked ? "#EF4444" : "#FFFFFF"} 
+        <TouchableOpacity style={styles.actionButton} onPress={onCheer}>
+          <FontAwesome5
+            name="glass-cheers"
+            size={20}
+            color={isLiked ? '#FCD34D' : '#FFFFFF'}
           />
-          <Text style={styles.actionText}>{likesCount} {likesCount === 1 ? 'Like' : 'Likes'}</Text>
+          <Text style={styles.actionText}>
+            {t('common.cheersCount', { count: cheersCount ?? drink.cheersCount ?? 0 })}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={onComment}>
-          <Ionicons name="chatbubble-outline" size={24} color="#FFFFFF" />
-          <Text style={styles.actionText}>Comment</Text>
-        </TouchableOpacity>
+        {onComment && (
+          <TouchableOpacity style={styles.actionButton} onPress={onComment}>
+            <Ionicons name="chatbubble-outline" size={24} color="#FFFFFF" />
+            <Text style={styles.actionText}>Comment</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={styles.actionButton} onPress={onSave}>
-          <Ionicons 
-            name={isSaved ? "bookmark" : "bookmark-outline"} 
-            size={24} 
-            color={isSaved ? "#8B5FBF" : "#FFFFFF"} 
+          <Ionicons
+            name={isSaved ? 'bookmark' : 'bookmark-outline'}
+            size={24}
+            color={isSaved ? '#8B5FBF' : '#FFFFFF'}
           />
           <Text style={styles.actionText}>{isSaved ? 'Saved' : 'Save'}</Text>
         </TouchableOpacity>
@@ -179,6 +173,13 @@ const styles = StyleSheet.create({
   },
   content: {
     marginBottom: 16,
+  },
+  image: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: '#111827',
   },
   drinkName: {
     fontSize: 18,

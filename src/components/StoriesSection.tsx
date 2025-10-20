@@ -1,19 +1,7 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
-interface Story {
-  id: number;
-  userId: string;
-  content: string;
-  mediaUrl?: string;
-  createdAt: string;
-  user?: {
-    firstName?: string;
-    lastName?: string;
-    email: string;
-  };
-}
+import { Story } from '../types/api';
 
 interface StoriesSectionProps {
   stories: Story[];

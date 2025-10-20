@@ -1,44 +1,49 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { apiFetch } from '../lib/api';
+import { Drink, SmartBarItem } from '../types/api';
+import { useLocalization } from '../context/LocalizationContext';
 
 export default function SmartBarScreen() {
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemName, setNewItemName] = useState('');
   const [newItemQuantity, setNewItemQuantity] = useState('');
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' or 'saved'
-  const { user, getJwtToken } = useAuth();
+  const { serverUserId, getJwtToken } = useAuth();
   const queryClient = useQueryClient();
+  const { t } = useLocalization();
 
-  const { data: inventory = [], isLoading } = useQuery({
-    queryKey: ['/api/smart-bar'],
-    enabled: !!user,
+  const { data: inventory = [], isLoading } = useQuery<SmartBarItem[]>({
+    queryKey: ['smartBar.inventory'],
+    enabled: !!serverUserId,
+    queryFn: () => apiFetch<SmartBarItem[]>('/api/smart-bar'),
   });
 
-  const { data: savedDrinks = [], isLoading: isSavedLoading } = useQuery({
-    queryKey: [`/api/users/${user?.uid}/saved-drinks`],
-    enabled: !!user,
+  const { data: savedDrinks = [], isLoading: isSavedLoading } = useQuery<Drink[]>({
+    queryKey: ['users.savedDrinks', serverUserId],
+    enabled: !!serverUserId,
+    queryFn: () => apiFetch<Drink[]>(`/api/users/${serverUserId}/saved-drinks`),
   });
 
   const addItemMutation = useMutation({
     mutationFn: async (item: { name: string; quantity: string; unit: string }) => {
       const token = await getJwtToken();
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/smart-bar`, {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      return apiFetch('/api/smart-bar', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify(item),
       });
-      if (!response.ok) throw new Error('Failed to add item');
-      return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/smart-bar'] });
+      queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
       setNewItemName('');
       setNewItemQuantity('');
       setIsAddingItem(false);
@@ -51,16 +56,17 @@ export default function SmartBarScreen() {
   const deleteItemMutation = useMutation({
     mutationFn: async (itemId: number) => {
       const token = await getJwtToken();
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/smart-bar/${itemId}`, {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      await apiFetch(`/api/smart-bar/${itemId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
       });
-      if (!response.ok) throw new Error('Failed to delete item');
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/smart-bar'] });
+      queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
     },
     onError: () => {
       Alert.alert('Error', 'Failed to remove item from your bar');
@@ -96,36 +102,36 @@ export default function SmartBarScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Smart Bar</Text>
+        <Text style={styles.headerTitle}>{t('smartBar.title')}</Text>
         <TouchableOpacity 
           style={styles.headerButton}
           onPress={() => setIsAddingItem(!isAddingItem)}
         >
-          <Ionicons 
-            name={isAddingItem ? "close" : "add"} 
-            size={24} 
-            color="#FFFFFF" 
+          <Ionicons
+            name={isAddingItem ? 'close' : 'add'}
+            size={24}
+            color="#FFFFFF"
           />
-        </TouchableOpacity>
-      </View>
+      </TouchableOpacity>
+    </View>
 
-      {isAddingItem && (
-        <View style={styles.addItemContainer}>
-          <Text style={styles.addItemTitle}>Add to Your Bar</Text>
-          
+    {isAddingItem && (
+      <View style={styles.addItemContainer}>
+          <Text style={styles.addItemTitle}>{t('smartBar.addItemTitle')}</Text>
+
           <TextInput
             style={styles.input}
-            placeholder="Item name (e.g., Whiskey, Vodka)"
+            placeholder={t('smartBar.itemNamePlaceholder')}
             placeholderTextColor="#6B7280"
             value={newItemName}
             onChangeText={setNewItemName}
           />
-          
+
           <TextInput
             style={styles.input}
-            placeholder="Quantity (e.g., 1, 750ml)"
+            placeholder={t('smartBar.quantityPlaceholder')}
             placeholderTextColor="#6B7280"
             value={newItemQuantity}
             onChangeText={setNewItemQuantity}
@@ -137,11 +143,11 @@ export default function SmartBarScreen() {
             disabled={addItemMutation.isPending}
           >
             <Text style={styles.addButtonText}>
-              {addItemMutation.isPending ? 'Adding...' : 'Add Item'}
+              {addItemMutation.isPending ? t('editProfile.saving') : t('smartBar.addItem')}
             </Text>
           </TouchableOpacity>
-        </View>
-      )}
+      </View>
+    )}
 
       {/* Tab Selector */}
       <View style={styles.tabContainer}>
@@ -150,7 +156,7 @@ export default function SmartBarScreen() {
           onPress={() => setActiveTab('inventory')}
         >
           <Text style={[styles.tabText, activeTab === 'inventory' && styles.activeTabText]}>
-            My Inventory
+            {t('smartBar.tabs.inventory')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -158,7 +164,7 @@ export default function SmartBarScreen() {
           onPress={() => setActiveTab('saved')}
         >
           <Text style={[styles.tabText, activeTab === 'saved' && styles.activeTabText]}>
-            Saved Posts
+            {t('smartBar.tabs.saved')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -168,15 +174,13 @@ export default function SmartBarScreen() {
           inventory.length === 0 && !isLoading ? (
             <View style={styles.emptyState}>
               <Ionicons name="wine-outline" size={64} color="#6B7280" />
-              <Text style={styles.emptyTitle}>Your bar is empty</Text>
-              <Text style={styles.emptySubtitle}>
-                Add your favorite spirits, mixers, and ingredients to get personalized recipe recommendations
-              </Text>
+              <Text style={styles.emptyTitle}>{t('smartBar.inventoryEmptyTitle')}</Text>
+              <Text style={styles.emptySubtitle}>{t('smartBar.inventoryEmptySubtitle')}</Text>
               <TouchableOpacity
                 style={styles.addFirstButton}
                 onPress={() => setIsAddingItem(true)}
               >
-                <Text style={styles.addFirstButtonText}>Add First Item</Text>
+                <Text style={styles.addFirstButtonText}>{t('smartBar.addFirst')}</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -203,24 +207,28 @@ export default function SmartBarScreen() {
           savedDrinks.length === 0 && !isSavedLoading ? (
             <View style={styles.emptyState}>
               <Ionicons name="bookmark-outline" size={64} color="#6B7280" />
-              <Text style={styles.emptyTitle}>No saved posts</Text>
-              <Text style={styles.emptySubtitle}>
-                Save interesting drink posts from other users to see them here
-              </Text>
+              <Text style={styles.emptyTitle}>{t('smartBar.savedEmptyTitle')}</Text>
+              <Text style={styles.emptySubtitle}>{t('smartBar.savedEmptySubtitle')}</Text>
             </View>
           ) : (
             <View style={styles.savedPostsContainer}>
-              {savedDrinks.map((drink: any) => (
+              {savedDrinks.map((drink) => (
                 <View key={drink.id} style={styles.savedPostCard}>
                   <View style={styles.savedPostHeader}>
                     <Text style={styles.savedPostName}>{drink.name}</Text>
                     <View style={styles.savedPostMeta}>
                       <Text style={styles.savedPostUser}>
-                        by {drink.displayName || drink.username}
+                        de {drink.user?.firstName
+                          ? `${drink.user.firstName} ${drink.user.lastName || ''}`.trim()
+                          : drink.user?.email?.split('@')[0] || 'utilizator'}
                       </Text>
                       <View style={styles.ratingContainer}>
                         <Ionicons name="star" size={16} color="#FFD700" />
                         <Text style={styles.ratingText}>{drink.rating}</Text>
+                      </View>
+                      <View style={styles.cheersRow}>
+                        <FontAwesome5 name="glass-cheers" size={14} color="#F59E0B" />
+                        <Text style={styles.cheersText}>{drink.cheersCount || 0}</Text>
                       </View>
                     </View>
                   </View>
@@ -474,5 +482,35 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     lineHeight: 20,
     marginBottom: 8,
+  },
+  cheersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cheersText: {
+    color: '#FCD34D',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  ratingText: {
+    color: '#FFD700',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  locationText: {
+    color: '#9CA3AF',
+    fontSize: 12,
   },
 });

@@ -1,91 +1,84 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera } from 'expo-camera';
-import { BarCodeScanner } from 'expo-barcode-scanner';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import * as ImagePicker from 'expo-image-picker';
+import { apiFetch } from '../lib/api';
+import { Recipe } from '../types/api';
+import { useLocalization } from '../context/LocalizationContext';
 
 export default function ScannerScreen({ navigation }: any) {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [scanned, setScanned] = useState(false);
+  const { getJwtToken } = useAuth();
+  const [imageUri, setImageUri] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [detectedProduct, setDetectedProduct] = useState<string | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const { getJwtToken } = useAuth();
+  const { t } = useLocalization();
 
-  useEffect(() => {
-    getCameraPermissions();
-  }, []);
-
-  const getCameraPermissions = async () => {
-    const { status } = await Camera.requestCameraPermissionsAsync();
-    setHasPermission(status === 'granted');
-  };
-
-  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
-    if (scanned) return;
-    
-    setScanned(true);
-    console.log('Barcode scanned:', data);
-
-    // Validate EAN barcode format
-    if (!/^\d{8,13}$/.test(data)) {
-      Alert.alert('Invalid Barcode', 'Please scan a valid product barcode (8-13 digits)');
-      setScanned(false);
+  const pickFromLibrary = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t('scanner.title'), t('scanner.permissionLibrary'));
       return;
     }
-
-    try {
-      // First try Open Food Facts API
-      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
-      const productData = await response.json();
-      
-      if (productData.status === 1 && productData.product) {
-        const product = productData.product;
-        const productName = product.product_name || product.product_name_en || 'Unknown Product';
-        const brand = product.brands || '';
-        const fullName = brand ? `${brand} ${productName}` : productName;
-        
-        setDetectedProduct(fullName);
-        setShowConfirmation(true);
-      } else {
-        // If not found in Open Food Facts, try AI detection
-        await detectWithAI(data);
-      }
-    } catch (error) {
-      console.error('Barcode lookup error:', error);
-      Alert.alert('Lookup Failed', 'Could not identify product. Try scanning again.');
-      setScanned(false);
+    const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, quality: 0.8, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setImageUri(result.assets[0].uri);
+      await detectFromImage(result.assets[0].uri);
     }
   };
 
-  const detectWithAI = async (barcode: string) => {
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t('scanner.title'), t('scanner.permissionCamera'));
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.8 });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setImageUri(result.assets[0].uri);
+      await detectFromImage(result.assets[0].uri);
+    }
+  };
+
+  const detectFromImage = async (uri: string) => {
     try {
       setIsLoading(true);
       const token = await getJwtToken();
-      
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/detect-product`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ barcode }),
-      });
+      const form = new FormData();
+      form.append('file', {
+        // @ts-ignore RN FormData file
+        uri,
+        name: 'photo.jpg',
+        type: 'image/jpeg',
+      } as any);
 
-      if (response.ok) {
-        const { productName } = await response.json();
-        setDetectedProduct(productName);
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const data = await apiFetch<{ productName?: string; error?: string }>(
+        '/api/detect-product',
+        {
+          method: 'POST',
+          headers,
+          body: form,
+        }
+      );
+
+      if (data?.productName) {
+        setDetectedProduct(data.productName);
         setShowConfirmation(true);
+      } else if (data?.error) {
+        Alert.alert(t('scanner.modalTitle'), data.error);
       } else {
-        Alert.alert('Detection Failed', 'Could not identify product. Try manual entry.');
-        setScanned(false);
+        Alert.alert(t('scanner.modalTitle'), t('explore.sections.noDrinksTitle'));
       }
     } catch (error) {
       console.error('AI detection error:', error);
-      Alert.alert('Detection Failed', 'Network error. Please try again.');
-      setScanned(false);
+      Alert.alert(t('scanner.modalTitle'), t('createPost.error'));
     } finally {
       setIsLoading(false);
     }
@@ -98,92 +91,67 @@ export default function ScannerScreen({ navigation }: any) {
       setIsLoading(true);
       const token = await getJwtToken();
       
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/generate-recipes`, {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const { recipes } = await apiFetch<{ recipes: Recipe[] }>('/api/generate-recipes', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ 
+        headers,
+        body: JSON.stringify({
           productName: detectedProduct,
-          count: 3 
+          count: 3,
         }),
       });
-
-      if (response.ok) {
-        const { recipes } = await response.json();
-        navigation.navigate('RecipeResults', { 
-          product: detectedProduct,
-          recipes 
-        });
-      } else {
-        Alert.alert('Generation Failed', 'Could not generate recipes. Please try again.');
-      }
+      navigation.navigate('RecipeResults', {
+        product: detectedProduct,
+        recipes,
+      });
     } catch (error) {
       console.error('Recipe generation error:', error);
-      Alert.alert('Generation Failed', 'Network error. Please try again.');
+      Alert.alert(t('scanner.modalTitle'), t('createPost.error'));
     } finally {
       setIsLoading(false);
       setShowConfirmation(false);
-      setScanned(false);
       setDetectedProduct(null);
     }
   };
 
   const resetScanner = () => {
-    setScanned(false);
+    setImageUri(null);
     setDetectedProduct(null);
     setShowConfirmation(false);
   };
 
-  if (hasPermission === null) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Text style={styles.text}>Requesting camera permission...</Text>
-      </SafeAreaView>
-    );
-  }
-
-  if (hasPermission === false) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.permissionContainer}>
-          <Ionicons name="camera-outline" size={64} color="#6B7280" />
-          <Text style={styles.permissionTitle}>Camera Permission Required</Text>
-          <Text style={styles.permissionText}>
-            DrinkMe needs camera access to scan bottle barcodes and detect products.
-          </Text>
-          <TouchableOpacity style={styles.permissionButton} onPress={getCameraPermissions}>
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Scan Bottle</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <Text style={styles.headerTitle}>{t('scanner.title')}</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Home')}>
           <Ionicons name="close" size={24} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
       <View style={styles.cameraContainer}>
-        <BarCodeScanner
-          onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
-          style={styles.camera}
-        />
-        
-        <View style={styles.overlay}>
-          <View style={styles.scanFrame} />
-          <Text style={styles.scanText}>
-            {isLoading 
-              ? 'Detecting product...' 
-              : 'Point camera at bottle barcode'}
-          </Text>
-        </View>
+        {imageUri ? (
+          <Image source={{ uri: imageUri }} style={styles.camera} />
+        ) : (
+          <View style={[styles.overlay, { paddingHorizontal: 24 }]}>
+            <View style={styles.scanFrame} />
+            <Text style={styles.scanText}>
+              {isLoading ? t('scanner.detecting') : t('scanner.instruction')}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <TouchableOpacity style={styles.permissionButton} onPress={pickFromLibrary} disabled={isLoading}>
+                <Text style={styles.permissionButtonText}>{t('scanner.choosePhoto')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.permissionButton} onPress={takePhoto} disabled={isLoading}>
+                <Text style={styles.permissionButtonText}>{t('scanner.takePhoto')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={styles.controls}>
@@ -192,7 +160,7 @@ export default function ScannerScreen({ navigation }: any) {
           onPress={resetScanner}
           disabled={isLoading}
         >
-          <Text style={styles.resetButtonText}>Reset Scanner</Text>
+          <Text style={styles.resetButtonText}>{t('scanner.reset')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -203,18 +171,16 @@ export default function ScannerScreen({ navigation }: any) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Product Detected</Text>
+            <Text style={styles.modalTitle}>{t('scanner.modalTitle')}</Text>
             <Text style={styles.modalProduct}>{detectedProduct}</Text>
-            <Text style={styles.modalText}>
-              Generate recipes for this product?
-            </Text>
+            <Text style={styles.modalText}>{t('scanner.modalQuestion')}</Text>
             
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonSecondary]}
                 onPress={resetScanner}
               >
-                <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+                <Text style={styles.modalButtonTextSecondary}>{t('scanner.cancel')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity
@@ -222,9 +188,11 @@ export default function ScannerScreen({ navigation }: any) {
                 onPress={generateRecipes}
                 disabled={isLoading}
               >
-                <Text style={styles.modalButtonTextPrimary}>
-                  {isLoading ? 'Generating...' : 'Generate Recipes'}
-                </Text>
+                {isLoading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalButtonTextPrimary}>{t('scanner.generate')}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
