@@ -13,7 +13,7 @@ interface Props {
 }
 
 export default function EditProfileScreen({ navigation }: Props) {
-  const { user } = useAuth();
+  const { serverUserId } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [city, setCity] = useState('');
@@ -21,9 +21,9 @@ export default function EditProfileScreen({ navigation }: Props) {
   const { t } = useLocalization();
 
   const { data: profileData, isLoading } = useQuery<BaseUser>({
-    queryKey: ['users.detail', user?.uid],
-    enabled: !!user,
-    queryFn: () => apiFetch<BaseUser>(`/api/users/${user?.uid}`),
+    queryKey: ['users.detail', serverUserId],
+    enabled: !!serverUserId,
+    queryFn: () => apiFetch<BaseUser>(`/api/users/${serverUserId}`),
   });
 
   useEffect(() => {
@@ -37,8 +37,8 @@ export default function EditProfileScreen({ navigation }: Props) {
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      if (!user?.uid) return;
-      return apiFetch<BaseUser>(`/api/users/${user.uid}`, {
+      if (!serverUserId) return;
+      return apiFetch<BaseUser>(`/api/users/${serverUserId}`, {
         method: 'PUT',
         body: JSON.stringify({ firstName, lastName, city, bio }),
       });

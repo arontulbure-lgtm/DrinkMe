@@ -5,7 +5,6 @@ type RequestConfig = RequestInit & {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __DRINKME_UID: string | null | undefined;
 }
 

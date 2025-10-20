@@ -22,25 +22,25 @@ import { useLocalization } from '../context/LocalizationContext';
 export default function HomeScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [isNotificationsVisible, setNotificationsVisible] = useState(false);
-  const { user, getJwtToken } = useAuth();
+  const { serverUserId, getJwtToken } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
   const { data: partnerDrinks = [], refetch, isLoading } = useQuery<Drink[]>({
     queryKey: ['drinks.partners'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<Drink[]>('/api/drinks/partners'),
   });
 
   const { data: stories = [] } = useQuery<Story[]>({
     queryKey: ['stories.latest'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<Story[]>('/api/stories'),
   });
 
   const { data: notificationData } = useQuery<{ notifications: NotificationItem[]; unreadCount: number }>({
     queryKey: ['notifications'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<{ notifications: NotificationItem[]; unreadCount: number }>('/api/notifications'),
     refetchInterval: 60000,
   });
@@ -82,7 +82,7 @@ export default function HomeScreen({ navigation }: any) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
       queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', user?.uid] });
+      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
     },
     onError: () => {
       Alert.alert(t('errors.saveFailed'));

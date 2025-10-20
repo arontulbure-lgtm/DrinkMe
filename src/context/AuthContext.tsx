@@ -8,6 +8,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  serverUserId: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -19,6 +20,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [serverUserId, setServerUserId] = useState<string | null>(null);
 
   const resolveServerUid = (firebaseUser: User): string => {
     const email = firebaseUser.email?.toLowerCase();
@@ -35,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (firebaseUser) {
         const serverUid = resolveServerUid(firebaseUser);
         globalThis.__DRINKME_UID = serverUid;
+        setServerUserId(serverUid);
         try {
           const idToken = await firebaseUser.getIdToken();
           const { token } = await apiFetch<{ token: string }>('/api/auth/mobile', {
@@ -47,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         globalThis.__DRINKME_UID = null;
+        setServerUserId(null);
         await SecureStore.deleteItemAsync('jwt_token');
       }
 
@@ -70,7 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const getJwtToken = async (): Promise<string | null> => {
     const stored = await SecureStore.getItemAsync('jwt_token');
-    return stored || (globalThis.__DRINKME_UID ?? null);
+    return stored || serverUserId || (globalThis.__DRINKME_UID ?? null);
   };
 
   return (
@@ -78,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isLoading,
       isAuthenticated: !!user,
+      serverUserId,
       signIn,
       signUp,
       logout,

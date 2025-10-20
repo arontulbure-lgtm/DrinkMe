@@ -13,20 +13,20 @@ export default function SmartBarScreen() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemQuantity, setNewItemQuantity] = useState('');
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' or 'saved'
-  const { user, getJwtToken } = useAuth();
+  const { serverUserId, getJwtToken } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
   const { data: inventory = [], isLoading } = useQuery<SmartBarItem[]>({
     queryKey: ['smartBar.inventory'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<SmartBarItem[]>('/api/smart-bar'),
   });
 
   const { data: savedDrinks = [], isLoading: isSavedLoading } = useQuery<Drink[]>({
-    queryKey: ['users.savedDrinks', user?.uid],
-    enabled: !!user,
-    queryFn: () => apiFetch<Drink[]>(`/api/users/${user?.uid}/saved-drinks`),
+    queryKey: ['users.savedDrinks', serverUserId],
+    enabled: !!serverUserId,
+    queryFn: () => apiFetch<Drink[]>(`/api/users/${serverUserId}/saved-drinks`),
   });
 
   const addItemMutation = useMutation({
@@ -43,7 +43,7 @@ export default function SmartBarScreen() {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/smart-bar'] });
+      queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
       setNewItemName('');
       setNewItemQuantity('');
       setIsAddingItem(false);
@@ -66,7 +66,7 @@ export default function SmartBarScreen() {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/smart-bar'] });
+      queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
     },
     onError: () => {
       Alert.alert('Error', 'Failed to remove item from your bar');

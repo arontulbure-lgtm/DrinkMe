@@ -9,24 +9,24 @@ import { BaseUser, Drink } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 
 export default function ProfileScreen({ navigation }: any) {
-  const { user, logout } = useAuth();
+  const { user, logout, serverUserId } = useAuth();
   const { t, locale, availableLocales } = useLocalization();
 
   const { data: profileData } = useQuery<BaseUser>({
-    queryKey: ['users.detail', user?.uid],
-    enabled: !!user,
-    queryFn: () => apiFetch<BaseUser>(`/api/users/${user?.uid}`),
+    queryKey: ['users.detail', serverUserId],
+    enabled: !!serverUserId,
+    queryFn: () => apiFetch<BaseUser>(`/api/users/${serverUserId}`),
   });
 
   const { data: userDrinks = [] } = useQuery<Drink[]>({
-    queryKey: ['drinks.byUser', user?.uid],
-    enabled: !!user,
-    queryFn: () => apiFetch<Drink[]>(`/api/drinks/user/${user?.uid}`),
+    queryKey: ['drinks.byUser', serverUserId],
+    enabled: !!serverUserId,
+    queryFn: () => apiFetch<Drink[]>(`/api/drinks/user/${serverUserId}`),
   });
 
   const { data: friendsCount = 0 } = useQuery<number>({
     queryKey: ['friends.count'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<number>('/api/friends/count'),
   });
 

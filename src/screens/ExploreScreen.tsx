@@ -11,7 +11,7 @@ import { useLocalization } from '../context/LocalizationContext';
 
 export default function ExploreScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = useState('');
-  const { user, getJwtToken } = useAuth();
+  const { serverUserId, getJwtToken } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
@@ -31,19 +31,19 @@ export default function ExploreScreen({ navigation }: any) {
 
   const { data: drinks = [] } = useQuery<Drink[]>({
     queryKey: ['drinks.all'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<Drink[]>('/api/drinks'),
   });
 
   const { data: partnerDrinks = [] } = useQuery<Drink[]>({
     queryKey: ['drinks.partners'],
-    enabled: !!user,
+    enabled: !!serverUserId,
     queryFn: () => apiFetch<Drink[]>('/api/drinks/partners'),
   });
 
   const { data: users = [] } = useQuery<BaseUser[]>({
     queryKey: ['users.search', searchQuery],
-    enabled: !!user && hasSearchTerm,
+    enabled: !!serverUserId && hasSearchTerm,
     queryFn: () => apiFetch<BaseUser[]>('/api/users/search', { query: { q: searchQuery } }),
   });
 
@@ -112,7 +112,7 @@ export default function ExploreScreen({ navigation }: any) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', user?.uid] });
+      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
     },
     onError: () => Alert.alert(t('errors.partnerFailed')),
   });
@@ -186,7 +186,7 @@ export default function ExploreScreen({ navigation }: any) {
               <Text style={styles.sectionTitle}>{t('explore.sections.users')}</Text>
             </View>
             {users.map((result) => {
-              const isSelf = result.id === user?.uid;
+              const isSelf = result.id === serverUserId;
               return (
               <View key={result.id} style={styles.userResult}>
                 <TouchableOpacity

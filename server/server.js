@@ -1,28 +1,58 @@
-// Minimal test server for DrinkMe MVP (CommonJS for Node on Windows)
-// Usage:
-//   1) npm install express cors multer dotenv openai
-//   2) set OPENAI_API_KEY=sk-...
-//   3) node server.js
-
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const dotenv = require('dotenv');
-const OpenAI = require('openai');
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import morgan from 'morgan';
+import multer from 'multer';
+import dotenv from 'dotenv';
+import OpenAI from 'openai';
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const upload = multer({ limits: { fileSize: 8 * 1024 * 1024 } });
+
+const isProduction = process.env.NODE_ENV === 'production';
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = isProduction
+  ? {
+      origin(origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        const error = new Error('Not allowed by CORS');
+        error.status = 403;
+        return callback(error, false);
+      },
+      credentials: true,
+    }
+  : { origin: true, credentials: true };
+
+app.use(cors(corsOptions));
+app.use(helmet());
+app.use(morgan(isProduction ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-const upload = multer({ limits: { fileSize: 8 * 1024 * 1024 } }); // 8MB
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', apiLimiter);
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('OPENAI_API_KEY not set. AI endpoints will respond with errors.');
+}
 
-/* -------------------------------------------------------------------------- */
-/*                              In-memory store                               */
-/* -------------------------------------------------------------------------- */
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 const users = [
   {
@@ -55,7 +85,7 @@ const userIndex = new Map(users.map((user) => [user.id, user]));
 
 let nextDrinkId = 4;
 let nextNotificationId = 1;
-let nextCommentId = 1;
+let nextCommentId = 3;
 
 const drinks = [
   {
@@ -128,69 +158,46 @@ const partnersByUser = new Map();
 const notificationsByUser = new Map();
 const commentsByDrink = new Map();
 
-ensureComments(1);
-ensureComments(1).push({
-  id: 1,
-  drinkId: 1,
-  userId: 'user_anamaria',
-  content: 'Abia aștept să îl încerc și eu! 🍸',
-  createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-});
-ensureComments(1).push({
-  id: 2,
-  drinkId: 1,
-  userId: 'user_demo',
-  content: 'Îl pregătesc și diseară, te aștept la Bar A1!',
-  createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-});
-
-nextCommentId = 3;
-
-
-function ensurePartnerSet(userId) {
+const ensurePartnerSet = (userId) => {
   if (!partnersByUser.has(userId)) {
     partnersByUser.set(userId, new Set());
   }
   return partnersByUser.get(userId);
-}
+};
 
-function getUserId(req) {
-  const header = req.headers.authorization || '';
-  const match = header.match(/Bearer\s+(.+)/i);
-  if (match && userIndex.has(match[1])) {
-    return match[1];
+const ensureNotifications = (userId) => {
+  if (!notificationsByUser.has(userId)) {
+    notificationsByUser.set(userId, []);
   }
-  return 'user_demo';
-}
+  return notificationsByUser.get(userId);
+};
 
-function getDisplayName(userId) {
-  const user = userIndex.get(userId);
-  if (!user) return 'Someone';
-  return user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email;
-}
+const cleanupNotifications = (userId) => {
+  const list = ensureNotifications(userId);
+  const now = Date.now();
+  const filtered = list.filter(
+    (item) => now - new Date(item.createdAt).getTime() <= 7 * 24 * 60 * 60 * 1000
+  );
+  if (filtered.length !== list.length) {
+    notificationsByUser.set(userId, filtered);
+  }
+  return filtered;
+};
 
-function decorateDrink(drink, currentUserId) {
-  const user = userIndex.get(drink.userId);
-  const likedSet = cheersByUser.get(currentUserId) || new Set();
-  const savedSet = savedByUser.get(currentUserId) || new Set();
-  const partnerSet = ensurePartnerSet(currentUserId);
-  return {
-    ...drink,
-    user,
-    isLiked: likedSet.has(drink.id),
-    isSaved: savedSet.has(drink.id),
-    isPartner: partnerSet.has(drink.userId) || drink.userId === currentUserId,
-  };
-}
+const pushNotification = (targetUserId, type, message) => {
+  if (!userIndex.has(targetUserId)) return;
+  const list = ensureNotifications(targetUserId);
+  list.unshift({
+    id: nextNotificationId++,
+    type,
+    message,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
+  notificationsByUser.set(targetUserId, list);
+};
 
-function decorateComment(comment) {
-  return {
-    ...comment,
-    user: userIndex.get(comment.userId),
-  };
-}
-
-function ensureSmartBar(userId) {
+const ensureSmartBar = (userId) => {
   if (!smartBarByUser.has(userId)) {
     smartBarByUser.set(userId, [
       {
@@ -208,64 +215,83 @@ function ensureSmartBar(userId) {
     ]);
   }
   return smartBarByUser.get(userId);
-}
+};
 
-function ensureNotifications(userId) {
-  if (!notificationsByUser.has(userId)) {
-    notificationsByUser.set(userId, []);
-  }
-  return notificationsByUser.get(userId);
-}
-
-function cleanupNotifications(userId) {
-  const list = ensureNotifications(userId);
-  const now = Date.now();
-  const filtered = list.filter(
-    (item) => now - new Date(item.createdAt).getTime() <= 7 * 24 * 60 * 60 * 1000
-  );
-  if (filtered.length !== list.length) {
-    notificationsByUser.set(userId, filtered);
-  }
-  return filtered;
-}
-
-function pushNotification(targetUserId, type, message) {
-  if (!userIndex.has(targetUserId)) return;
-  const list = ensureNotifications(targetUserId);
-  list.unshift({
-    id: nextNotificationId++,
-    type,
-    message,
-    read: false,
-    createdAt: new Date().toISOString(),
-  });
-  notificationsByUser.set(targetUserId, list);
-}
-
-function ensureComments(drinkId) {
+const ensureComments = (drinkId) => {
   if (!commentsByDrink.has(drinkId)) {
     commentsByDrink.set(drinkId, []);
   }
   return commentsByDrink.get(drinkId);
-}
+};
 
-// Seed initial partnerships
 ensurePartnerSet('user_demo').add('user_anamaria');
 ensurePartnerSet('user_anamaria').add('user_demo');
 
-/* -------------------------------------------------------------------------- */
-/*                               Auth endpoint                                */
-/* -------------------------------------------------------------------------- */
+ensureComments(1).push(
+  {
+    id: 1,
+    drinkId: 1,
+    userId: 'user_anamaria',
+    content: 'Abia aștept să îl încerc și eu! 🍸',
+    createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+  },
+  {
+    id: 2,
+    drinkId: 1,
+    userId: 'user_demo',
+    content: 'Îl pregătesc și diseară, te aștept la Bar A1!',
+    createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+  }
+);
+
+const getUserId = (req) => {
+  const header = req.headers.authorization || '';
+  const match = header.match(/Bearer\s+(.+)/i);
+  if (match && userIndex.has(match[1])) {
+    return match[1];
+  }
+  return 'user_demo';
+};
+
+const getDisplayName = (userId) => {
+  const user = userIndex.get(userId);
+  if (!user) return 'Someone';
+  return user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email;
+};
+
+const decorateDrink = (drink, currentUserId) => {
+  const user = userIndex.get(drink.userId);
+  const likedSet = cheersByUser.get(currentUserId) || new Set();
+  const savedSet = savedByUser.get(currentUserId) || new Set();
+  const partnerSet = ensurePartnerSet(currentUserId);
+  return {
+    ...drink,
+    user,
+    isLiked: likedSet.has(drink.id),
+    isSaved: savedSet.has(drink.id),
+    isPartner: partnerSet.has(drink.userId) || drink.userId === currentUserId,
+  };
+};
+
+const decorateComment = (comment) => ({
+  ...comment,
+  user: userIndex.get(comment.userId),
+});
+
+const toDataUrl = (buffer, mime = 'image/jpeg') => {
+  const base64 = buffer.toString('base64');
+  return `data:${mime};base64,${base64}`;
+};
+
+app.get('/healthz', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 app.post('/api/auth/mobile', (req, res) => {
   const { uid } = req.body || {};
   const fallback = 'mock-jwt-token';
   res.json({ token: uid && userIndex.has(uid) ? uid : fallback });
 });
-
-/* -------------------------------------------------------------------------- */
-/*                                User routes                                 */
-/* -------------------------------------------------------------------------- */
 
 app.get('/api/users/:id', (req, res) => {
   const user = userIndex.get(req.params.id);
@@ -278,10 +304,10 @@ app.put('/api/users/:id', (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const { firstName, lastName, city, bio } = req.body || {};
-  if (typeof firstName === 'string') user.firstName = firstName;
-  if (typeof lastName === 'string') user.lastName = lastName;
-  if (typeof city === 'string') user.city = city;
-  if (typeof bio === 'string') user.bio = bio;
+  if (typeof firstName === 'string') user.firstName = firstName.slice(0, 120);
+  if (typeof lastName === 'string') user.lastName = lastName.slice(0, 120);
+  if (typeof city === 'string') user.city = city.slice(0, 120);
+  if (typeof bio === 'string') user.bio = bio.slice(0, 500);
 
   res.json(user);
 });
@@ -291,20 +317,20 @@ app.get('/api/users/search', (req, res) => {
   const partnerSet = ensurePartnerSet(currentUserId);
   const term = (req.query.q || '').toString().toLowerCase();
   const filtered = term
-    ? users.filter((user) => {
-        const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
+    ? users.filter((candidate) => {
+        const fullName = `${candidate.firstName} ${candidate.lastName}`.toLowerCase();
         return (
-          user.email.toLowerCase().includes(term) ||
+          candidate.email.toLowerCase().includes(term) ||
           fullName.includes(term) ||
-          (user.city || '').toLowerCase().includes(term)
+          (candidate.city || '').toLowerCase().includes(term)
         );
       })
     : users;
 
   res.json(
-    filtered.map((user) => ({
-      ...user,
-      isPartner: partnerSet.has(user.id),
+    filtered.map((candidate) => ({
+      ...candidate,
+      isPartner: partnerSet.has(candidate.id),
     }))
   );
 });
@@ -344,10 +370,6 @@ app.get('/api/friends/count', (req, res) => {
   res.json(ensurePartnerSet(userId).size);
 });
 
-/* -------------------------------------------------------------------------- */
-/*                                Story routes                                */
-/* -------------------------------------------------------------------------- */
-
 app.get('/api/stories', (req, res) => {
   res.json(
     stories.map((story) => ({
@@ -356,10 +378,6 @@ app.get('/api/stories', (req, res) => {
     }))
   );
 });
-
-/* -------------------------------------------------------------------------- */
-/*                                Drinks routes                                */
-/* -------------------------------------------------------------------------- */
 
 app.get('/api/drinks', (req, res) => {
   const currentUserId = getUserId(req);
@@ -391,6 +409,9 @@ app.post('/api/drinks/:id/comments', (req, res) => {
   const { content } = req.body || {};
   if (!content || !content.trim()) {
     return res.status(400).json({ error: 'Missing comment content' });
+  }
+  if (content.length > 500) {
+    return res.status(400).json({ error: 'Comment too long' });
   }
   const drink = drinks.find((item) => item.id === drinkId);
   if (!drink) return res.status(404).json({ error: 'Drink not found' });
@@ -430,6 +451,11 @@ app.post('/api/drinks', (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
+  const normalizedRating = Number(rating);
+  if (Number.isNaN(normalizedRating) || normalizedRating < 0 || normalizedRating > 5) {
+    return res.status(400).json({ error: 'Rating must be between 0 and 5' });
+  }
+
   const normalizedImage = imageData.startsWith('data:')
     ? imageData
     : `data:image/jpeg;base64,${imageData}`;
@@ -437,10 +463,10 @@ app.post('/api/drinks', (req, res) => {
   const newDrink = {
     id: nextDrinkId++,
     userId: currentUserId,
-    name,
-    description,
-    rating: Number(rating) || 0,
-    location: location || null,
+    name: String(name).slice(0, 120),
+    description: String(description).slice(0, 1000),
+    rating: normalizedRating,
+    location: location ? String(location).slice(0, 180) : null,
     isAlcoholic: isAlcoholic !== false,
     createdAt: new Date().toISOString(),
     cheersCount: 0,
@@ -508,10 +534,6 @@ app.get('/api/users/:userId/saved-drinks', (req, res) => {
   );
 });
 
-/* -------------------------------------------------------------------------- */
-/*                              Notification API                              */
-/* -------------------------------------------------------------------------- */
-
 app.get('/api/notifications', (req, res) => {
   const userId = getUserId(req);
   const list = cleanupNotifications(userId);
@@ -529,10 +551,6 @@ app.post('/api/notifications/read', (req, res) => {
   res.json({ success: true });
 });
 
-/* -------------------------------------------------------------------------- */
-/*                             Smart Bar routes                               */
-/* -------------------------------------------------------------------------- */
-
 app.get('/api/smart-bar', (req, res) => {
   const userId = getUserId(req);
   res.json(ensureSmartBar(userId));
@@ -547,9 +565,9 @@ app.post('/api/smart-bar', (req, res) => {
   }
   const newItem = {
     id: Math.max(0, ...bar.map((item) => item.id)) + 1,
-    name,
-    quantity,
-    unit: unit || 'bottle',
+    name: String(name).slice(0, 120),
+    quantity: String(quantity).slice(0, 60),
+    unit: (unit ? String(unit) : 'bottle').slice(0, 60),
   };
   bar.push(newItem);
   res.status(201).json(newItem);
@@ -566,33 +584,30 @@ app.delete('/api/smart-bar/:itemId', (req, res) => {
   res.status(204).end();
 });
 
-/* -------------------------------------------------------------------------- */
-/*                             AI helper routes                                */
-/* -------------------------------------------------------------------------- */
-
-function toDataUrl(buffer, mime = 'image/jpeg') {
-  const base64 = buffer.toString('base64');
-  return `data:${mime};base64,${base64}`;
-}
-
-async function handleDetectProduct(req, res) {
+const handleDetectProduct = async (req, res, next) => {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OPENAI_API_KEY missing on server' });
+    if (!openai) {
+      const error = new Error('AI detection unavailable');
+      error.status = 503;
+      throw error;
     }
     const file =
       req.file ||
       (Array.isArray(req.files) && req.files.find((f) => f.fieldname === 'file')) ||
       (Array.isArray(req.files) && req.files.find((f) => f.fieldname === 'image')) ||
       (Array.isArray(req.files) ? req.files[0] : null);
-    if (!file) return res.status(400).json({ error: 'Missing image file (field: file or image)' });
+    if (!file) {
+      const error = new Error('Missing image file (field: file or image)');
+      error.status = 400;
+      throw error;
+    }
 
     const imageDataUrl = toDataUrl(file.buffer, file.mimetype || 'image/jpeg');
 
     const prompt =
       'You are a product recognition expert. From the image provided, extract the product name as specifically as possible (brand + product if possible), and determine whether it is alcoholic or non-alcoholic. Return strictly JSON with keys: productName (string), isAlcoholic (boolean).';
 
-    const resp = await openai.responses.create({
+    const response = await openai.responses.create({
       model: 'gpt-4o-mini',
       input: [
         {
@@ -605,29 +620,30 @@ async function handleDetectProduct(req, res) {
       ],
     });
 
-    const text = resp.output_text || '';
+    const text = response.output_text || '';
     let data = null;
     try {
       data = JSON.parse(text);
-    } catch (err) {
-      console.warn('Failed to parse detect json', err, text);
+    } catch (error) {
+      console.warn('Failed to parse detect-product response', error, text);
     }
     if (!data || typeof data.productName !== 'string' || !data.productName.trim()) {
       return res.json({ error: 'Product not recognized, please try again.' });
     }
     res.json({ productName: data.productName.trim(), isAlcoholic: !!data.isAlcoholic });
-  } catch (err) {
-    console.error('detect error', err);
-    res.status(500).json({ error: 'Detection failed' });
+  } catch (error) {
+    next(error);
   }
-}
+};
 
 app.post('/api/detect-product', upload.any(), handleDetectProduct);
 
-app.post('/api/generate-recipes', async (req, res) => {
+app.post('/api/generate-recipes', async (req, res, next) => {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OPENAI_API_KEY missing on server' });
+    if (!openai) {
+      const error = new Error('AI generation unavailable');
+      error.status = 503;
+      throw error;
     }
     const { productName, count = 5, isAlcoholic } = req.body || {};
     if (!productName) return res.status(400).json({ error: 'Missing productName' });
@@ -654,32 +670,38 @@ app.post('/api/generate-recipes', async (req, res) => {
   ]
 }`;
 
-    const resp = await openai.responses.create({
+    const response = await openai.responses.create({
       model: 'gpt-4o-mini',
       input: [{ role: 'user', content: [{ type: 'input_text', text: userPrompt }] }],
       response_format: { type: 'json_object' },
     });
 
-    const text = resp.output_text || '{}';
+    const text = response.output_text || '{}';
     let data = null;
     try {
       data = JSON.parse(text);
-    } catch (err) {
-      console.warn('Failed to parse recipe json', err, text);
+    } catch (error) {
+      console.warn('Failed to parse recipe response', error, text);
     }
     if (!data || !Array.isArray(data.recipes)) {
       return res.status(502).json({ error: 'Invalid AI output', raw: text });
     }
     res.json({ recipes: data.recipes });
-  } catch (err) {
-    console.error('recipes error', err);
-    res.status(500).json({ error: 'Generation failed' });
+  } catch (error) {
+    next(error);
   }
 });
 
-/* -------------------------------------------------------------------------- */
-/*                                 Bootstrap                                  */
-/* -------------------------------------------------------------------------- */
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  const status = err.status && Number.isInteger(err.status) ? err.status : 500;
+  if (status >= 500) {
+    console.error(err);
+  }
+  return res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
