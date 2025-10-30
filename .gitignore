@@ -8,3 +8,14 @@ ios
 dist
 build
 .DS_Store
+
+# Sensitive and local files
+.env
+server/.env
+node_modules/
+dist/
+.expo/
+.expo-shared/
+coverage/
+*.log
+

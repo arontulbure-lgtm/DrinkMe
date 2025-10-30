@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +11,7 @@ import { useLocalization } from '../context/LocalizationContext';
 
 export default function ExploreScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = useState('');
-  const { serverUserId, getJwtToken } = useAuth();
+  const { serverUserId, getJwtToken, profile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
@@ -27,7 +27,10 @@ export default function ExploreScreen({ navigation }: any) {
   );
 
   const [activeFilter, setActiveFilter] = useState('all');
-  const hasSearchTerm = searchQuery.trim().length > 2;
+  const rawQuery = searchQuery.trim();
+  const isUserQuery = rawQuery.startsWith('@');
+  const userQuery = isUserQuery ? rawQuery.slice(1) : '';
+  const hasSearchTerm = rawQuery.length > 0;
 
   const { data: drinks = [] } = useQuery<Drink[]>({
     queryKey: ['drinks.all'],
@@ -42,16 +45,36 @@ export default function ExploreScreen({ navigation }: any) {
   });
 
   const { data: users = [] } = useQuery<BaseUser[]>({
-    queryKey: ['users.search', searchQuery],
-    enabled: !!serverUserId && hasSearchTerm,
-    queryFn: () => apiFetch<BaseUser[]>('/api/users/search', { query: { q: searchQuery } }),
+    queryKey: ['users.search', userQuery],
+    enabled: !!serverUserId && isUserQuery && userQuery.length > 0,
+    queryFn: () => apiFetch<BaseUser[]>('/api/users/search', { query: { q: userQuery } }),
   });
+
+  const { data: publicDrinks = [] } = useQuery<Drink[]>({
+    queryKey: ['drinks.search', rawQuery],
+    enabled: !!serverUserId && !isUserQuery && rawQuery.length > 0,
+    queryFn: () =>
+      rawQuery
+        ? apiFetch<Drink[]>('/api/drinks', { query: { city: rawQuery } })
+        : apiFetch<Drink[]>('/api/drinks'),
+  });
+
+  const applyLocalUser = useCallback(
+    (drink: Drink) => {
+      if (profile && serverUserId && drink.userId === serverUserId) {
+        return { ...drink, user: profile };
+      }
+      return drink;
+    },
+    [profile, serverUserId]
+  );
 
   const partnerIds = useMemo(() => new Set(partnerDrinks.map((drink) => drink.id)), [partnerDrinks]);
   const discoveryDrinks = useMemo(
-    () => drinks.filter((drink) => !partnerIds.has(drink.id)),
-    [drinks, partnerIds]
+    () => drinks.filter((drink) => !partnerIds.has(drink.id)).map(applyLocalUser),
+    [drinks, partnerIds, applyLocalUser]
   );
+  const allHydratedDrinks = useMemo(() => drinks.map(applyLocalUser), [drinks, applyLocalUser]);
 
   const matchesFilter = (drink: Drink, filter: string) => {
     if (filter === 'all') return true;
@@ -67,20 +90,60 @@ export default function ExploreScreen({ navigation }: any) {
     [discoveryDrinks, activeFilter]
   );
 
-  const searchDrinks = useMemo(() => {
-    if (!hasSearchTerm) return [] as Drink[];
-    const query = searchQuery.trim().toLowerCase();
-    return discoveryDrinks.filter(
-      (drink) =>
-        drink.name.toLowerCase().includes(query) ||
-        (drink.description || '').toLowerCase().includes(query) ||
-        (drink.location || '').toLowerCase().includes(query)
+  const matchingDrinks = useMemo(() => {
+    if (!hasSearchTerm || isUserQuery) return [] as Drink[];
+    const queryLower = rawQuery.toLowerCase();
+    const cityMatches = publicDrinks.filter((drink) =>
+      (drink.location || '').toLowerCase().includes(queryLower)
     );
-  }, [discoveryDrinks, hasSearchTerm, searchQuery]);
+    const fallbackMatches = allHydratedDrinks.filter((drink) => {
+      const location = (drink.location || '').toLowerCase();
+      const description = (drink.description || '').toLowerCase();
+      return (
+        drink.name.toLowerCase().includes(queryLower) ||
+        description.includes(queryLower) ||
+        location.includes(queryLower)
+      );
+    });
+    const combined = cityMatches.length > 0 ? cityMatches : fallbackMatches;
+    const seen = new Set<number>();
+    return combined.filter((drink) => {
+      if (seen.has(drink.id)) return false;
+      seen.add(drink.id);
+      return true;
+    });
+  }, [allHydratedDrinks, publicDrinks, hasSearchTerm, isUserQuery, rawQuery]);
 
   const trendingDrinks = useMemo(
     () => [...discoveryDrinks].sort((a, b) => (b.cheersCount || 0) - (a.cheersCount || 0)).slice(0, 6),
     [discoveryDrinks]
+  );
+
+  const shouldShowUserResults = isUserQuery && userQuery.length > 0;
+  const shouldShowDrinkResults = !isUserQuery && rawQuery.length > 0;
+
+  const hydrateDrinkCollections = useCallback(
+    (drinkId: number, updater: (drink: Drink) => Drink) => {
+      const keys: any[] = [
+        ['drinks.all'],
+        ['drinks.partners'],
+      ];
+      if (serverUserId) {
+        keys.push(['drinks.byUser', serverUserId]);
+        keys.push(['users.savedDrinks', serverUserId]);
+      }
+      keys.forEach((key) => {
+        queryClient.setQueryData<Drink[]>(key, (existing) => {
+          if (!existing) return existing;
+          return existing.map((item) => (item.id === drinkId ? updater(item) : item));
+        });
+      });
+      queryClient.setQueryData<Drink>(['drinks.detail', drinkId], (existing) => {
+        if (!existing) return existing;
+        return updater(existing);
+      });
+    },
+    [queryClient, serverUserId]
   );
 
   const cheerMutation = useMutation({
@@ -93,9 +156,12 @@ export default function ExploreScreen({ navigation }: any) {
         headers,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
+    onSuccess: (result, drinkId) => {
+      hydrateDrinkCollections(drinkId, (drink) => ({
+        ...drink,
+        isLiked: result.cheered,
+        cheersCount: result.cheersCount,
+      }));
     },
     onError: () => Alert.alert(t('errors.cheerFailed')),
   });
@@ -110,9 +176,14 @@ export default function ExploreScreen({ navigation }: any) {
         headers,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
+    onSuccess: (result, drinkId) => {
+      hydrateDrinkCollections(drinkId, (drink) => ({
+        ...drink,
+        isSaved: result.saved,
+      }));
+      if (serverUserId) {
+        queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
+      }
     },
     onError: () => Alert.alert(t('errors.partnerFailed')),
   });
@@ -128,7 +199,7 @@ export default function ExploreScreen({ navigation }: any) {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users.search', searchQuery] });
+      queryClient.invalidateQueries({ queryKey: ['users.search', userQuery] });
       queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
       queryClient.invalidateQueries({ queryKey: ['friends.count'] });
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
@@ -162,6 +233,13 @@ export default function ExploreScreen({ navigation }: any) {
       </View>
 
       <ScrollView style={styles.content}>
+        {!hasSearchTerm && (
+          <View style={styles.searchHints}>
+            <Text style={styles.searchHint}>{t('explore.tipUsers')}</Text>
+            <Text style={[styles.searchHint, styles.searchHintLast]}>{t('explore.tipPlaces')}</Text>
+          </View>
+        )}
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filters}>
           {filters.map((filter) => {
             const isActive = filter.id === activeFilter;
@@ -179,67 +257,85 @@ export default function ExploreScreen({ navigation }: any) {
           })}
         </ScrollView>
 
-        {hasSearchTerm ? (
+        {shouldShowUserResults ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="people-outline" size={18} color="#8B5FBF" />
               <Text style={styles.sectionTitle}>{t('explore.sections.users')}</Text>
             </View>
-            {users.map((result) => {
-              const isSelf = result.id === serverUserId;
-              return (
-              <View key={result.id} style={styles.userResult}>
-                <TouchableOpacity
-                  style={styles.userInfoContainer}
-                  onPress={() => navigation.navigate('Profile', { userId: result.id })}
-                >
-                  <View style={styles.userAvatar}>
-                    <Text style={styles.userAvatarText}>
-                      {(result.firstName || result.email)[0]?.toUpperCase() || '?'}
-                    </Text>
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>
-                      {result.firstName ? `${result.firstName} ${result.lastName || ''}` : result.email}
-                    </Text>
-                    {result.city && <Text style={styles.userCity}>{result.city}</Text>}
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.partnerButton,
-                    result.isPartner && styles.partnerButtonActive,
-                    isSelf && styles.partnerButtonDisabled,
-                  ]}
-                  onPress={() => partnerMutation.mutate(result.id)}
-                  disabled={isSelf}
-                >
-                  <Text style={[styles.partnerButtonText, result.isPartner && styles.partnerButtonTextActive]}>
-                    {isSelf
-                      ? t('common.you')
-                      : result.isPartner
-                      ? t('profile.drinkPartners')
-                      : t('common.addPartner')}
-                  </Text>
-                </TouchableOpacity>
+            {users.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={40} color="#6B7280" />
+                <Text style={styles.emptyTitle}>{t('explore.sections.noUsersTitle')}</Text>
+                <Text style={styles.emptySubtitle}>{t('explore.sections.noUsersSubtitle')}</Text>
               </View>
-            );
-            })}
-
+            ) : (
+              users.map((result) => {
+                const isSelf = result.id === serverUserId;
+                const displayName = result.firstName
+                  ? `${result.firstName} ${result.lastName || ''}`.trim()
+                  : result.email;
+                return (
+                  <View key={result.id} style={styles.userResult}>
+                    <TouchableOpacity
+                      style={styles.userInfoContainer}
+                      onPress={() =>
+                        navigation.navigate(
+                          isSelf ? 'Profile' : 'UserProfile',
+                          isSelf ? undefined : { userId: result.id }
+                        )
+                      }
+                    >
+                      <View style={styles.userAvatar}>
+                        <Text style={styles.userAvatarText}>
+                          {displayName[0]?.toUpperCase() || '?'}
+                        </Text>
+                      </View>
+                      <View style={styles.userInfo}>
+                        <Text style={styles.userName}>{displayName}</Text>
+                        {result.city && <Text style={styles.userCity}>{result.city}</Text>}
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.partnerButton,
+                        result.isPartner && styles.partnerButtonActive,
+                        isSelf && styles.partnerButtonDisabled,
+                      ]}
+                      onPress={() => partnerMutation.mutate(result.id)}
+                      disabled={isSelf}
+                    >
+                      <Text
+                        style={[styles.partnerButtonText, result.isPartner && styles.partnerButtonTextActive]}
+                      >
+                        {isSelf
+                          ? t('common.you')
+                          : result.isPartner
+                          ? t('profile.drinkPartners')
+                          : t('common.addPartner')}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        ) : shouldShowDrinkResults ? (
+          <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="search-outline" size={18} color="#8B5FBF" />
               <Text style={styles.sectionTitle}>
-                {t('explore.sections.searchResults', { query: searchQuery.trim() })}
+                {t('explore.sections.searchResults', { query: rawQuery })}
               </Text>
             </View>
-            {searchDrinks.length === 0 ? (
+            {matchingDrinks.length === 0 ? (
               <View style={styles.emptyState}>
                 <Ionicons name="wine-outline" size={48} color="#6B7280" />
                 <Text style={styles.emptyTitle}>{t('explore.sections.noDrinksTitle')}</Text>
                 <Text style={styles.emptySubtitle}>{t('explore.sections.noDrinksSubtitle')}</Text>
               </View>
             ) : (
-              searchDrinks.map((drink) => (
+              matchingDrinks.map((drink) => (
                 <DrinkPostCard
                   key={drink.id}
                   drink={drink}
@@ -249,6 +345,12 @@ export default function ExploreScreen({ navigation }: any) {
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
+                  onPressAuthor={() =>
+                    navigation.navigate(
+                      drink.userId === serverUserId ? 'Profile' : 'UserProfile',
+                      drink.userId === serverUserId ? undefined : { userId: drink.userId }
+                    )
+                  }
                 />
               ))
             )}
@@ -317,6 +419,12 @@ export default function ExploreScreen({ navigation }: any) {
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
+                  onPressAuthor={() =>
+                    navigation.navigate(
+                      drink.userId === serverUserId ? 'Profile' : 'UserProfile',
+                      drink.userId === serverUserId ? undefined : { userId: drink.userId }
+                    )
+                  }
                 />
               ))}
             </View>
@@ -364,6 +472,17 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  searchHints: {
+    marginBottom: 12,
+  },
+  searchHint: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  searchHintLast: {
+    marginBottom: 0,
   },
   filters: {
     paddingTop: 8,

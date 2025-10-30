@@ -315,9 +315,12 @@ app.put('/api/users/:id', (req, res) => {
 app.get('/api/users/search', (req, res) => {
   const currentUserId = getUserId(req);
   const partnerSet = ensurePartnerSet(currentUserId);
-  const term = (req.query.q || '').toString().toLowerCase();
+  const raw = (req.query.q ?? '').toString();
+  const normalized = raw.trim().replace(/^@+/, '');
+  const term = normalized.toLowerCase();
+  const allUsers = Array.from(userIndex.values());
   const filtered = term
-    ? users.filter((candidate) => {
+    ? allUsers.filter((candidate) => {
         const fullName = `${candidate.firstName} ${candidate.lastName}`.toLowerCase();
         return (
           candidate.email.toLowerCase().includes(term) ||
@@ -325,7 +328,7 @@ app.get('/api/users/search', (req, res) => {
           (candidate.city || '').toLowerCase().includes(term)
         );
       })
-    : users;
+    : allUsers;
 
   res.json(
     filtered.map((candidate) => ({
@@ -337,6 +340,7 @@ app.get('/api/users/search', (req, res) => {
 
 app.get('/api/drink-partners', (req, res) => {
   const userId = getUserId(req);
+  console.log('[drink-partners] requester', userId);
   const partnerSet = Array.from(ensurePartnerSet(userId));
   res.json(partnerSet.map((id) => userIndex.get(id)).filter(Boolean));
 });
