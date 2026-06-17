@@ -6,6 +6,7 @@ export interface BaseUser {
   city?: string;
   bio?: string;
   isPartner?: boolean;
+  avatar?: string | null;
 }
 
 export interface Drink {

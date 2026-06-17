@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,10 +7,12 @@ import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
 import { Drink, BaseUser } from '../types/api';
 import DrinkPostCard from '../components/DrinkPostCard';
+import CommentDrawer from '../components/CommentDrawer';
 import { useLocalization } from '../context/LocalizationContext';
 
 export default function ExploreScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
   const { serverUserId, getJwtToken, profile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
@@ -27,7 +29,17 @@ export default function ExploreScreen({ navigation }: any) {
   );
 
   const [activeFilter, setActiveFilter] = useState('all');
-  const rawQuery = searchQuery.trim();
+
+  // Debounce search query by 300ms to avoid firing on every keystroke
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300);
+    return () => { if (debounceTimer.current) clearTimeout(debounceTimer.current); };
+  }, [searchQuery]);
+
+  const rawQuery = debouncedQuery;
   const isUserQuery = rawQuery.startsWith('@');
   const userQuery = isUserQuery ? rawQuery.slice(1) : '';
   const hasSearchTerm = rawQuery.length > 0;
@@ -340,7 +352,7 @@ export default function ExploreScreen({ navigation }: any) {
                   key={drink.id}
                   drink={drink}
                   onCheer={() => cheerMutation.mutate(drink.id)}
-                  onComment={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
+                  onComment={() => setCommentDrinkId(drink.id)}
                   onSave={() => saveMutation.mutate(drink.id)}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
@@ -414,7 +426,7 @@ export default function ExploreScreen({ navigation }: any) {
                   key={drink.id}
                   drink={drink}
                   onCheer={() => cheerMutation.mutate(drink.id)}
-                  onComment={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
+                  onComment={() => setCommentDrinkId(drink.id)}
                   onSave={() => saveMutation.mutate(drink.id)}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
@@ -431,6 +443,8 @@ export default function ExploreScreen({ navigation }: any) {
           </>
         )}
       </ScrollView>
+
+      <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
     </SafeAreaView>
   );
 }

@@ -17,7 +17,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
 import { Drink, Comment } from '../types/api';
 import { useAuth } from '../context/AuthContext';
-import DrinkPostCard from '../components/DrinkPostCard';
 import { useLocalization } from '../context/LocalizationContext';
 
 interface Props {
@@ -89,9 +88,11 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
         body: JSON.stringify({ content }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (newComment) => {
       setCommentText('');
-      queryClient.invalidateQueries({ queryKey: ['drinks.comments', drinkId] });
+      queryClient.setQueryData<Comment[]>(['drinks.comments', drinkId], (existing) =>
+        existing ? [...existing, newComment] : [newComment]
+      );
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
     onError: () => Alert.alert(t('drinkDetail.title'), t('errors.commentFailed')),
@@ -188,18 +189,6 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     <Ionicons name="bookmark" size={20} color="#8B5FBF" />
                     <Text style={styles.secondaryActionText}>{t('drinkDetail.save')}</Text>
                   </TouchableOpacity>
-                </View>
-
-                <View style={styles.cardWrapper}>
-                  <DrinkPostCard
-                    drink={drink}
-                    onCheer={() => cheerMutation.mutate()}
-                    onComment={() => {}}
-                    onSave={() => saveMutation.mutate()}
-                    isLiked={drink.isLiked}
-                    isSaved={drink.isSaved}
-                    cheersCount={drink.cheersCount}
-                  />
                 </View>
 
                 <View style={styles.section}>
@@ -413,9 +402,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
     textAlign: 'center',
-  },
-  cardWrapper: {
-    paddingHorizontal: 16,
   },
   section: {
     paddingHorizontal: 16,

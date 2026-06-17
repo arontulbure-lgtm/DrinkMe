@@ -1,6 +1,5 @@
 import { initializeApp } from "firebase/app";
 import { initializeAuth } from "firebase/auth";
-import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 // 👇 TS nu are tipurile pentru asta, dar funcția există în runtime
 // @ts-ignore
@@ -21,9 +20,5 @@ const app = initializeApp(firebaseConfig);
 export const auth = initializeAuth(app, {
   persistence: getReactNativePersistence(AsyncStorage),
 });
-
-// ✅ Storage (pentru imagini, fișiere etc.)
-export const storage = getStorage(app);
-
 
 export default app;

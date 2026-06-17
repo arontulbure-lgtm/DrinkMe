@@ -4,14 +4,20 @@ type RequestConfig = RequestInit & {
   query?: Record<string, string | number | boolean | undefined | null>;
 };
 
-declare global {
-  var __DRINKME_UID: string | null | undefined;
+// ── Token store (module-level, nu global) ──────────────────────────────────
+// AuthContext apelează setApiToken() imediat după ce primește JWT-ul de la server.
+// apiFetch îl injectează automat pe toate request-urile care nu au deja Authorization.
+let _apiToken: string | null = null;
+
+export function setApiToken(token: string | null): void {
+  _apiToken = token;
 }
 
-if (typeof globalThis.__DRINKME_UID === 'undefined') {
-  globalThis.__DRINKME_UID = null;
+export function getApiToken(): string | null {
+  return _apiToken;
 }
 
+// ── Config ─────────────────────────────────────────────────────────────────
 const RAW_BASE_URL = Constants.expoConfig?.extra?.apiUrl || process.env.EXPO_PUBLIC_API_URL;
 const API_BASE_URL = RAW_BASE_URL ? RAW_BASE_URL.replace(/\/$/, '') : '';
 
@@ -43,18 +49,19 @@ export async function apiFetch<T>(path: string, config: RequestConfig = {}): Pro
   const { query, headers, ...rest } = config;
   const url = buildUrl(path, query);
   const isFormData = rest.body instanceof FormData;
+
   const finalHeaders: Record<string, string> = {
     Accept: 'application/json',
     ...(!isFormData && rest.body ? { 'Content-Type': 'application/json' } : {}),
     ...(headers as Record<string, string> | undefined),
   };
 
+  // Injectează automat Authorization dacă există un token și caller-ul nu l-a setat deja
   const hasAuthHeader = Object.keys(finalHeaders).some(
     (key) => key.toLowerCase() === 'authorization'
   );
-
-  if (!hasAuthHeader && globalThis.__DRINKME_UID) {
-    finalHeaders.Authorization = `Bearer ${globalThis.__DRINKME_UID}`;
+  if (!hasAuthHeader && _apiToken) {
+    finalHeaders.Authorization = `Bearer ${_apiToken}`;
   }
 
   const response = await fetch(url, {

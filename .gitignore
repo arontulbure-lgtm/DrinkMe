@@ -12,6 +12,8 @@ build
 # Sensitive and local files
 .env
 server/.env
+server/serviceAccount.json
+server/data/db.json
 node_modules/
 dist/
 .expo/

@@ -10,9 +10,9 @@ interface Props {
 }
 
 const difficultyLabels: Record<Recipe['difficulty'], string> = {
-  easy: 'Ușor',
-  medium: 'Medie',
-  hard: 'Dificil',
+  easy: 'Easy',
+  medium: 'Medium',
+  hard: 'Hard',
   mocktail: 'Mocktail',
 };
 
@@ -27,10 +27,10 @@ export default function RecipeResultsScreen({ route, navigation }: Props) {
   const { product, recipes } = route.params;
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="close" size={22} color="#FFFFFF" onPress={navigation.goBack} />
-        <Text style={styles.headerTitle}>Rețete pentru {product}</Text>
+        <Text style={styles.headerTitle}>Recipes for {product}</Text>
         <View style={{ width: 22 }} />
       </View>
 

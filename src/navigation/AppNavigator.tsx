@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import DrinkDetailScreen from '../screens/DrinkDetailScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import RecipeResultsScreen from '../screens/RecipeResultsScreen';
 import LanguageSettingsScreen from '../screens/LanguageSettingsScreen';
+import PartnersListScreen from '../screens/PartnersListScreen';
 
 type TabParamList = {
   Home: undefined;
@@ -32,8 +34,10 @@ type RootStackParamList = {
   CreatePost: undefined;
   DrinkDetail: { drinkId: number };
   EditProfile: undefined;
-  RecipeResults: { product: string; recipes: Recipe[] };
+  RecipeResults: { product: string; recipes: Recipe[]; isAlcoholic: boolean | null };
   LanguageSettings: undefined;
+  PartnersList: undefined;
+  UserProfile: { userId: string };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -89,7 +93,11 @@ export function AppNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
-    return null; // You can add a loading screen here
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#8B5FBF" />
+      </View>
+    );
   }
 
   return (
@@ -103,11 +111,8 @@ export function AppNavigator() {
             name="CreatePost"
             component={CreatePostScreen}
             options={{
-              presentation: 'modal',
-              headerShown: true,
-              headerStyle: { backgroundColor: '#000000' },
-              headerTintColor: '#FFFFFF',
-              title: 'Creează postare',
+              presentation: 'fullScreenModal',
+              headerShown: false,
             }}
           />
           <Stack.Screen
@@ -129,6 +134,16 @@ export function AppNavigator() {
             name="LanguageSettings"
             component={LanguageSettingsScreen}
             options={{ headerShown: false, presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="PartnersList"
+            component={PartnersListScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="UserProfile"
+            component={ProfileScreen}
+            options={{ headerShown: false }}
           />
         </>
       )}

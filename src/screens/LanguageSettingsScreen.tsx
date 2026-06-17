@@ -8,6 +8,10 @@ import {
   useLocalization,
 } from '../context/LocalizationContext';
 
+// Only show languages that have complete translations — hide stubs (es, zh, hi, ar, bn)
+const COMPLETE_LOCALES: SupportedLocale[] = ['en', 'ro'];
+const SHOWN_LOCALES = AVAILABLE_LOCALES.filter((l) => COMPLETE_LOCALES.includes(l.code));
+
 interface Props {
   navigation: {
     goBack: () => void;
@@ -55,7 +59,7 @@ export default function LanguageSettingsScreen({ navigation }: Props) {
       </View>
 
       <FlatList
-        data={AVAILABLE_LOCALES}
+        data={SHOWN_LOCALES}
         keyExtractor={(item) => item.code}
         renderItem={renderItem}
         contentContainerStyle={styles.list}

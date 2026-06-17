@@ -17,6 +17,9 @@ const translations = {
       commentPlaceholder: 'Leave a comment…',
       addPartner: 'Add partner',
       you: 'You',
+      comment: 'Comment',
+      save: 'Save',
+      saved: 'Saved',
     },
     errors: {
       cheerFailed: 'Failed to send cheers. Please try again.',
@@ -50,6 +53,8 @@ const translations = {
     explore: {
       title: 'Explore',
       searchPlaceholder: 'Search drinks, venues, or friends',
+      tipUsers: 'Tip: search people with @username',
+      tipPlaces: 'Search places by city name',
       filters: {
         all: 'All',
         cocktail: 'Cocktails',
@@ -71,12 +76,16 @@ const translations = {
         partnersSubtitle:
           'DrinkMe partners in Bucharest, Cluj, and Timișoara offer discounts to beta testers.',
         unknownLocation: 'Unknown location',
+        noUsersTitle: 'No users found',
+        noUsersSubtitle: 'Try @username format or invite more drink partners.',
       },
     },
     profile: {
       title: 'Profile',
       posts: 'Posts',
+      saved: 'Saved',
       drinkPartners: 'Drink Partners',
+      noPartners: 'No drink partners yet',
       following: 'Following',
       edit: 'Edit profile',
       emptyDrinks: 'No drinks posted yet',
@@ -90,8 +99,9 @@ const translations = {
     smartBar: {
       title: 'Smart Bar',
       tabs: {
-        inventory: 'My inventory',
-        saved: 'Saved posts',
+        inventory: 'Inventory',
+        recipes: 'Recipes',
+        saved: 'Saved',
       },
       addFirst: 'Add first ingredient',
       inventoryEmptyTitle: 'Your bar is empty',
@@ -102,6 +112,10 @@ const translations = {
       itemNamePlaceholder: 'Item name (e.g., Whiskey, Vodka)',
       quantityPlaceholder: 'Quantity (e.g., 1, 750ml)',
       addItem: 'Add item',
+      generateRecipes: 'Generate recipes',
+      selectIngredients: 'Select the ingredients you want to use',
+      selectIngredientsHint: 'Add ingredients to your bar first, then generate AI recipes.',
+      selectAll: 'Select all',
     },
     scanner: {
       title: 'Scan bottle',
@@ -116,6 +130,7 @@ const translations = {
       generate: 'Generate recipes',
       permissionLibrary: 'Media library access is required to pick a photo.',
       permissionCamera: 'Camera access is required to take a photo.',
+      error: 'Something went wrong. Please try again.',
     },
     editProfile: {
       title: 'Edit profile',
@@ -143,9 +158,9 @@ const translations = {
       noComments: 'No comments yet',
     },
     createPost: {
-      title: 'New post',
+      title: 'Create Post',
       cancel: 'Cancel',
-      submit: 'Post',
+      submit: 'Create Post',
       submitting: 'Posting...',
       nameLabel: 'Drink name *',
       namePlaceholder: 'Enter drink name',
@@ -183,6 +198,9 @@ const translations = {
       commentPlaceholder: 'Scrie un comentariu…',
       addPartner: 'Adaugă partener',
       you: 'Tu',
+      comment: 'Comentează',
+      save: 'Salvează',
+      saved: 'Salvat',
     },
     errors: {
       cheerFailed: 'Nu am putut trimite norocul. Încearcă din nou.',
@@ -216,6 +234,8 @@ const translations = {
     explore: {
       title: 'Explorează',
       searchPlaceholder: 'Caută băuturi, baruri sau prieteni',
+      tipUsers: 'Pont: caută persoane cu @utilizator',
+      tipPlaces: 'Caută locuri după numele orașului',
       filters: {
         all: 'Toate',
         cocktail: 'Cocktailuri',
@@ -235,12 +255,16 @@ const translations = {
         partnersTitle: 'Localuri partenere',
         partnersSubtitle: 'Partenerii DrinkMe oferă reduceri testerilor beta.',
         unknownLocation: 'Locație necunoscută',
+        noUsersTitle: 'Niciun utilizator găsit',
+        noUsersSubtitle: 'Folosește formatul @utilizator sau invită-ți prietenii.',
       },
     },
     profile: {
       title: 'Profil',
       posts: 'Postări',
+      saved: 'Salvate',
       drinkPartners: 'Parteneri de băuturi',
+      noPartners: 'Încă nu ai parteneri de băuturi',
       following: 'Urmăriri',
       edit: 'Editează profilul',
       emptyDrinks: 'Nu există postări încă',
@@ -255,7 +279,8 @@ const translations = {
       title: 'Smart Bar',
       tabs: {
         inventory: 'Inventar',
-        saved: 'Postări salvate',
+        recipes: 'Rețete',
+        saved: 'Salvate',
       },
       addFirst: 'Adaugă primul ingredient',
       inventoryEmptyTitle: 'Barul tău este gol',
@@ -267,6 +292,10 @@ const translations = {
       itemNamePlaceholder: 'Denumire (ex: Whiskey, Vodka)',
       quantityPlaceholder: 'Cantitate (ex: 1, 750ml)',
       addItem: 'Adaugă',
+      generateRecipes: 'Generează rețete',
+      selectIngredients: 'Selectează ingredientele pe care vrei să le folosești',
+      selectIngredientsHint: 'Adaugă ingrediente în bar, apoi generează rețete AI.',
+      selectAll: 'Selectează tot',
     },
     scanner: {
       title: 'Scanează sticla',
@@ -281,6 +310,7 @@ const translations = {
       generate: 'Generează rețete',
       permissionLibrary: 'Este necesar accesul la galerie pentru a selecta o fotografie.',
       permissionCamera: 'Este necesar accesul la cameră pentru a face o fotografie.',
+      error: 'A apărut o eroare. Încearcă din nou.',
     },
     editProfile: {
       title: 'Editează profilul',
@@ -308,7 +338,7 @@ const translations = {
       noComments: 'Încă nu există comentarii',
     },
     createPost: {
-      title: 'Postare nouă',
+      title: 'Create Post',
       cancel: 'Anulează',
       submit: 'Publică',
       submitting: 'Se publică...',

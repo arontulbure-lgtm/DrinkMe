@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,14 +15,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import DrinkPostCard from '../components/DrinkPostCard';
 import StoriesSection from '../components/StoriesSection';
+import CommentDrawer from '../components/CommentDrawer';
 import { apiFetch } from '../lib/api';
 import { Drink, Story, NotificationItem } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 
+// Stories are decorative for now — hide until the feature is implemented
+const STORIES_ENABLED = false;
+
 export default function HomeScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [isNotificationsVisible, setNotificationsVisible] = useState(false);
-  const { serverUserId, getJwtToken } = useAuth();
+  const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
+  const { serverUserId, getJwtToken, profile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
@@ -45,6 +50,40 @@ export default function HomeScreen({ navigation }: any) {
     refetchInterval: 60000,
   });
 
+  const applyLocalUser = useCallback(
+    (drink: Drink) => {
+      if (profile && serverUserId && drink.userId === serverUserId) {
+        return { ...drink, user: { ...profile } };
+      }
+      return drink;
+    },
+    [profile, serverUserId]
+  );
+
+  const hydrateDrinkCollections = useCallback(
+    (drinkId: number, updater: (drink: Drink) => Drink) => {
+      const keys: any[] = [
+        ['drinks.partners'],
+        ['drinks.all'],
+      ];
+      if (serverUserId) {
+        keys.push(['drinks.byUser', serverUserId]);
+        keys.push(['users.savedDrinks', serverUserId]);
+      }
+      keys.forEach((key) => {
+        queryClient.setQueryData<Drink[]>(key, (existing) => {
+          if (!existing) return existing;
+          return existing.map((item) => (item.id === drinkId ? updater(item) : item));
+        });
+      });
+      queryClient.setQueryData<Drink>(['drinks.detail', drinkId], (existing) => {
+        if (!existing) return existing;
+        return updater(existing);
+      });
+    },
+    [queryClient, serverUserId]
+  );
+
   const cheerMutation = useMutation({
     mutationFn: async (drinkId: number) => {
       const token = await getJwtToken();
@@ -57,9 +96,12 @@ export default function HomeScreen({ navigation }: any) {
         headers,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
+    onSuccess: (result, drinkId) => {
+      hydrateDrinkCollections(drinkId, (drink) => ({
+        ...drink,
+        isLiked: result.cheered,
+        cheersCount: result.cheersCount,
+      }));
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
     onError: () => {
@@ -79,10 +121,14 @@ export default function HomeScreen({ navigation }: any) {
         headers,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-      queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
+    onSuccess: (result, drinkId) => {
+      hydrateDrinkCollections(drinkId, (drink) => ({
+        ...drink,
+        isSaved: result.saved,
+      }));
+      if (serverUserId) {
+        queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
+      }
     },
     onError: () => {
       Alert.alert(t('errors.saveFailed'));
@@ -96,125 +142,134 @@ export default function HomeScreen({ navigation }: any) {
     },
   });
 
-  const onRefresh = React.useCallback(async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
+    try {
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
   }, [refetch]);
+
+  const notifications = notificationData?.notifications ?? [];
+  const unreadCount = notificationData?.unreadCount ?? 0;
+  const drinks = useMemo(() => partnerDrinks.map(applyLocalUser), [applyLocalUser, partnerDrinks]);
 
   const openNotifications = () => {
     setNotificationsVisible(true);
-    if ((notificationData?.unreadCount || 0) > 0) {
+    if (unreadCount > 0) {
       markNotificationsRead.mutate();
     }
   };
 
-  const closeNotifications = () => setNotificationsVisible(false);
-
-  const notifications = useMemo(
-    () => notificationData?.notifications ?? [],
-    [notificationData]
-  );
-
-  const unreadCount = notificationData?.unreadCount ?? 0;
-
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>DrinkMe</Text>
-        <View style={styles.headerActions}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <FontAwesome5 name="wine-glass" size={20} color="#8B5FBF" />
+          <View>
+            <Text style={styles.headerTitle}>DrinkMe</Text>
+            <Text style={styles.headerSubtitle}>{t('home.sections.feed')}</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('CreatePost')}>
+            <Ionicons name="add-circle-outline" size={24} color="#8B5FBF" />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.notificationButton} onPress={openNotifications}>
-            <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
+            <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
             {unreadCount > 0 && (
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>{Math.min(unreadCount, 99)}</Text>
+                <Text style={styles.badgeText}>{unreadCount}</Text>
               </View>
             )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('CreatePost')}>
-            <Ionicons name="add" size={24} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView
         style={styles.content}
-        contentInsetAdjustmentBehavior="never"
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5FBF" />
-        }
         contentContainerStyle={styles.contentContainer}
+        refreshControl={<RefreshControl tintColor="#8B5FBF" refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {stories.length > 0 && <StoriesSection stories={stories} />}
+        {STORIES_ENABLED && <StoriesSection stories={stories} isLoading={isLoading} />}
 
         <Text style={styles.sectionLabel}>{t('home.sections.feed')}</Text>
-
-        <View style={styles.feed}>
-          {partnerDrinks.length === 0 && !isLoading ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="wine-outline" size={64} color="#6B7280" />
-              <Text style={styles.emptyTitle}>{t('home.sections.emptyFeedTitle')}</Text>
-              <Text style={styles.emptySubtitle}>{t('home.sections.emptyFeedSubtitle')}</Text>
-              <TouchableOpacity
-                style={styles.createButton}
-                onPress={() => navigation.navigate('CreatePost')}
-              >
-                <Text style={styles.createButtonText}>{t('home.sections.createFirstPost')}</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            partnerDrinks.map((drink) => (
+        {drinks.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="people-outline" size={48} color="#6B7280" />
+            <Text style={styles.emptyTitle}>{t('home.sections.emptyFeedTitle')}</Text>
+            <Text style={styles.emptySubtitle}>{t('home.sections.emptyFeedSubtitle')}</Text>
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={() => navigation.navigate('Explore')}
+            >
+              <Text style={styles.createButtonText}>{t('home.sections.createFirstPost')}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.feed}>
+            {drinks.map((drink) => (
               <DrinkPostCard
                 key={drink.id}
                 drink={drink}
                 onCheer={() => cheerMutation.mutate(drink.id)}
-                onComment={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
+                onComment={() => setCommentDrinkId(drink.id)}
                 onSave={() => saveMutation.mutate(drink.id)}
                 isLiked={drink.isLiked}
                 isSaved={drink.isSaved}
                 cheersCount={drink.cheersCount}
+                onPressAuthor={() =>
+                  navigation.navigate(
+                    drink.userId === serverUserId ? 'Profile' : 'UserProfile',
+                    drink.userId === serverUserId ? undefined : { userId: drink.userId }
+                  )
+                }
               />
-            ))
-          )}
-        </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
-      <Modal
-        visible={isNotificationsVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeNotifications}
-      >
+      <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
+
+      <Modal visible={isNotificationsVisible} transparent animationType="slide" onRequestClose={() => setNotificationsVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('notifications.title')}</Text>
-              <TouchableOpacity onPress={closeNotifications}>
+              <TouchableOpacity onPress={() => setNotificationsVisible(false)}>
                 <Ionicons name="close" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.notificationList}>
+            <ScrollView contentContainerStyle={styles.notificationList}>
               {notifications.length === 0 ? (
                 <View style={styles.emptyNotifications}>
-                  <Ionicons name="notifications-off" size={28} color="#6B7280" />
+                  <Ionicons name="notifications-off-outline" size={36} color="#6B7280" />
                   <Text style={styles.emptyNotificationsText}>{t('notifications.empty')}</Text>
                 </View>
               ) : (
-                notifications.map((notification) => {
-                  const iconName =
-                    notification.type === 'comment'
-                      ? 'comment-dots'
-                      : notification.type === 'partner'
-                      ? 'user-friends'
-                      : 'glass-cheers';
+                notifications.map((item) => {
+                  const iconName: React.ComponentProps<typeof Ionicons>['name'] =
+                    item.type === 'comment'
+                      ? 'chatbubble-outline'
+                      : item.type === 'partner'
+                      ? 'people-outline'
+                      : 'wine-outline';
+                  const iconColor =
+                    item.type === 'comment'
+                      ? '#60A5FA'
+                      : item.type === 'partner'
+                      ? '#34D399'
+                      : '#8B5FBF';
                   return (
-                    <View key={notification.id} style={styles.notificationItem}>
-                      <FontAwesome5 name={iconName as any} size={16} color="#8B5FBF" />
+                    <View key={item.id} style={[styles.notificationItem, !item.read && styles.notificationUnread]}>
+                      <View style={[styles.notificationIcon, { backgroundColor: iconColor + '22' }]}>
+                        <Ionicons name={iconName} size={18} color={iconColor} />
+                      </View>
                       <View style={styles.notificationBody}>
-                        <Text style={styles.notificationMessage}>{notification.message}</Text>
-                        <Text style={styles.notificationTimestamp}>
-                          {new Date(notification.createdAt).toLocaleString()}
-                        </Text>
+                        <Text style={styles.notificationMessage}>{item.message}</Text>
+                        <Text style={styles.notificationTimestamp}>{new Date(item.createdAt).toLocaleString()}</Text>
                       </View>
                     </View>
                   );
@@ -235,8 +290,8 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -247,10 +302,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 2,
   },
   headerButton: {
     padding: 8,
@@ -354,6 +409,21 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#1F2937',
+    alignItems: 'flex-start',
+  },
+  notificationUnread: {
+    backgroundColor: '#8B5FBF0A',
+    marginHorizontal: -4,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+  },
+  notificationIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   notificationBody: {
     flex: 1,

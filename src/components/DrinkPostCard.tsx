@@ -12,6 +12,7 @@ interface DrinkPostCardProps {
   isLiked?: boolean;
   isSaved?: boolean;
   cheersCount?: number;
+  onPressAuthor?: () => void;
 }
 
 export default function DrinkPostCard({
@@ -19,6 +20,7 @@ export default function DrinkPostCard({
   onCheer,
   onComment,
   onSave,
+  onPressAuthor,
   isLiked = false,
   isSaved = false,
   cheersCount = 0,
@@ -55,15 +57,24 @@ export default function DrinkPostCard({
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <View style={styles.userInfo}>
+        <TouchableOpacity
+          style={styles.userInfo}
+          activeOpacity={onPressAuthor ? 0.8 : 1}
+          onPress={onPressAuthor}
+          disabled={!onPressAuthor}
+        >
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
+            {drink.user?.avatar ? (
+              <Image source={{ uri: drink.user.avatar }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
+            )}
           </View>
           <View style={styles.userDetails}>
             <Text style={styles.username}>{displayName}</Text>
             <Text style={styles.timestamp}>{formatTimeAgo(drink.createdAt)}</Text>
           </View>
-        </View>
+        </TouchableOpacity>
         {drink.location && (
           <View style={styles.locationContainer}>
             <Ionicons name="location-outline" size={16} color="#9CA3AF" />
@@ -99,7 +110,7 @@ export default function DrinkPostCard({
         {onComment && (
           <TouchableOpacity style={styles.actionButton} onPress={onComment}>
             <Ionicons name="chatbubble-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.actionText}>Comment</Text>
+            <Text style={styles.actionText}>{t('common.comment')}</Text>
           </TouchableOpacity>
         )}
 
@@ -109,7 +120,7 @@ export default function DrinkPostCard({
             size={24}
             color={isSaved ? '#8B5FBF' : '#FFFFFF'}
           />
-          <Text style={styles.actionText}>{isSaved ? 'Saved' : 'Save'}</Text>
+          <Text style={styles.actionText}>{isSaved ? t('common.saved') : t('common.save')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -143,11 +154,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    overflow: 'hidden',
   },
   avatarText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   userDetails: {
     flex: 1,

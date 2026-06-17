@@ -1,49 +1,114 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  ScrollView,
+  Image,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
 import { useLocalization } from '../context/LocalizationContext';
+import { Drink } from '../types/api';
+import LocationPickerModal from '../components/LocationPickerModal';
 
 interface SelectedImage {
   uri: string;
   base64: string;
 }
 
+interface CreateDrinkPayload {
+  name: string;
+  description: string;
+  rating: number;
+  location: string | null;
+  isAlcoholic: boolean;
+  imageData: string;
+}
+
 export default function CreatePostScreen({ navigation }: any) {
   const [drinkName, setDrinkName] = useState('');
   const [description, setDescription] = useState('');
   const [rating, setRating] = useState(5);
+  const [isAlcoholic, setIsAlcoholic] = useState(true);
   const [location, setLocation] = useState('');
   const [photo, setPhoto] = useState<SelectedImage | null>(null);
-  const { getJwtToken } = useAuth();
+  const [isLocationPickerVisible, setLocationPickerVisible] = useState(false);
+  const { getJwtToken, profile, serverUserId, user: firebaseUser, refreshProfile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const insets = useSafeAreaInsets();
+  const extraScrollInset = useMemo(() => insets.bottom + 120, [insets.bottom]);
 
-  const createPostMutation = useMutation({
-    mutationFn: async (postData: any) => {
+  const currentUser = useMemo(() => {
+    if (profile) return profile;
+    if (firebaseUser && serverUserId) {
+      const displayName = firebaseUser.displayName?.trim() ?? '';
+      const parts = displayName.split(' ');
+      return {
+        id: serverUserId,
+        email: firebaseUser.email || `user+${serverUserId}@drinkme.app`,
+        firstName: parts[0] || undefined,
+        lastName: parts.slice(1).join(' ') || undefined,
+        avatar: firebaseUser.photoURL || null,
+      };
+    }
+    return null;
+  }, [firebaseUser, profile, serverUserId]);
+
+  const createPostMutation = useMutation<Drink, unknown, CreateDrinkPayload>({
+    mutationFn: async (payload) => {
       const token = await getJwtToken();
       const headers: Record<string, string> = {};
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
-      return apiFetch('/api/drinks', {
+      return apiFetch<Drink>('/api/drinks', {
         method: 'POST',
         headers,
-        body: JSON.stringify(postData),
+        body: JSON.stringify(payload),
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
+    onSuccess: async (createdDrink) => {
+      if (!profile && refreshProfile) {
+        await refreshProfile();
+      }
+
+      const author = currentUser ?? createdDrink.user;
+      const hydratedDrink: Drink = {
+        ...createdDrink,
+        user: author ?? createdDrink.user,
+      };
+
+      const prepend = (items: Drink[] | undefined) => {
+        if (!items) return [hydratedDrink];
+        const filtered = items.filter((item) => item.id !== hydratedDrink.id);
+        return [hydratedDrink, ...filtered];
+      };
+
+      queryClient.setQueryData<Drink[]>(['drinks.partners'], prepend);
+      queryClient.setQueryData<Drink[]>(['drinks.all'], prepend);
+      if (serverUserId) {
+        queryClient.setQueryData<Drink[]>(['drinks.byUser', serverUserId], prepend);
+      }
+      queryClient.setQueryData<Drink>(['drinks.detail', hydratedDrink.id], hydratedDrink);
+
       setDrinkName('');
       setDescription('');
       setLocation('');
       setRating(5);
+      setIsAlcoholic(true);
       setPhoto(null);
+
       Alert.alert(t('createPost.title'), t('createPost.success'), [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
@@ -64,7 +129,26 @@ export default function CreatePostScreen({ navigation }: any) {
       allowsEditing: true,
       quality: 0.8,
       base64: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri && result.assets[0].base64) {
+      setPhoto({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t('createPost.title'), t('scanner.permissionCamera'));
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.8,
+      base64: true,
+      mediaTypes: 'images',
     });
 
     if (!result.canceled && result.assets?.[0]?.uri && result.assets[0].base64) {
@@ -88,7 +172,7 @@ export default function CreatePostScreen({ navigation }: any) {
       description: description.trim(),
       rating,
       location: location.trim() || null,
-      isAlcoholic: true,
+      isAlcoholic,
       imageData: photo.base64,
     });
   };
@@ -112,86 +196,131 @@ export default function CreatePostScreen({ navigation }: any) {
   );
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.cancelButton}>{t('createPost.cancel')}</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('createPost.title')}</Text>
-        <TouchableOpacity onPress={handleCreatePost} disabled={createPostMutation.isPending}>
-          <Text
-            style={[styles.postButton, createPostMutation.isPending && styles.postButtonDisabled]}
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoider}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+      >
+        <View style={{ flex: 1 }}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Text style={styles.cancelButton}>{t('createPost.cancel')}</Text>
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>{t('createPost.title')}</Text>
+            <TouchableOpacity onPress={handleCreatePost} disabled={createPostMutation.isPending}>
+              <Text
+                style={[styles.postButton, createPostMutation.isPending && styles.postButtonDisabled]}
+              >
+                {createPostMutation.isPending ? t('createPost.submitting') : t('createPost.submit')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            keyboardShouldPersistTaps="handled"
+            contentInset={{ bottom: extraScrollInset }}
+            scrollIndicatorInsets={{ bottom: extraScrollInset }}
           >
-            {createPostMutation.isPending ? t('createPost.submitting') : t('createPost.submit')}
-          </Text>
-        </TouchableOpacity>
-      </View>
+            <View style={styles.section}>
+              <Text style={styles.label}>{t('createPost.nameLabel')}</Text>
+              <TextInput
+                style={styles.input}
+                placeholder={t('createPost.namePlaceholder')}
+                placeholderTextColor="#6B7280"
+                value={drinkName}
+                onChangeText={setDrinkName}
+              />
+            </View>
 
-      <ScrollView style={styles.content}>
-        <View style={styles.section}>
-          <Text style={styles.label}>{t('createPost.nameLabel')}</Text>
-          <TextInput
-            style={styles.input}
-            placeholder={t('createPost.namePlaceholder')}
-            placeholderTextColor="#6B7280"
-            value={drinkName}
-            onChangeText={setDrinkName}
-          />
+            <View style={styles.section}>
+              <Text style={styles.label}>{t('createPost.descriptionLabel')}</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder={t('createPost.descriptionPlaceholder')}
+                placeholderTextColor="#6B7280"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+              <Text style={styles.helpText}>{t('createPost.helperText')}</Text>
+            </View>
+
+            {renderStarRating()}
+
+            {/* Alcoholic toggle */}
+            <View style={styles.toggleSection}>
+              <Text style={styles.label}>Type</Text>
+              <View style={styles.toggleRow}>
+                <TouchableOpacity
+                  style={[styles.toggleOption, isAlcoholic && styles.toggleOptionActive]}
+                  onPress={() => setIsAlcoholic(true)}
+                >
+                  <Ionicons name="wine" size={16} color={isAlcoholic ? '#FFFFFF' : '#6B7280'} />
+                  <Text style={[styles.toggleOptionText, isAlcoholic && styles.toggleOptionTextActive]}>
+                    Alcoholic
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.toggleOption, !isAlcoholic && styles.toggleOptionActive]}
+                  onPress={() => setIsAlcoholic(false)}
+                >
+                  <Ionicons name="leaf" size={16} color={!isAlcoholic ? '#FFFFFF' : '#6B7280'} />
+                  <Text style={[styles.toggleOptionText, !isAlcoholic && styles.toggleOptionTextActive]}>
+                    Non-alcoholic
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.photoSection}>
+              <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto}>
+                <Ionicons name="image-outline" size={20} color="#8B5FBF" />
+                <Text style={styles.photoButtonText}>
+                  {photo ? t('createPost.changePhoto') : t('createPost.addPhoto')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.photoButton} onPress={handleTakePhoto}>
+                <Ionicons name="camera-outline" size={20} color="#8B5FBF" />
+                <Text style={styles.photoButtonText}>{t('scanner.takePhoto')}</Text>
+              </TouchableOpacity>
+              {photo && <Image source={{ uri: photo.uri }} style={styles.preview} />}
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.label}>{t('createPost.location')}</Text>
+              <TouchableOpacity
+                style={styles.locationSelector}
+                onPress={() => setLocationPickerVisible(true)}
+              >
+                <Ionicons name="location-outline" size={20} color="#8B5FBF" />
+                <Text style={styles.locationSelectorText}>
+                  {location || t('createPost.locationPlaceholder')}
+                </Text>
+                <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.bottomActions}>
+              <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Scanner')}>
+                <Ionicons name="scan-outline" size={22} color="#8B5FBF" />
+                <Text style={styles.actionText}>{t('scanner.title')}</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </View>
+      </KeyboardAvoidingView>
 
-        <View style={styles.section}>
-          <Text style={styles.label}>{t('createPost.descriptionLabel')}</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder={t('createPost.descriptionPlaceholder')}
-            placeholderTextColor="#6B7280"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={4}
-            textAlignVertical="top"
-          />
-        </View>
-
-        {renderStarRating()}
-
-        <View style={styles.section}>
-          <Text style={styles.label}>{t('createPost.location')}</Text>
-          <TextInput
-            style={styles.input}
-            placeholder={t('createPost.locationPlaceholder')}
-            placeholderTextColor="#6B7280"
-            value={location}
-            onChangeText={setLocation}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.helpText}>{t('createPost.helperText')}</Text>
-        </View>
-
-        <View style={styles.photoSection}>
-          <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto}>
-            <Ionicons name="camera" size={20} color="#8B5FBF" />
-            <Text style={styles.photoButtonText}>
-              {photo ? t('createPost.changePhoto') : t('createPost.addPhoto')}
-            </Text>
-          </TouchableOpacity>
-          {photo?.uri && <Image source={{ uri: photo.uri }} style={styles.preview} />}
-        </View>
-
-        <View style={styles.bottomActions}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="location-outline" size={24} color="#8B5FBF" />
-            <Text style={styles.actionText}>{t('createPost.addLocation')}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="pricetag-outline" size={24} color="#8B5FBF" />
-            <Text style={styles.actionText}>{t('createPost.addTags')}</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+      <LocationPickerModal
+        visible={isLocationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        initialValue={location}
+        onSelect={({ description }) => setLocation(description)}
+      />
     </SafeAreaView>
   );
 }
@@ -203,8 +332,8 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -227,9 +356,15 @@ const styles = StyleSheet.create({
   postButtonDisabled: {
     opacity: 0.5,
   },
+  keyboardAvoider: {
+    flex: 1,
+  },
   content: {
     flex: 1,
-    padding: 16,
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   section: {
     marginBottom: 24,
@@ -278,6 +413,38 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontStyle: 'italic',
   },
+  toggleSection: {
+    marginBottom: 24,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  toggleOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: 8,
+    backgroundColor: '#1F2937',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  toggleOptionActive: {
+    backgroundColor: '#8B5FBF',
+    borderColor: '#8B5FBF',
+  },
+  toggleOptionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  toggleOptionTextActive: {
+    color: '#FFFFFF',
+  },
   photoSection: {
     marginBottom: 24,
     gap: 12,
@@ -303,18 +470,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#111827',
   },
   bottomActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
     paddingVertical: 24,
+    alignItems: 'flex-start',
   },
   actionButton: {
     alignItems: 'center',
-    flex: 1,
+    alignSelf: 'flex-start',
   },
   actionText: {
     fontSize: 12,
     color: '#8B5FBF',
     marginTop: 4,
     textAlign: 'center',
+  },
+  locationSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  locationSelectorText: {
+    color: '#E5E7EB',
+    flex: 1,
+    fontSize: 14,
   },
 });
