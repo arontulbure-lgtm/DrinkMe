@@ -16,7 +16,12 @@ export default {
     },
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.aroncarola.drinkmefinal"
+      bundleIdentifier: "com.aroncarola.drinkmefinal",
+      infoPlist: {
+        NSCameraUsageDescription: "DrinkMe needs the camera to photograph your drinks.",
+        NSPhotoLibraryUsageDescription: "DrinkMe needs access to your photos to add drink images.",
+        NSPhotoLibraryAddUsageDescription: "DrinkMe saves drink photos to your library."
+      }
     },
     android: {
       package: "com.aroncarola.drinkmefinal",
@@ -29,9 +34,14 @@ export default {
     web: {
       favicon: "./assets/favicon.png"
     },
+    scheme: "drinkme",
     plugins: [
-      "expo-barcode-scanner",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-apple-authentication",
+      ["expo-image-picker", {
+        "photosPermission": "DrinkMe needs access to your photos to add drink images.",
+        "cameraPermission": "DrinkMe needs the camera to photograph your drinks."
+      }]
     ],
     extra: {
       firebaseApiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -41,8 +51,8 @@ export default {
       firebaseMessagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
       firebaseAppId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
       apiUrl: process.env.EXPO_PUBLIC_API_URL,
+      googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+      googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
     }
   }
 };
-
-

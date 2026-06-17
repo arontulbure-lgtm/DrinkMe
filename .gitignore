@@ -1,6 +1,23 @@
 .env
+.env.*
+server/.env
 .expo
 node_modules
 android
 ios
+dist
+build
 .DS_Store
+
+# Sensitive and local files
+.env
+server/.env
+server/serviceAccount.json
+server/data/db.json
+node_modules/
+dist/
+.expo/
+.expo-shared/
+coverage/
+*.log
+
