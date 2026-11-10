@@ -1,8 +1,11 @@
-FROM node:20-alpine
-WORKDIR /app
-COPY server/package*.json ./server/
-RUN cd server && npm ci --only=production
-COPY server ./server
+FROM node:22-alpine
 WORKDIR /app/server
+COPY server/package*.json ./
+RUN npm ci --omit=dev
+COPY server/server.js ./
+RUN mkdir -p data && chown node:node data
+USER node
+ENV NODE_ENV=production
+ENV PORT=8080
 EXPOSE 8080
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

@@ -13,7 +13,7 @@ build
 .env
 server/.env
 server/serviceAccount.json
-server/data/db.json
+server/data/
 node_modules/
 dist/
 .expo/
@@ -21,3 +21,7 @@ dist/
 coverage/
 *.log
 
+*firebase-adminsdk*.json
+**/serviceAccount*.json
+server/backups/
+.claude/worktrees/
