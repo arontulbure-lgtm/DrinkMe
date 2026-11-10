@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./server/.env)",
+      "Read(./server/serviceAccount.json)",
+      "Read(./**/*firebase-adminsdk*.json)",
+      "Edit(./.env)",
+      "Edit(./server/.env)",
+      "Edit(./server/serviceAccount.json)"
+    ],
+    "ask": [
+      "Bash(npm install:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
