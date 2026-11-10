@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,16 +8,21 @@ import {
   RefreshControl,
   Alert,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../context/AuthContext';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import DrinkPostCard from '../components/DrinkPostCard';
 import StoriesSection from '../components/StoriesSection';
 import CommentDrawer from '../components/CommentDrawer';
-import { apiFetch } from '../lib/api';
-import { Drink, Story, NotificationItem } from '../types/api';
+import PostActionsSheet from '../components/PostActionsSheet';
+import LoadMoreButton from '../components/LoadMoreButton';
+import AgeGateBanner from '../components/AgeGateBanner';
+import { apiFetch, isAgeRequiredError } from '../lib/api';
+import { flattenPages, getNextCursor, invalidateAfterPartnerChange, invalidateAfterPartnerRequest, removeDrinkIfNotFound, syncSavedList, trimToFirstPage, updateDrinkInCaches } from '../lib/drinkCache';
+import { Drink, Page, Story, NotificationItem } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 
 // Stories are decorative for now — hide until the feature is implemented
@@ -27,14 +32,26 @@ export default function HomeScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [isNotificationsVisible, setNotificationsVisible] = useState(false);
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
   const { serverUserId, getJwtToken, profile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
-  const { data: partnerDrinks = [], refetch, isLoading } = useQuery<Drink[]>({
+  const {
+    data: partnerDrinksData,
+    refetch,
+    isLoading,
+    isError,
+    isFetching,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['drinks.partners'],
     enabled: !!serverUserId,
-    queryFn: () => apiFetch<Drink[]>('/api/drinks/partners'),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) => apiFetch<Page<Drink>>('/api/drinks/partners', { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
 
   const { data: stories = [] } = useQuery<Story[]>({
@@ -50,6 +67,28 @@ export default function HomeScreen({ navigation }: any) {
     refetchInterval: 60000,
   });
 
+  // The other side of a partnership acted, and this device only learns it from the poll. The first answer
+  // for a user is the baseline: the lists were just fetched too. A request changes no feed, so only a
+  // partner notice refetches them.
+  const partnerNoticeSeenRef = useRef<{ userId: string | null; partnerId: number; requestId: number } | null>(null);
+  useEffect(() => {
+    if (!notificationData) return;
+    const newestIdOf = (type: string) => notificationData.notifications
+      .filter((item) => item.type === type)
+      .reduce((newest, item) => Math.max(newest, item.id), 0);
+    const partnerId = newestIdOf('partner');
+    const requestId = newestIdOf('partner_request');
+    const seen = partnerNoticeSeenRef.current?.userId === serverUserId ? partnerNoticeSeenRef.current : null;
+    partnerNoticeSeenRef.current = {
+      userId: serverUserId,
+      partnerId: Math.max(partnerId, seen?.partnerId ?? 0),
+      requestId: Math.max(requestId, seen?.requestId ?? 0),
+    };
+    if (!seen || !isCurrentAuthUser(serverUserId)) return;
+    if (partnerId > seen.partnerId) invalidateAfterPartnerChange(queryClient);
+    else if (requestId > seen.requestId) invalidateAfterPartnerRequest(queryClient);
+  }, [notificationData, queryClient, serverUserId]);
+
   const applyLocalUser = useCallback(
     (drink: Drink) => {
       if (profile && serverUserId && drink.userId === serverUserId) {
@@ -58,30 +97,6 @@ export default function HomeScreen({ navigation }: any) {
       return drink;
     },
     [profile, serverUserId]
-  );
-
-  const hydrateDrinkCollections = useCallback(
-    (drinkId: number, updater: (drink: Drink) => Drink) => {
-      const keys: any[] = [
-        ['drinks.partners'],
-        ['drinks.all'],
-      ];
-      if (serverUserId) {
-        keys.push(['drinks.byUser', serverUserId]);
-        keys.push(['users.savedDrinks', serverUserId]);
-      }
-      keys.forEach((key) => {
-        queryClient.setQueryData<Drink[]>(key, (existing) => {
-          if (!existing) return existing;
-          return existing.map((item) => (item.id === drinkId ? updater(item) : item));
-        });
-      });
-      queryClient.setQueryData<Drink>(['drinks.detail', drinkId], (existing) => {
-        if (!existing) return existing;
-        return updater(existing);
-      });
-    },
-    [queryClient, serverUserId]
   );
 
   const cheerMutation = useMutation({
@@ -97,15 +112,16 @@ export default function HomeScreen({ navigation }: any) {
       });
     },
     onSuccess: (result, drinkId) => {
-      hydrateDrinkCollections(drinkId, (drink) => ({
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
         ...drink,
         isLiked: result.cheered,
         cheersCount: result.cheersCount,
       }));
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
-    onError: () => {
-      Alert.alert(t('errors.cheerFailed'));
+    onError: (error, drinkId) => {
+      Alert.alert(t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.cheerFailed'));
     },
   });
 
@@ -122,16 +138,15 @@ export default function HomeScreen({ navigation }: any) {
       });
     },
     onSuccess: (result, drinkId) => {
-      hydrateDrinkCollections(drinkId, (drink) => ({
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
         ...drink,
         isSaved: result.saved,
       }));
-      if (serverUserId) {
-        queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
-      }
+      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
     },
-    onError: () => {
-      Alert.alert(t('errors.saveFailed'));
+    onError: (error, drinkId) => {
+      Alert.alert(t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.saveFailed'));
     },
   });
 
@@ -145,15 +160,16 @@ export default function HomeScreen({ navigation }: any) {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
+      trimToFirstPage(queryClient, { queryKey: ['drinks.partners'] });
       await refetch();
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [queryClient, refetch]);
 
   const notifications = notificationData?.notifications ?? [];
   const unreadCount = notificationData?.unreadCount ?? 0;
-  const drinks = useMemo(() => partnerDrinks.map(applyLocalUser), [applyLocalUser, partnerDrinks]);
+  const drinks = useMemo(() => flattenPages(partnerDrinksData).map(applyLocalUser), [applyLocalUser, partnerDrinksData]);
 
   const openNotifications = () => {
     setNotificationsVisible(true);
@@ -187,6 +203,8 @@ export default function HomeScreen({ navigation }: any) {
         </View>
       </View>
 
+      <AgeGateBanner />
+
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
@@ -195,7 +213,26 @@ export default function HomeScreen({ navigation }: any) {
         {STORIES_ENABLED && <StoriesSection stories={stories} isLoading={isLoading} />}
 
         <Text style={styles.sectionLabel}>{t('home.sections.feed')}</Text>
-        {drinks.length === 0 ? (
+        {partnerDrinksData === undefined ? (
+          isError && !isFetching ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="cloud-offline-outline" size={48} color="#6B7280" />
+              <Text style={styles.emptySubtitle}>{t('home.sections.feedError')}</Text>
+              <TouchableOpacity
+                style={styles.createButton}
+                onPress={() => refetch()}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.retry')}
+              >
+                <Text style={styles.createButtonText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color="#8B5FBF" />
+            </View>
+          )
+        ) : drinks.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="people-outline" size={48} color="#6B7280" />
             <Text style={styles.emptyTitle}>{t('home.sections.emptyFeedTitle')}</Text>
@@ -216,6 +253,7 @@ export default function HomeScreen({ navigation }: any) {
                 onCheer={() => cheerMutation.mutate(drink.id)}
                 onComment={() => setCommentDrinkId(drink.id)}
                 onSave={() => saveMutation.mutate(drink.id)}
+                onMore={() => setActionsDrink(drink)}
                 isLiked={drink.isLiked}
                 isSaved={drink.isSaved}
                 cheersCount={drink.cheersCount}
@@ -227,11 +265,13 @@ export default function HomeScreen({ navigation }: any) {
                 }
               />
             ))}
+            {hasNextPage && <LoadMoreButton onPress={() => fetchNextPage()} isLoading={isFetchingNextPage} />}
           </View>
         )}
       </ScrollView>
 
       <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
+      <PostActionsSheet drink={actionsDrink} onClose={() => setActionsDrink(null)} />
 
       <Modal visible={isNotificationsVisible} transparent animationType="slide" onRequestClose={() => setNotificationsVisible(false)}>
         <View style={styles.modalOverlay}>
@@ -255,6 +295,8 @@ export default function HomeScreen({ navigation }: any) {
                       ? 'chatbubble-outline'
                       : item.type === 'partner'
                       ? 'people-outline'
+                      : item.type === 'partner_request'
+                      ? 'person-add-outline'
                       : 'wine-outline';
                   const iconColor =
                     item.type === 'comment'

@@ -15,8 +15,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
+import { apiFetch, ApiError } from '../lib/api';
+import { prependDrink } from '../lib/drinkCache';
 import { useLocalization } from '../context/LocalizationContext';
 import { Drink } from '../types/api';
 import LocationPickerModal from '../components/LocationPickerModal';
@@ -39,11 +40,12 @@ export default function CreatePostScreen({ navigation }: any) {
   const [drinkName, setDrinkName] = useState('');
   const [description, setDescription] = useState('');
   const [rating, setRating] = useState(5);
-  const [isAlcoholic, setIsAlcoholic] = useState(true);
   const [location, setLocation] = useState('');
   const [photo, setPhoto] = useState<SelectedImage | null>(null);
   const [isLocationPickerVisible, setLocationPickerVisible] = useState(false);
   const { getJwtToken, profile, serverUserId, user: firebaseUser, refreshProfile } = useAuth();
+  const isAgeConfirmed = profile?.ageConfirmed === true;
+  const [isAlcoholic, setIsAlcoholic] = useState(isAgeConfirmed);
   const queryClient = useQueryClient();
   const { t } = useLocalization();
   const insets = useSafeAreaInsets();
@@ -79,6 +81,8 @@ export default function CreatePostScreen({ navigation }: any) {
       });
     },
     onSuccess: async (createdDrink) => {
+      if (!isCurrentAuthUser(serverUserId)) return;
+
       if (!profile && refreshProfile) {
         await refreshProfile();
       }
@@ -89,32 +93,32 @@ export default function CreatePostScreen({ navigation }: any) {
         user: author ?? createdDrink.user,
       };
 
-      const prepend = (items: Drink[] | undefined) => {
-        if (!items) return [hydratedDrink];
-        const filtered = items.filter((item) => item.id !== hydratedDrink.id);
-        return [hydratedDrink, ...filtered];
-      };
-
-      queryClient.setQueryData<Drink[]>(['drinks.partners'], prepend);
-      queryClient.setQueryData<Drink[]>(['drinks.all'], prepend);
-      if (serverUserId) {
-        queryClient.setQueryData<Drink[]>(['drinks.byUser', serverUserId], prepend);
+      // refreshProfile above can outlive a logout.
+      if (serverUserId && isCurrentAuthUser(serverUserId)) {
+        prependDrink(queryClient, hydratedDrink, serverUserId);
       }
-      queryClient.setQueryData<Drink>(['drinks.detail', hydratedDrink.id], hydratedDrink);
 
       setDrinkName('');
       setDescription('');
       setLocation('');
       setRating(5);
-      setIsAlcoholic(true);
+      setIsAlcoholic(isAgeConfirmed);
       setPhoto(null);
 
       Alert.alert(t('createPost.title'), t('createPost.success'), [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     },
-    onError: () => {
-      Alert.alert(t('createPost.title'), t('createPost.error'));
+    onError: (error) => {
+      const status = error instanceof ApiError ? error.status : undefined;
+      const code = error instanceof ApiError ? error.code : undefined;
+      let message = t('createPost.error');
+      if (status === 413) message = t('createPost.imageTooLarge');
+      if (status === 400) message = t('createPost.imageInvalidFormat');
+      if (status === 429) message = t(code === 'daily_post_limit' ? 'createPost.dailyLimit' : 'common.tooManyRequests');
+      if (status === 507) message = t(code === 'user_image_quota' ? 'common.imageQuotaReached' : 'common.serviceUnavailable');
+      if (code === 'age_required') message = t('ageGate.required');
+      Alert.alert(t('createPost.title'), message);
     },
   });
 
@@ -257,8 +261,10 @@ export default function CreatePostScreen({ navigation }: any) {
               <Text style={styles.label}>Type</Text>
               <View style={styles.toggleRow}>
                 <TouchableOpacity
-                  style={[styles.toggleOption, isAlcoholic && styles.toggleOptionActive]}
+                  style={[styles.toggleOption, isAlcoholic && styles.toggleOptionActive, !isAgeConfirmed && styles.toggleOptionLocked]}
                   onPress={() => setIsAlcoholic(true)}
+                  disabled={!isAgeConfirmed}
+                  accessibilityState={{ disabled: !isAgeConfirmed, selected: isAlcoholic }}
                 >
                   <Ionicons name="wine" size={16} color={isAlcoholic ? '#FFFFFF' : '#6B7280'} />
                   <Text style={[styles.toggleOptionText, isAlcoholic && styles.toggleOptionTextActive]}>
@@ -275,6 +281,7 @@ export default function CreatePostScreen({ navigation }: any) {
                   </Text>
                 </TouchableOpacity>
               </View>
+              {!isAgeConfirmed && <Text style={styles.toggleHint}>{t('ageGate.banner')}</Text>}
             </View>
 
             <View style={styles.photoSection}>
@@ -436,6 +443,14 @@ const styles = StyleSheet.create({
   toggleOptionActive: {
     backgroundColor: '#8B5FBF',
     borderColor: '#8B5FBF',
+  },
+  toggleHint: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    marginTop: 8,
+  },
+  toggleOptionLocked: {
+    opacity: 0.5,
   },
   toggleOptionText: {
     fontSize: 14,

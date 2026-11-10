@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Dimensions,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,11 +18,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
-import { Comment } from '../types/api';
+import { apiFetch, getCommentErrorKey, getImageSource, isAgeRequiredError, isNotFoundError, retryUnlessNotFound } from '../lib/api';
+import { findCachedDrink, flattenPages, getNextCursor, removeDrinkIfNotFound } from '../lib/drinkCache';
+import { Comment, Page } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
+import { ActionsPanel } from './PostActionsSheet';
+import ListLoadState from './ListLoadState';
+import LoadMoreButton from './LoadMoreButton';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DRAWER_HEIGHT = SCREEN_HEIGHT * 0.72;
@@ -28,6 +34,7 @@ const DRAWER_HEIGHT = SCREEN_HEIGHT * 0.72;
 interface CommentDrawerProps {
   drinkId: number | null;
   onClose: () => void;
+  onBlocked?: (userId: string) => void;
 }
 
 function formatTimeAgo(dateString: string): string {
@@ -45,19 +52,24 @@ function formatTimeAgo(dateString: string): string {
   return 'now';
 }
 
-export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) {
+export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDrawerProps) {
   const insets = useSafeAreaInsets();
   const { profile, serverUserId, getJwtToken } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
   const [text, setText] = useState('');
+  const [actionsComment, setActionsComment] = useState<Comment | null>(null);
+  const actionsCloseRef = useRef<() => void>(() => setActionsComment(null));
+  // Read when the panel opens: a block removes that user's posts from the cache before the panel reports back.
+  const actionsPostOwnerRef = useRef<string | undefined>(undefined);
   const translateY = useRef(new Animated.Value(DRAWER_HEIGHT)).current;
   const isVisible = drinkId !== null;
 
   useEffect(() => {
     if (isVisible) {
       setText('');
+      setActionsComment(null);
       Animated.spring(translateY, {
         toValue: 0,
         damping: 20,
@@ -73,11 +85,25 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
     }
   }, [isVisible, translateY]);
 
-  const { data: comments = [], isLoading } = useQuery<Comment[]>({
+  const {
+    data: commentPages,
+    refetch,
+    error: commentsError,
+    isError,
+    isFetching,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['drinks.comments', drinkId],
     enabled: isVisible && drinkId !== null,
-    queryFn: () => apiFetch<Comment[]>(`/api/drinks/${drinkId}/comments`),
+    retry: retryUnlessNotFound,
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Comment>>(`/api/drinks/${drinkId}/comments`, { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
+  const comments = flattenPages(commentPages);
 
   const addCommentMutation = useMutation({
     mutationFn: async (content: string) => {
@@ -94,6 +120,14 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
       queryClient.invalidateQueries({ queryKey: ['drinks.comments', drinkId] });
       queryClient.invalidateQueries({ queryKey: ['drinks.detail', drinkId] });
       setText('');
+    },
+    onError: (error) => {
+      if (drinkId !== null && removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) {
+        Alert.alert(t('drinkDetail.title'), t('post.notFound'));
+        handleClose();
+        return;
+      }
+      Alert.alert(t('drinkDetail.title'), t(getCommentErrorKey(error)));
     },
   });
 
@@ -119,7 +153,7 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={handleClose}
+      onRequestClose={() => (actionsComment ? actionsCloseRef.current() : handleClose())}
     >
       <TouchableWithoutFeedback onPress={handleClose}>
         <View style={styles.backdrop} />
@@ -145,10 +179,23 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
           >
-            {isLoading ? (
+            {isNotFoundError(commentsError) ? (
               <View style={styles.centered}>
-                <Ionicons name="hourglass-outline" size={28} color="#6B7280" />
+                <Ionicons name="alert-circle-outline" size={36} color="#374151" />
+                <Text style={styles.emptyText}>{t('post.notFound')}</Text>
               </View>
+            ) : isAgeRequiredError(commentsError) ? (
+              <View style={styles.centered}>
+                <Ionicons name="lock-closed-outline" size={36} color="#374151" />
+                <Text style={styles.emptyText}>{t('ageGate.required')}</Text>
+              </View>
+            ) : commentPages === undefined ? (
+              <ListLoadState
+                isError={isError}
+                isFetching={isFetching}
+                message={t('drinkDetail.commentsLoadError')}
+                onRetry={() => refetch()}
+              />
             ) : comments.length === 0 ? (
               <View style={styles.centered}>
                 <Ionicons name="chatbubble-outline" size={36} color="#374151" />
@@ -156,18 +203,18 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
               </View>
             ) : (
               comments.map((comment) => {
-                const commentUser = comment.user;
+                const commentUser = comment.userId === serverUserId && profile ? profile : comment.user;
                 const avatarUri = commentUser?.avatar ?? null;
                 const displayName = commentUser?.firstName
                   ? `${commentUser.firstName} ${commentUser.lastName || ''}`.trim()
-                  : commentUser?.email ?? 'User';
+                  : t('common.unknownUser');
                 const initial = displayName[0]?.toUpperCase() ?? '?';
 
                 return (
                   <View key={comment.id} style={styles.commentRow}>
                     <View style={styles.avatarWrap}>
                       {avatarUri ? (
-                        <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+                        <Image source={getImageSource(avatarUri)} style={styles.avatarImg} />
                       ) : (
                         <View style={styles.avatarFallback}>
                           <Text style={styles.avatarInitial}>{initial}</Text>
@@ -178,6 +225,19 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
                       <View style={styles.commentMeta}>
                         <Text style={styles.commentAuthor}>{displayName}</Text>
                         <Text style={styles.commentTime}>{formatTimeAgo(comment.createdAt)}</Text>
+                        <TouchableOpacity
+                          style={styles.commentMoreButton}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            actionsPostOwnerRef.current = findCachedDrink(queryClient, comment.drinkId)?.userId;
+                            setActionsComment(comment);
+                          }}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel={t('comment.actions')}
+                        >
+                          <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
+                        </TouchableOpacity>
                       </View>
                       <Text style={styles.commentContent}>{comment.content}</Text>
                     </View>
@@ -185,12 +245,13 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
                 );
               })
             )}
+            {hasNextPage && <LoadMoreButton onPress={() => fetchNextPage()} isLoading={isFetchingNextPage} />}
           </ScrollView>
 
           {/* Input area */}
           <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             {profile?.avatar ? (
-              <Image source={{ uri: profile.avatar }} style={styles.inputAvatar} />
+              <Image source={getImageSource(profile.avatar)} style={styles.inputAvatar} />
             ) : (
               <View style={[styles.inputAvatar, styles.inputAvatarFallback]}>
                 <Text style={styles.inputAvatarInitial}>
@@ -219,6 +280,21 @@ export default function CommentDrawer({ drinkId, onClose }: CommentDrawerProps) 
           </View>
         </KeyboardAvoidingView>
       </Animated.View>
+
+      {/* Inside this Modal, not a second one: iOS shows only one at a time. */}
+      {actionsComment && (
+        <View style={StyleSheet.absoluteFill}>
+          <ActionsPanel
+            target={{ type: 'comment', comment: actionsComment }}
+            onClose={() => setActionsComment(null)}
+            onBlocked={(blockedUserId) => {
+              if (blockedUserId === actionsPostOwnerRef.current) handleClose();
+              onBlocked?.(blockedUserId);
+            }}
+            closeRef={actionsCloseRef}
+          />
+        </View>
+      )}
     </Modal>
   );
 }
@@ -324,6 +400,13 @@ const styles = StyleSheet.create({
   commentTime: {
     color: '#6B7280',
     fontSize: 12,
+  },
+  commentMoreButton: {
+    width: 32,
+    height: 32,
+    marginLeft: 'auto',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   commentContent: {
     color: '#D1D5DB',

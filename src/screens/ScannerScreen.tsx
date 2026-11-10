@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 
 // ── Beta flag — set to false to re-enable AI features ────────────────────────
@@ -9,6 +10,8 @@ const AI_ENABLED = false;
 
 export default function ScannerScreen({ navigation }: any) {
   const { t } = useLocalization();
+  const { profile } = useAuth();
+  const isAgeConfirmed = profile?.ageConfirmed === true;
 
   if (!AI_ENABLED) {
     return (
@@ -42,8 +45,9 @@ export default function ScannerScreen({ navigation }: any) {
 
           <Text style={styles.betaTitle}>AI Scanner</Text>
           <Text style={styles.betaSubtitle}>
-            Point your camera at any bottle or label and let the AI instantly identify
-            the product and suggest cocktail recipes crafted just for you.
+            {isAgeConfirmed
+              ? 'Point your camera at any bottle or label and let the AI instantly identify the product and suggest cocktail recipes crafted just for you.'
+              : t('ageGate.scannerIntro')}
           </Text>
 
           {/* Feature preview cards */}
@@ -55,8 +59,9 @@ export default function ScannerScreen({ navigation }: any) {
               <View style={styles.featureText}>
                 <Text style={styles.featureTitle}>Instant Recognition</Text>
                 <Text style={styles.featureDesc}>
-                  Snap a photo or pick one from your gallery — our AI identifies
-                  spirits, wines, and mixers in seconds.
+                  {isAgeConfirmed
+                    ? 'Snap a photo or pick one from your gallery — our AI identifies spirits, wines, and mixers in seconds.'
+                    : t('ageGate.scannerRecognition')}
                 </Text>
               </View>
             </View>
@@ -68,8 +73,9 @@ export default function ScannerScreen({ navigation }: any) {
               <View style={styles.featureText}>
                 <Text style={styles.featureTitle}>Recipe Generator</Text>
                 <Text style={styles.featureDesc}>
-                  Once the product is detected, get 5 personalised cocktail recipes
-                  with ingredients and step-by-step instructions.
+                  {isAgeConfirmed
+                    ? 'Once the product is detected, get 5 personalised cocktail recipes with ingredients and step-by-step instructions.'
+                    : t('ageGate.scannerRecipes')}
                 </Text>
               </View>
             </View>

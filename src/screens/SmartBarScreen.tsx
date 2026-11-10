@@ -11,15 +11,19 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
+import LoadMoreButton from '../components/LoadMoreButton';
+import PostActionsSheet from '../components/PostActionsSheet';
+import AgeGateBanner from '../components/AgeGateBanner';
 
 // ── Beta flag — set to false to re-enable AI recipe generation ────────────────
 const AI_RECIPES_ENABLED = false;
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
-import { Drink, SmartBarItem, Recipe } from '../types/api';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
+import { apiFetch, ApiError } from '../lib/api';
+import { Drink, Page, SmartBarItem, Recipe } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
@@ -33,8 +37,10 @@ export default function SmartBarScreen({ navigation }: any) {
   const [activeTab, setActiveTab] = useState<Tab>('inventory');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
 
   const { serverUserId, getJwtToken, profile } = useAuth();
+  const isAgeConfirmed = profile?.ageConfirmed === true;
   const queryClient = useQueryClient();
   const { t } = useLocalization();
   const insets = useSafeAreaInsets();
@@ -46,11 +52,21 @@ export default function SmartBarScreen({ navigation }: any) {
     queryFn: () => apiFetch<SmartBarItem[]>('/api/smart-bar'),
   });
 
-  const { data: savedDrinks = [], isLoading: isSavedLoading } = useQuery<Drink[]>({
+  const {
+    data: savedDrinkPages,
+    isLoading: isSavedLoading,
+    hasNextPage: hasMoreSaved,
+    fetchNextPage: fetchMoreSaved,
+    isFetchingNextPage: isFetchingMoreSaved,
+  } = useInfiniteQuery({
     queryKey: ['users.savedDrinks', serverUserId],
     enabled: !!serverUserId,
-    queryFn: () => apiFetch<Drink[]>(`/api/users/${serverUserId}/saved-drinks`),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Drink>>(`/api/users/${serverUserId}/saved-drinks`, { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
+  const savedDrinks = useMemo(() => flattenPages(savedDrinkPages), [savedDrinkPages]);
 
   const applyLocalUser = useCallback(
     (drink: Drink) => {
@@ -60,30 +76,6 @@ export default function SmartBarScreen({ navigation }: any) {
       return drink;
     },
     [profile, serverUserId]
-  );
-
-  const hydrateDrinkCollections = useCallback(
-    (drinkId: number, updater: (drink: Drink) => Drink) => {
-      const keys: any[] = [
-        ['users.savedDrinks', serverUserId],
-        ['drinks.partners'],
-        ['drinks.all'],
-      ];
-      if (serverUserId) {
-        keys.push(['drinks.byUser', serverUserId]);
-      }
-      keys.forEach((key) => {
-        queryClient.setQueryData<Drink[]>(key, (existing) => {
-          if (!existing) return existing;
-          return existing.map((item) => (item.id === drinkId ? updater(item) : item));
-        });
-      });
-      queryClient.setQueryData<Drink>(['drinks.detail', drinkId], (existing) => {
-        if (!existing) return existing;
-        return updater(existing);
-      });
-    },
-    [queryClient, serverUserId]
   );
 
   const addItemMutation = useMutation({
@@ -105,8 +97,13 @@ export default function SmartBarScreen({ navigation }: any) {
       setNewItemQuantity('');
       setIsAddingItem(false);
     },
-    onError: () => {
-      Alert.alert('Error', 'Failed to add item to your bar');
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'smart_bar_limit') {
+        Alert.alert(t('smartBar.addItemTitle'), t('smartBar.itemLimit'));
+        return;
+      }
+      const isStorageFull = error instanceof ApiError && error.status === 507;
+      Alert.alert('Error', isStorageFull ? t('common.serviceUnavailable') : 'Failed to add item to your bar');
     },
   });
 
@@ -138,7 +135,7 @@ export default function SmartBarScreen({ navigation }: any) {
       return apiFetch<Recipe[]>('/api/smart-bar/generate-recipes', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ ingredients }),
+        body: JSON.stringify({ ingredients, nonAlcoholicOnly: profile?.ageConfirmed !== true }),
       });
     },
     onSuccess: (recipes, ingredients) => {
@@ -235,14 +232,20 @@ export default function SmartBarScreen({ navigation }: any) {
       });
     },
     onSuccess: (result, drinkId) => {
-      if (result.saved) return;
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
-      hydrateDrinkCollections(drinkId, (drink) => ({
+      if (!serverUserId || !isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
         ...drink,
         isSaved: result.saved,
       }));
+      syncSavedList(queryClient, serverUserId, drinkId, result.saved);
     },
-    onError: () => Alert.alert('Error', 'Failed to update saved state'),
+    onError: (error, drinkId) => {
+      if (removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) {
+        Alert.alert(t('post.notFound'));
+        return;
+      }
+      Alert.alert('Error', 'Failed to update saved state');
+    },
   });
 
   // ── Inventory tab ──────────────────────────────────────────────
@@ -346,8 +349,9 @@ export default function SmartBarScreen({ navigation }: any) {
 
           <Text style={styles.betaTitle}>AI Recipe Generator</Text>
           <Text style={styles.betaDesc}>
-            Select ingredients from your bar, tap Generate, and our AI will craft
-            personalised cocktail recipes matched to exactly what you have on hand.
+            {isAgeConfirmed
+              ? 'Select ingredients from your bar, tap Generate, and our AI will craft personalised cocktail recipes matched to exactly what you have on hand.'
+              : t('ageGate.recipesIntro')}
           </Text>
 
           {/* Feature cards */}
@@ -358,7 +362,9 @@ export default function SmartBarScreen({ navigation }: any) {
             </View>
             <View style={styles.betaFeatureRow}>
               <Ionicons name="checkmark-circle" size={18} color="#8B5FBF" />
-              <Text style={styles.betaFeatureText}>Get 5 tailored cocktail recipes instantly</Text>
+              <Text style={styles.betaFeatureText}>
+                {isAgeConfirmed ? 'Get 5 tailored cocktail recipes instantly' : t('ageGate.recipesFeature')}
+              </Text>
             </View>
             <View style={styles.betaFeatureRow}>
               <Ionicons name="checkmark-circle" size={18} color="#8B5FBF" />
@@ -442,6 +448,7 @@ export default function SmartBarScreen({ navigation }: any) {
     handleGenerateRecipes,
     handleSelectAll,
     inventory,
+    isAgeConfirmed,
     isLoading,
     selectedIds,
     t,
@@ -478,6 +485,7 @@ export default function SmartBarScreen({ navigation }: any) {
             onCheer={() => {}}
             onComment={() => setCommentDrinkId(drink.id)}
             onSave={() => unsaveMutation.mutate(drink.id)}
+            onMore={() => setActionsDrink(drink)}
             isLiked={drink.isLiked}
             isSaved={drink.isSaved}
             cheersCount={drink.cheersCount}
@@ -489,9 +497,10 @@ export default function SmartBarScreen({ navigation }: any) {
             }
           />
         ))}
+        {hasMoreSaved && <LoadMoreButton onPress={() => fetchMoreSaved()} isLoading={isFetchingMoreSaved} />}
       </View>
     );
-  }, [applyLocalUser, isSavedLoading, navigation, savedDrinks, serverUserId, t, unsaveMutation]);
+  }, [applyLocalUser, fetchMoreSaved, hasMoreSaved, isFetchingMoreSaved, isSavedLoading, navigation, savedDrinks, serverUserId, t, unsaveMutation]);
 
   return (
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
@@ -539,6 +548,7 @@ export default function SmartBarScreen({ navigation }: any) {
       >
         {activeTab === 'inventory' && inventoryContent}
         {activeTab === 'recipes' && recipesContent}
+        {activeTab === 'saved' && <AgeGateBanner />}
         {activeTab === 'saved' && savedContent}
 
         {activeTab === 'inventory' && (
@@ -570,7 +580,7 @@ export default function SmartBarScreen({ navigation }: any) {
             <Text style={styles.modalTitle}>{t('smartBar.addItemTitle')}</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder={t('smartBar.itemNamePlaceholder')}
+              placeholder={t(isAgeConfirmed ? 'smartBar.itemNamePlaceholder' : 'ageGate.itemNamePlaceholder')}
               placeholderTextColor="#6B7280"
               value={newItemName}
               onChangeText={setNewItemName}
@@ -595,6 +605,7 @@ export default function SmartBarScreen({ navigation }: any) {
       )}
 
       <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
+      <PostActionsSheet drink={actionsDrink} onClose={() => setActionsDrink(null)} />
     </SafeAreaView>
   );
 }

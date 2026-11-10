@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { Drink } from '../types/api';
+import { getImageSource } from '../lib/api';
 import { useLocalization } from '../context/LocalizationContext';
 
 interface DrinkPostCardProps {
@@ -13,6 +14,7 @@ interface DrinkPostCardProps {
   isSaved?: boolean;
   cheersCount?: number;
   onPressAuthor?: () => void;
+  onMore?: () => void;
 }
 
 export default function DrinkPostCard({
@@ -21,6 +23,7 @@ export default function DrinkPostCard({
   onComment,
   onSave,
   onPressAuthor,
+  onMore,
   isLiked = false,
   isSaved = false,
   cheersCount = 0,
@@ -28,7 +31,7 @@ export default function DrinkPostCard({
   const { t } = useLocalization();
   const displayName = drink.user?.firstName
     ? `${drink.user.firstName} ${drink.user.lastName || ''}`
-    : drink.user?.email?.split('@')[0] || 'Unknown User';
+    : t('common.unknownUser');
 
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -65,7 +68,7 @@ export default function DrinkPostCard({
         >
           <View style={styles.avatar}>
             {drink.user?.avatar ? (
-              <Image source={{ uri: drink.user.avatar }} style={styles.avatarImage} />
+              <Image source={getImageSource(drink.user.avatar)} style={styles.avatarImage} />
             ) : (
               <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
             )}
@@ -78,14 +81,25 @@ export default function DrinkPostCard({
         {drink.location && (
           <View style={styles.locationContainer}>
             <Ionicons name="location-outline" size={16} color="#9CA3AF" />
-            <Text style={styles.location}>{drink.location}</Text>
+            <Text style={styles.location} numberOfLines={1}>{drink.location}</Text>
           </View>
+        )}
+        {onMore && (
+          <TouchableOpacity
+            style={styles.moreButton}
+            onPress={onMore}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={t('post.actions')}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
         )}
       </View>
 
       <View style={styles.content}>
         {drink.imageUrl ? (
-          <Image source={{ uri: drink.imageUrl }} style={styles.image} />
+          <Image source={getImageSource(drink.imageUrl)} style={styles.image} />
         ) : null}
         <Text style={styles.drinkName}>{drink.name}</Text>
         <View style={styles.ratingContainer}>
@@ -181,11 +195,13 @@ const styles = StyleSheet.create({
   locationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
   },
   location: {
     fontSize: 12,
     color: '#9CA3AF',
     marginLeft: 4,
+    flexShrink: 1,
   },
   content: {
     marginBottom: 16,
@@ -236,5 +252,12 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     color: '#FFFFFF',
+  },
+  moreButton: {
+    width: 32,
+    height: 32,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

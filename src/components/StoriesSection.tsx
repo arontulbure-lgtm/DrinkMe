@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Story } from '../types/api';
+import { useLocalization } from '../context/LocalizationContext';
 
 interface StoriesSectionProps {
   stories: Story[];
@@ -9,11 +10,12 @@ interface StoriesSectionProps {
 }
 
 export default function StoriesSection({ stories, isLoading = false }: StoriesSectionProps) {
+  const { t } = useLocalization();
+
   const getDisplayName = (user?: Story['user']) => {
-    if (!user) return 'Unknown';
-    return user.firstName 
+    return user?.firstName
       ? `${user.firstName} ${user.lastName || ''}`
-      : user.email?.split('@')[0] || 'User';
+      : t('common.unknownUser');
   };
 
   const isRecentStory = (createdAt: string) => {

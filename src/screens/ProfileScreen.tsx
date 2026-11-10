@@ -7,17 +7,24 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
-import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
-import { BaseUser, Drink } from '../types/api';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
+import { apiFetch, ApiError, getImageSource, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
+import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, trimAndInvalidate, updateDrinkInCaches } from '../lib/drinkCache';
+import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
+import { BaseUser, Drink, Page } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
+import AgeGateBanner from '../components/AgeGateBanner';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
+import PostActionsSheet from '../components/PostActionsSheet';
+import ListLoadState from '../components/ListLoadState';
+import LoadMoreButton from '../components/LoadMoreButton';
 
 interface ProfileScreenProps {
   navigation: any;
@@ -34,10 +41,20 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
 
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-  const { data: profileData } = useQuery<BaseUser>({
+  const {
+    data: profileData,
+    error: profileError,
+    isLoading: isProfileLoading,
+    isError: isProfileError,
+    refetch: refetchProfile,
+  } = useQuery<BaseUser>({
     queryKey: ['users.detail', viewedUserId],
-    enabled: !!viewedUserId,
+    // For the owner, profile is set after the token exchange, so the public view is never cached.
+    enabled: !!viewedUserId && (!isSelf || !!profile),
+    retry: retryUnlessNotFound,
     queryFn: () => apiFetch<BaseUser>(`/api/users/${viewedUserId}`),
   });
 
@@ -46,56 +63,82 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       const normalizedEmail = (
         profileData.email ?? firebaseUser?.email ?? `user+${viewedUserId}@drinkme.app`
       ) as string;
-      const nextProfile: BaseUser = {
-        id: viewedUserId,
-        email: normalizedEmail,
-        firstName: profileData.firstName,
-        lastName: profileData.lastName,
-        city: profileData.city,
-        bio: profileData.bio,
-        avatar: profileData.avatar ?? null,
-        isPartner: profileData.isPartner,
-      };
+      const nextProfile: BaseUser = { ...profileData, id: viewedUserId, email: normalizedEmail };
       setProfile(nextProfile);
     }
   }, [firebaseUser?.email, isSelf, profileData, setProfile, viewedUserId]);
 
-  const { data: userDrinks = [] } = useQuery<Drink[]>({
+  const {
+    data: userDrinkPages,
+    refetch: refetchUserDrinks,
+    isError: isUserDrinksError,
+    isFetching: isUserDrinksFetching,
+    hasNextPage: hasMoreUserDrinks,
+    fetchNextPage: fetchMoreUserDrinks,
+    isFetchingNextPage: isFetchingMoreUserDrinks,
+  } = useInfiniteQuery({
     queryKey: ['drinks.byUser', viewedUserId],
     enabled: !!viewedUserId,
-    queryFn: () => apiFetch<Drink[]>(`/api/drinks/user/${viewedUserId}`),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Drink>>(`/api/drinks/user/${viewedUserId}`, { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
+  const userDrinks = flattenPages(userDrinkPages);
+  const userDrinksTotal = userDrinkPages?.pages[0]?.total;
 
-  const { data: savedDrinks = [] } = useQuery<Drink[]>({
+  const {
+    data: savedDrinkPages,
+    refetch: refetchSaved,
+    isError: isSavedError,
+    isFetching: isSavedFetching,
+    hasNextPage: hasMoreSaved,
+    fetchNextPage: fetchMoreSaved,
+    isFetchingNextPage: isFetchingMoreSaved,
+  } = useInfiniteQuery({
     queryKey: ['users.savedDrinks', viewedUserId],
     enabled: isSelf && !!viewedUserId,
-    queryFn: () => apiFetch<Drink[]>(`/api/users/${viewedUserId}/saved-drinks`),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Drink>>(`/api/users/${viewedUserId}/saved-drinks`, { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
+  const savedDrinks = flattenPages(savedDrinkPages);
 
-  const { data: friendsCount = 0 } = useQuery<number>({
+  // By post author, not isSelf: the Saved tab also holds other users' posts.
+  const applyLocalUser = (drink: Drink) => {
+    if (profile && serverUserId && drink.userId === serverUserId) {
+      return { ...drink, user: { ...profile } };
+    }
+    return drink;
+  };
+
+  const { data: friendsCount } = useQuery<number>({
     queryKey: ['friends.count'],
     enabled: isSelf,
     queryFn: () => apiFetch<number>('/api/friends/count'),
   });
 
-  const { data: myPartners = [] } = useQuery<BaseUser[]>({
-    queryKey: ['drink-partners'],
-    enabled: !!serverUserId,
-    queryFn: () => apiFetch<BaseUser[]>('/api/drink-partners'),
-  });
+  // friends.count is always the signed-in user's own, so it is never shown on another user's profile.
+  const shownPartnerCount = isSelf ? friendsCount : profileData?.partnerCount;
+  const canOpenPartners = isSelf || shownPartnerCount !== undefined;
 
-  const isCurrentPartner = useMemo(() => {
-    if (isSelf || !viewedUserId) return false;
-    return myPartners.some((partner) => partner.id === viewedUserId);
-  }, [isSelf, myPartners, viewedUserId]);
+  const partnerStatus = profileData?.partnerStatus ?? 'none';
+  const { pressPartner, pendingTargetId } = usePartnerAction();
 
   const displayName = useMemo(() => {
-    const source = profileData || profile;
+    // Another user's profile must never fall back to the viewer's own data.
+    const source = isSelf ? profileData || profile : profileData;
     if (source?.firstName) {
       return `${source.firstName} ${source.lastName || ''}`.trim();
     }
+    if (!isSelf) {
+      // Blank until loaded. A masked first name can still leave a public last name.
+      if (!profileData) return '';
+      return profileData.lastName || t('common.unknownUser');
+    }
     return source?.email || firebaseUser?.email || 'User';
-  }, [firebaseUser?.email, profile, profileData]);
+  }, [firebaseUser?.email, isSelf, profile, profileData, t]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -112,7 +155,15 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
     );
   };
 
-  const avatarSource = profileData?.avatar || profile?.avatar;
+  const avatarSource = isSelf ? profileData?.avatar || profile?.avatar : profileData?.avatar;
+  // Also over cached data: the account can be gone, or a block can have started since.
+  const isProfileGone = !isSelf && isNotFoundError(profileError);
+  const isOtherProfileMissing = !isSelf && (!profileData || isProfileGone);
+
+  // Mutation callbacks still run after this screen is gone, and goBack pops whichever route is focused.
+  const leaveIfUserBlocked = (blockedUserId: string) => {
+    if (!isSelf && blockedUserId === viewedUserId && navigation.isFocused()) navigation.goBack();
+  };
 
   const uploadAvatarMutation = useMutation({
     mutationFn: async (asset: ImagePicker.ImagePickerAsset) => {
@@ -133,12 +184,12 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       });
     },
     onSuccess: (updated) => {
+      if (!isCurrentAuthUser(serverUserId)) return;
       if (viewedUserId) {
         queryClient.setQueryData<BaseUser>(['users.detail', viewedUserId], updated);
-        queryClient.invalidateQueries({ queryKey: ['drinks.byUser', viewedUserId] });
+        trimAndInvalidate(queryClient, { queryKey: ['drinks.byUser', viewedUserId] });
       }
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
+      trimAndInvalidate(queryClient, { queryKey: ['drinks.partners'] });
       queryClient.invalidateQueries({
         predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'users.search',
       });
@@ -146,25 +197,15 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
         setProfile(updated);
       }
     },
-    onError: () => Alert.alert(t('profile.title'), t('createPost.error')),
-  });
-
-  const togglePartnerMutation = useMutation({
-    mutationFn: async () => {
-      if (!viewedUserId) throw new Error('Missing user id');
-      return apiFetch<{ isPartner: boolean }>(`/api/drink-partners/${viewedUserId}`, {
-        method: 'POST',
-      });
+    onError: (error) => {
+      const status = error instanceof ApiError ? error.status : undefined;
+      const code = error instanceof ApiError ? error.code : undefined;
+      let message = t('profile.avatarUploadError');
+      if (status === 413) message = t('profile.avatarTooLarge');
+      if (status === 400) message = t('profile.avatarInvalidFormat');
+      if (status === 507) message = t(code === 'user_image_quota' ? 'common.imageQuotaReached' : 'common.serviceUnavailable');
+      Alert.alert(t('profile.title'), message);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drink-partners'] });
-      queryClient.invalidateQueries({ queryKey: ['friends.count'] });
-      if (viewedUserId) {
-        queryClient.invalidateQueries({ queryKey: ['users.detail', viewedUserId] });
-      }
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-    onError: () => Alert.alert(t('profile.title'), t('createPost.error')),
   });
 
   const saveMutation = useMutation({
@@ -178,11 +219,19 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       });
     },
     onSuccess: (result, drinkId) => {
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', viewedUserId] });
-      queryClient.setQueryData<Drink[]>(['drinks.byUser', viewedUserId], (existing) => {
-        if (!existing) return existing;
-        return existing.map((d) => d.id === drinkId ? { ...d, isSaved: result.saved } : d);
-      });
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (d) => ({ ...d, isSaved: result.saved }));
+      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
+    },
+    onError: (error, drinkId) => {
+      if (removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) {
+        Alert.alert(t('profile.title'), t('post.notFound'));
+        return;
+      }
+      Alert.alert(
+        t('profile.title'),
+        t(isStorageFullError(error) ? 'common.serviceUnavailable' : 'errors.saveFailed')
+      );
     },
   });
 
@@ -197,7 +246,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 0.5,
       mediaTypes: 'images',
     });
 
@@ -206,12 +255,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
     }
   };
 
-  const partnerLabel = useMemo(() => {
-    if (isSelf) {
-      return t('profile.drinkPartners');
-    }
-    return isCurrentPartner ? t('profile.drinkPartners') : t('common.addPartner');
-  }, [isCurrentPartner, isSelf, t]);
+  const isPartnerOutlined = partnerStatus === 'partner' || partnerStatus === 'requested';
 
   return (
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
@@ -231,13 +275,32 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
               </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconButton}>
-              <Ionicons name="close" size={22} color="#FFFFFF" />
-            </TouchableOpacity>
+            <>
+              {!isOtherProfileMissing && (
+                <TouchableOpacity
+                  onPress={() => setIsUserMenuOpen(true)}
+                  style={styles.headerIconButton}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('common.moreOptions')}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={22} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconButton}>
+                <Ionicons name="close" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            </>
           )}
         </View>
       </View>
 
+      {isProfileGone ? (
+        <View style={styles.profileGone}>
+          <Ionicons name="person-outline" size={48} color="#6B7280" />
+          <Text style={styles.emptyDrinksText}>{t('profile.notFound')}</Text>
+        </View>
+      ) : (
       <ScrollView style={styles.content}>
         <View style={styles.profileSection}>
           <TouchableOpacity
@@ -246,7 +309,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
             disabled={!isSelf || uploadAvatarMutation.isPending}
           >
             {avatarSource ? (
-              <Image source={{ uri: avatarSource }} style={styles.avatarImage} />
+              <Image source={getImageSource(avatarSource)} style={styles.avatarImage} />
             ) : (
               <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
             )}
@@ -257,26 +320,46 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
             )}
           </TouchableOpacity>
 
-          <Text style={styles.displayName}>{displayName}</Text>
-          <Text style={styles.email}>{profileData?.email || profile?.email || firebaseUser?.email}</Text>
+          {isOtherProfileMissing ? (
+            isProfileError ? (
+              <View style={styles.profileLoadError}>
+                <Text style={styles.profileLoadErrorText}>{t('profile.loadError')}</Text>
+                <TouchableOpacity
+                  style={styles.profileRetryButton}
+                  onPress={() => refetchProfile()}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('profile.retry')}
+                >
+                  <Text style={styles.editButtonText}>{t('profile.retry')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : isProfileLoading ? (
+              <ActivityIndicator color="#8B5FBF" style={styles.profileLoading} />
+            ) : null
+          ) : (
+            <Text style={styles.displayName}>{displayName}</Text>
+          )}
+          {isSelf ? (
+            <Text style={styles.email}>{profileData?.email || profile?.email || firebaseUser?.email}</Text>
+          ) : null}
           {profileData?.city ? <Text style={styles.meta}>{profileData.city}</Text> : null}
           {profileData?.bio ? <Text style={styles.bio}>{profileData.bio}</Text> : null}
 
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{userDrinks.length}</Text>
+              <Text style={styles.statNumber}>{userDrinksTotal ?? '–'}</Text>
               <Text style={styles.statLabel}>{t('profile.posts')}</Text>
             </View>
             <TouchableOpacity
-              style={[styles.statItemTouchable, friendsCount === 0 && styles.statItemDisabled]}
+              style={[styles.statItemTouchable, !canOpenPartners && styles.statItemDisabled]}
               onPress={() =>
                 navigation.navigate('PartnersList', {
                   userId: viewedUserId,
                 })
               }
-              disabled={friendsCount === 0}
+              disabled={!canOpenPartners}
             >
-              <Text style={styles.statNumber}>{friendsCount}</Text>
+              <Text style={styles.statNumber}>{shownPartnerCount ?? '-'}</Text>
               <Text style={styles.statLabel}>{t('profile.drinkPartners')}</Text>
             </TouchableOpacity>
           </View>
@@ -288,13 +371,26 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
             >
               <Text style={styles.editButtonText}>{t('profile.edit')}</Text>
             </TouchableOpacity>
-          ) : (
+          ) : isOtherProfileMissing ? null : (
             <TouchableOpacity
-              style={[styles.partnerToggleButton, isCurrentPartner && styles.partnerToggleButtonActive]}
-              onPress={() => togglePartnerMutation.mutate()}
+              style={[
+                styles.partnerToggleButton,
+                isPartnerOutlined && styles.partnerToggleButtonActive,
+                partnerStatus === 'requested' && styles.partnerToggleButtonRequested,
+              ]}
+              onPress={() => viewedUserId && pressPartner(viewedUserId, partnerStatus)}
+              disabled={pendingTargetId === viewedUserId}
+              accessibilityRole="button"
+              accessibilityLabel={t(getPartnerLabelKey(partnerStatus))}
             >
-              <Text style={[styles.partnerToggleText, isCurrentPartner && styles.partnerToggleTextActive]}>
-                {partnerLabel}
+              <Text
+                style={[
+                  styles.partnerToggleText,
+                  isPartnerOutlined && styles.partnerToggleTextActive,
+                  partnerStatus === 'requested' && styles.partnerToggleTextRequested,
+                ]}
+              >
+                {t(getPartnerLabelKey(partnerStatus))}
               </Text>
             </TouchableOpacity>
           )}
@@ -333,10 +429,19 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
           )}
         </View>
 
+        {isSelf && <AgeGateBanner />}
+
         {/* Posts tab */}
         {activeTab === 'posts' && (
           <View style={styles.section}>
-            {userDrinks.length === 0 ? (
+            {userDrinkPages === undefined ? (
+              <ListLoadState
+                isError={isUserDrinksError}
+                isFetching={isUserDrinksFetching}
+                message={t('profile.postsLoadError')}
+                onRetry={() => refetchUserDrinks()}
+              />
+            ) : userDrinks.length === 0 ? (
               <View style={styles.emptyDrinks}>
                 <Ionicons name="wine-outline" size={48} color="#6B7280" />
                 <Text style={styles.emptyDrinksText}>{t('profile.emptyDrinks')}</Text>
@@ -351,19 +456,23 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
               </View>
             ) : (
               <View style={{ gap: 16 }}>
-                {userDrinks.map((drink) => (
+                {userDrinks.map(applyLocalUser).map((drink) => (
                   <DrinkPostCard
                     key={drink.id}
                     drink={drink}
                     onCheer={() => {}}
                     onComment={() => setCommentDrinkId(drink.id)}
                     onSave={() => saveMutation.mutate(drink.id)}
+                    onMore={() => setActionsDrink(drink)}
                     isLiked={drink.isLiked}
                     isSaved={drink.isSaved}
                     cheersCount={drink.cheersCount}
                     onPressAuthor={() => {}}
                   />
                 ))}
+                {hasMoreUserDrinks && (
+                  <LoadMoreButton onPress={() => fetchMoreUserDrinks()} isLoading={isFetchingMoreUserDrinks} />
+                )}
               </View>
             )}
           </View>
@@ -372,7 +481,14 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
         {/* Saved tab — self only */}
         {activeTab === 'saved' && isSelf && (
           <View style={styles.section}>
-            {savedDrinks.length === 0 ? (
+            {savedDrinkPages === undefined ? (
+              <ListLoadState
+                isError={isSavedError}
+                isFetching={isSavedFetching}
+                message={t('profile.postsLoadError')}
+                onRetry={() => refetchSaved()}
+              />
+            ) : savedDrinks.length === 0 ? (
               <View style={styles.emptyDrinks}>
                 <Ionicons name="bookmark-outline" size={48} color="#6B7280" />
                 <Text style={styles.emptyDrinksText}>{t('smartBar.savedEmptyTitle')}</Text>
@@ -382,13 +498,14 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
               </View>
             ) : (
               <View style={{ gap: 16 }}>
-                {savedDrinks.map((drink) => (
+                {savedDrinks.map(applyLocalUser).map((drink) => (
                   <DrinkPostCard
                     key={drink.id}
                     drink={drink}
                     onCheer={() => {}}
                     onComment={() => setCommentDrinkId(drink.id)}
                     onSave={() => saveMutation.mutate(drink.id)}
+                    onMore={() => setActionsDrink(drink)}
                     isLiked={drink.isLiked}
                     isSaved={drink.isSaved}
                     cheersCount={drink.cheersCount}
@@ -400,13 +517,24 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
                     }
                   />
                 ))}
+                {hasMoreSaved && <LoadMoreButton onPress={() => fetchMoreSaved()} isLoading={isFetchingMoreSaved} />}
               </View>
             )}
           </View>
         )}
       </ScrollView>
+      )}
 
-      <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
+      <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} onBlocked={leaveIfUserBlocked} />
+      <PostActionsSheet
+        drink={actionsDrink}
+        userId={isUserMenuOpen ? viewedUserId : null}
+        onClose={() => {
+          setActionsDrink(null);
+          setIsUserMenuOpen(false);
+        }}
+        onBlocked={leaveIfUserBlocked}
+      />
     </SafeAreaView>
   );
 }
@@ -551,6 +679,12 @@ const styles = StyleSheet.create({
   partnerToggleTextActive: {
     color: '#8B5FBF',
   },
+  partnerToggleButtonRequested: {
+    borderColor: '#374151',
+  },
+  partnerToggleTextRequested: {
+    color: '#9CA3AF',
+  },
   tabBar: {
     flexDirection: 'row',
     borderTopWidth: 1,
@@ -609,5 +743,32 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
     fontWeight: '600',
+  },
+  profileGone: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+  },
+  profileLoading: {
+    marginVertical: 16,
+  },
+  profileLoadError: {
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 24,
+  },
+  profileLoadErrorText: {
+    color: '#EF4444',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  profileRetryButton: {
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 24,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: 20,
   },
 });

@@ -1,5 +1,5 @@
 {
   "compilerOptions": {},
   "extends": "expo/tsconfig.base",
-  "exclude": ["_compare_tar", "_compare_tar2", "**/*.tar.gz"]
+  "exclude": ["_compare_tar", "_compare_tar2", "**/*.tar.gz", "agents"]
 }

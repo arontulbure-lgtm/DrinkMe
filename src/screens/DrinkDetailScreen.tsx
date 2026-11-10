@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
   Image,
   TextInput,
   KeyboardAvoidingView,
@@ -13,33 +14,83 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../lib/api';
-import { Drink, Comment } from '../types/api';
-import { useAuth } from '../context/AuthContext';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiFetch, getCommentErrorKey, getImageSource, isAgeRequiredError, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
+import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
+import { Drink, Comment, Page } from '../types/api';
+import ListLoadState from '../components/ListLoadState';
+import LoadMoreButton from '../components/LoadMoreButton';
+import PostActionsSheet from '../components/PostActionsSheet';
+import { useConfirmAge } from '../lib/useConfirmAge';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 
 interface Props {
   route: { params: { drinkId: number } };
-  navigation: { goBack: () => void; navigate: (screen: string, params?: any) => void };
+  navigation: { goBack: () => void; isFocused: () => boolean; navigate: (screen: string, params?: any) => void };
 }
 
 export default function DrinkDetailScreen({ route, navigation }: Props) {
   const { drinkId } = route.params;
-  const { getJwtToken } = useAuth();
+  const { getJwtToken, profile, serverUserId } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
   const [commentText, setCommentText] = useState('');
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
+  const [actionsComment, setActionsComment] = useState<Comment | null>(null);
+  const { promptConfirmAge, isConfirming } = useConfirmAge();
 
-  const { data: drink, isLoading } = useQuery<Drink>({
+  const {
+    data: drink,
+    error: drinkError,
+    isError: isDrinkError,
+    isFetching: isDrinkFetching,
+    refetch: refetchDrink,
+  } = useQuery<Drink>({
     queryKey: ['drinks.detail', drinkId],
     queryFn: () => apiFetch<Drink>(`/api/drinks/${drinkId}`),
+    retry: retryUnlessNotFound,
   });
+  // Also over cached data: a post held in the cache can have been deleted since.
+  const isDrinkGone = isNotFoundError(drinkError);
+  const isAgeRequired = isAgeRequiredError(drinkError);
 
-  const { data: comments = [] } = useQuery<Comment[]>({
+  const {
+    data: commentPages,
+    refetch: refetchComments,
+    isError: isCommentsError,
+    isFetching: isCommentsFetching,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['drinks.comments', drinkId],
-    queryFn: () => apiFetch<Comment[]>(`/api/drinks/${drinkId}/comments`),
+    enabled: !isDrinkGone && !isAgeRequired,
+    retry: retryUnlessNotFound,
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Comment>>(`/api/drinks/${drinkId}/comments`, { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
+  const comments = flattenPages(commentPages);
+
+  // Mutation callbacks still run after this screen is gone, and goBack pops whichever route is focused.
+  const leaveScreen = () => {
+    if (navigation.isFocused()) navigation.goBack();
+  };
+
+  const getDrinkActionErrorKey = (error: unknown) => {
+    if (isAgeRequiredError(error)) return 'ageGate.required';
+    return isStorageFullError(error) ? 'common.serviceUnavailable' : 'createPost.error';
+  };
+
+  // The screen has nothing left to show once a cheer, save or comment finds the post gone.
+  const leaveIfDrinkGone = (error: unknown) => {
+    if (!removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) return false;
+    Alert.alert(t('drinkDetail.title'), t('post.notFound'));
+    leaveScreen();
+    return true;
+  };
 
   const cheerMutation = useMutation({
     mutationFn: async () => {
@@ -51,13 +102,19 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
         headers,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.detail', drinkId] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
+    onSuccess: (result) => {
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (item) => ({
+        ...item,
+        isLiked: result.cheered,
+        cheersCount: result.cheersCount,
+      }));
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
-    onError: () => Alert.alert(t('drinkDetail.title'), t('createPost.error')),
+    onError: (error) => {
+      if (leaveIfDrinkGone(error)) return;
+      Alert.alert(t('drinkDetail.title'), t(getDrinkActionErrorKey(error)));
+    },
   });
 
   const saveMutation = useMutation({
@@ -70,11 +127,15 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
         headers,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.detail', drinkId] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks'] });
+    onSuccess: (result) => {
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (item) => ({ ...item, isSaved: result.saved }));
+      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
     },
-    onError: () => Alert.alert(t('drinkDetail.title'), t('createPost.error')),
+    onError: (error) => {
+      if (leaveIfDrinkGone(error)) return;
+      Alert.alert(t('drinkDetail.title'), t(getDrinkActionErrorKey(error)));
+    },
   });
 
   const commentMutation = useMutation({
@@ -88,14 +149,16 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
         body: JSON.stringify({ content }),
       });
     },
-    onSuccess: (newComment) => {
+    onSuccess: () => {
+      if (!isCurrentAuthUser(serverUserId)) return;
       setCommentText('');
-      queryClient.setQueryData<Comment[]>(['drinks.comments', drinkId], (existing) =>
-        existing ? [...existing, newComment] : [newComment]
-      );
+      queryClient.invalidateQueries({ queryKey: ['drinks.comments', drinkId] });
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
-    onError: () => Alert.alert(t('drinkDetail.title'), t('errors.commentFailed')),
+    onError: (error) => {
+      if (leaveIfDrinkGone(error)) return;
+      Alert.alert(t('drinkDetail.title'), t(getCommentErrorKey(error)));
+    },
   });
 
   const handleSubmitComment = () => {
@@ -132,11 +195,53 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
               <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{t('drinkDetail.title')}</Text>
-            <View style={{ width: 32 }} />
+            {drink && !isDrinkGone && !isAgeRequired ? (
+              <TouchableOpacity
+                onPress={() => setActionsDrink(drink)}
+                style={styles.headerButton}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={t('post.actions')}
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 32 }} />
+            )}
           </View>
 
           <ScrollView contentContainerStyle={styles.content}>
-            {isLoading || !drink ? (
+            {isDrinkGone ? (
+              <View style={styles.loadingState}>
+                <Ionicons name="alert-circle-outline" size={32} color="#6B7280" />
+                <Text style={styles.loadingText}>{t('post.notFound')}</Text>
+              </View>
+            ) : isAgeRequired ? (
+              <View style={styles.loadingState}>
+                <Ionicons name="lock-closed-outline" size={32} color="#6B7280" />
+                <Text style={styles.loadingText}>{t('ageGate.required')}</Text>
+                <TouchableOpacity
+                  style={styles.ageConfirmButton}
+                  onPress={promptConfirmAge}
+                  disabled={isConfirming}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('ageGate.bannerAction')}
+                >
+                  {isConfirming ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.primaryActionText}>{t('ageGate.bannerAction')}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : !drink && isDrinkError ? (
+              <ListLoadState
+                isError={isDrinkError}
+                isFetching={isDrinkFetching}
+                message={t('post.loadError')}
+                onRetry={() => refetchDrink()}
+              />
+            ) : !drink ? (
               <View style={styles.loadingState}>
                 <Ionicons name="hourglass" size={32} color="#6B7280" />
                 <Text style={styles.loadingText}>{t('drinkDetail.loading')}</Text>
@@ -152,7 +257,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     </View>
                   </View>
                   {drink.imageUrl ? (
-                    <Image source={{ uri: drink.imageUrl }} style={styles.heroImage} />
+                    <Image source={getImageSource(drink.imageUrl)} style={styles.heroImage} />
                   ) : null}
                   {drink.location && (
                     <View style={styles.locationRow}>
@@ -193,30 +298,56 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
 
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{t('drinkDetail.comments')}</Text>
-                  {comments.length === 0 ? (
+                  {commentPages === undefined ? (
+                    <ListLoadState
+                      isError={isCommentsError}
+                      isFetching={isCommentsFetching}
+                      message={t('drinkDetail.commentsLoadError')}
+                      onRetry={() => refetchComments()}
+                    />
+                  ) : comments.length === 0 ? (
                     <Text style={styles.emptyComments}>{t('drinkDetail.noComments')}</Text>
                   ) : (
-                    comments.map((comment) => (
-                      <View key={comment.id} style={styles.commentItem}>
-                        <View style={styles.commentAvatar}>
-                          <Text style={styles.commentAvatarText}>
-                            {comment.user?.firstName?.[0]?.toUpperCase() || comment.user?.email?.[0] || '?'}
-                          </Text>
-                        </View>
-                        <View style={styles.commentBody}>
-                          <View style={styles.commentHeader}>
-                            <Text style={styles.commentAuthor}>
-                              {comment.user?.firstName
-                                ? `${comment.user.firstName} ${comment.user.lastName || ''}`
-                                : comment.user?.email}
-                            </Text>
-                            <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt)}</Text>
+                    comments.map((comment) => {
+                      const commentUser = comment.userId === serverUserId && profile ? profile : comment.user;
+                      return (
+                        <View key={comment.id} style={styles.commentItem}>
+                          <View style={styles.commentAvatar}>
+                            {commentUser?.avatar ? (
+                              <Image source={getImageSource(commentUser.avatar)} style={styles.commentAvatarImage} />
+                            ) : (
+                              <Text style={styles.commentAvatarText}>
+                                {commentUser?.firstName?.[0]?.toUpperCase() || '?'}
+                              </Text>
+                            )}
                           </View>
-                          <Text style={styles.commentText}>{comment.content}</Text>
+                          <View style={styles.commentBody}>
+                            <View style={styles.commentHeader}>
+                              <Text style={styles.commentAuthor}>
+                                {commentUser?.firstName
+                                  ? `${commentUser.firstName} ${commentUser.lastName || ''}`
+                                  : t('common.unknownUser')}
+                              </Text>
+                              <View style={styles.commentHeaderEnd}>
+                                <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt)}</Text>
+                                <TouchableOpacity
+                                  style={styles.commentMoreButton}
+                                  onPress={() => setActionsComment(comment)}
+                                  hitSlop={6}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={t('comment.actions')}
+                                >
+                                  <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                            <Text style={styles.commentText}>{comment.content}</Text>
+                          </View>
                         </View>
-                      </View>
-                    ))
+                      );
+                    })
                   )}
+                  {hasNextPage && <LoadMoreButton onPress={() => fetchNextPage()} isLoading={isFetchingNextPage} />}
                 </View>
 
                 <View style={styles.section}>
@@ -237,25 +368,39 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
             )}
           </ScrollView>
 
-          <View style={styles.commentInputContainer}>
-            <TextInput
-              style={styles.commentInput}
-              placeholder={t('common.commentPlaceholder')}
-              placeholderTextColor="#6B7280"
-              value={commentText}
-              onChangeText={setCommentText}
-              multiline
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, (!commentText.trim() || commentMutation.isPending) && styles.sendButtonDisabled]}
-              onPress={handleSubmitComment}
-              disabled={!commentText.trim() || commentMutation.isPending}
-            >
-              <Ionicons name="send" size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+          {drink && !isDrinkGone && !isAgeRequired && (
+            <View style={styles.commentInputContainer}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder={t('common.commentPlaceholder')}
+                placeholderTextColor="#6B7280"
+                value={commentText}
+                onChangeText={setCommentText}
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, (!commentText.trim() || commentMutation.isPending) && styles.sendButtonDisabled]}
+                onPress={handleSubmitComment}
+                disabled={!commentText.trim() || commentMutation.isPending}
+              >
+                <Ionicons name="send" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
+      <PostActionsSheet
+        drink={actionsDrink}
+        comment={actionsComment}
+        onClose={() => {
+          setActionsDrink(null);
+          setActionsComment(null);
+        }}
+        onDeleted={leaveScreen}
+        onBlocked={(blockedUserId) => {
+          if (blockedUserId === drink?.userId) leaveScreen();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -457,6 +602,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  commentAvatarImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
   commentAvatarText: {
     color: '#FFFFFF',
     fontWeight: '600',
@@ -511,5 +661,24 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  commentHeaderEnd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  commentMoreButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ageConfirmButton: {
+    backgroundColor: '#8B5FBF',
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

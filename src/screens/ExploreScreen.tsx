@@ -2,30 +2,45 @@ import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
-import { Drink, BaseUser } from '../types/api';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
+import { apiFetch, isAgeRequiredError } from '../lib/api';
+import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
+import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
+import { Drink, BaseUser, Page } from '../types/api';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
+import PostActionsSheet from '../components/PostActionsSheet';
+import ListLoadState from '../components/ListLoadState';
+import LoadMoreButton from '../components/LoadMoreButton';
+import AgeGateBanner from '../components/AgeGateBanner';
 import { useLocalization } from '../context/LocalizationContext';
+
+const TRENDING_LIMIT = 6;
+const SEARCH_MIN_LENGTH = 2;
 
 export default function ExploreScreen({ navigation }: any) {
   const [searchQuery, setSearchQuery] = useState('');
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
   const { serverUserId, getJwtToken, profile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const isAgeConfirmed = profile?.ageConfirmed === true;
 
   const filters = useMemo(
     () => [
       { id: 'all', label: t('explore.filters.all') },
-      { id: 'cocktail', label: t('explore.filters.cocktail') },
-      { id: 'wine', label: t('explore.filters.wine') },
-      { id: 'beer', label: t('explore.filters.beer') },
+      ...(isAgeConfirmed
+        ? [
+            { id: 'cocktail', label: t('explore.filters.cocktail') },
+            { id: 'wine', label: t('explore.filters.wine') },
+            { id: 'beer', label: t('explore.filters.beer') },
+          ]
+        : []),
       { id: 'non-alcoholic', label: t('explore.filters.nonAlcoholic') },
     ],
-    [t]
+    [isAgeConfirmed, t]
   );
 
   const [activeFilter, setActiveFilter] = useState('all');
@@ -41,34 +56,60 @@ export default function ExploreScreen({ navigation }: any) {
 
   const rawQuery = debouncedQuery;
   const isUserQuery = rawQuery.startsWith('@');
-  const userQuery = isUserQuery ? rawQuery.slice(1) : '';
+  const userQuery = isUserQuery ? rawQuery.replace(/^@+/, '').trim() : '';
   const hasSearchTerm = rawQuery.length > 0;
+  // Lowercase, so "Gin" and "gin" share one cached result: the server matches either way.
+  const drinkSearchTerm = rawQuery.toLowerCase();
+  const isDrinkSearch = !isUserQuery && rawQuery.length >= SEARCH_MIN_LENGTH;
 
-  const { data: drinks = [] } = useQuery<Drink[]>({
-    queryKey: ['drinks.all'],
+  // The server filters, so a match on a later page is found. Tag chips stay a client filter below.
+  const isNonAlcoholicFilter = activeFilter === 'non-alcoholic';
+  const {
+    data: discoverPages,
+    refetch: refetchDiscover,
+    isError: isDiscoverError,
+    isFetching: isDiscoverFetching,
+    hasNextPage: hasMoreDiscover,
+    fetchNextPage: fetchMoreDiscover,
+    isFetchingNextPage: isFetchingMoreDiscover,
+  } = useInfiniteQuery({
+    queryKey: ['drinks.all', isNonAlcoholicFilter ? 'non-alcoholic' : 'all'],
     enabled: !!serverUserId,
-    queryFn: () => apiFetch<Drink[]>('/api/drinks'),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Drink>>('/api/drinks', {
+        query: { scope: 'discover', alcoholic: isNonAlcoholicFilter ? 'false' : undefined, before: pageParam },
+      }),
+    getNextPageParam: getNextCursor,
   });
 
-  const { data: partnerDrinks = [] } = useQuery<Drink[]>({
-    queryKey: ['drinks.partners'],
+  const { data: trendingPage } = useQuery<Page<Drink>>({
+    queryKey: ['drinks.trending'],
     enabled: !!serverUserId,
-    queryFn: () => apiFetch<Drink[]>('/api/drinks/partners'),
+    queryFn: () =>
+      apiFetch<Page<Drink>>('/api/drinks', { query: { scope: 'discover', sort: 'trending', limit: TRENDING_LIMIT } }),
   });
 
   const { data: users = [] } = useQuery<BaseUser[]>({
     queryKey: ['users.search', userQuery],
-    enabled: !!serverUserId && isUserQuery && userQuery.length > 0,
+    enabled: !!serverUserId && isUserQuery && userQuery.length >= 2,
     queryFn: () => apiFetch<BaseUser[]>('/api/users/search', { query: { q: userQuery } }),
   });
 
-  const { data: publicDrinks = [] } = useQuery<Drink[]>({
-    queryKey: ['drinks.search', rawQuery],
-    enabled: !!serverUserId && !isUserQuery && rawQuery.length > 0,
-    queryFn: () =>
-      rawQuery
-        ? apiFetch<Drink[]>('/api/drinks', { query: { city: rawQuery } })
-        : apiFetch<Drink[]>('/api/drinks'),
+  const {
+    data: searchPages,
+    refetch: refetchSearch,
+    isError: isSearchError,
+    isFetching: isSearchFetching,
+    hasNextPage: hasMoreSearch,
+    fetchNextPage: fetchMoreSearch,
+    isFetchingNextPage: isFetchingMoreSearch,
+  } = useInfiniteQuery({
+    queryKey: ['drinks.search', drinkSearchTerm],
+    enabled: !!serverUserId && isDrinkSearch,
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) => apiFetch<Page<Drink>>('/api/drinks', { query: { q: drinkSearchTerm, before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
 
   const applyLocalUser = useCallback(
@@ -81,18 +122,16 @@ export default function ExploreScreen({ navigation }: any) {
     [profile, serverUserId]
   );
 
-  const partnerIds = useMemo(() => new Set(partnerDrinks.map((drink) => drink.id)), [partnerDrinks]);
   const discoveryDrinks = useMemo(
-    () => drinks.filter((drink) => !partnerIds.has(drink.id)).map(applyLocalUser),
-    [drinks, partnerIds, applyLocalUser]
+    () => flattenPages(discoverPages).map(applyLocalUser),
+    [discoverPages, applyLocalUser]
   );
-  const allHydratedDrinks = useMemo(() => drinks.map(applyLocalUser), [drinks, applyLocalUser]);
 
   const matchesFilter = (drink: Drink, filter: string) => {
     if (filter === 'all') return true;
     const tags = drink.tags || [];
     if (filter === 'non-alcoholic') {
-      return tags.includes('mocktail') || tags.includes('non-alcoholic') || drink.isAlcoholic === false;
+      return drink.isAlcoholic === false;
     }
     return tags.includes(filter);
   };
@@ -103,60 +142,15 @@ export default function ExploreScreen({ navigation }: any) {
   );
 
   const matchingDrinks = useMemo(() => {
-    if (!hasSearchTerm || isUserQuery) return [] as Drink[];
-    const queryLower = rawQuery.toLowerCase();
-    const cityMatches = publicDrinks.filter((drink) =>
-      (drink.location || '').toLowerCase().includes(queryLower)
-    );
-    const fallbackMatches = allHydratedDrinks.filter((drink) => {
-      const location = (drink.location || '').toLowerCase();
-      const description = (drink.description || '').toLowerCase();
-      return (
-        drink.name.toLowerCase().includes(queryLower) ||
-        description.includes(queryLower) ||
-        location.includes(queryLower)
-      );
-    });
-    const combined = cityMatches.length > 0 ? cityMatches : fallbackMatches;
-    const seen = new Set<number>();
-    return combined.filter((drink) => {
-      if (seen.has(drink.id)) return false;
-      seen.add(drink.id);
-      return true;
-    });
-  }, [allHydratedDrinks, publicDrinks, hasSearchTerm, isUserQuery, rawQuery]);
+    if (!isDrinkSearch) return [] as Drink[];
+    return flattenPages(searchPages).map(applyLocalUser);
+  }, [applyLocalUser, searchPages, isDrinkSearch]);
 
-  const trendingDrinks = useMemo(
-    () => [...discoveryDrinks].sort((a, b) => (b.cheersCount || 0) - (a.cheersCount || 0)).slice(0, 6),
-    [discoveryDrinks]
-  );
+  const trendingDrinks = trendingPage?.items ?? [];
 
-  const shouldShowUserResults = isUserQuery && userQuery.length > 0;
-  const shouldShowDrinkResults = !isUserQuery && rawQuery.length > 0;
-
-  const hydrateDrinkCollections = useCallback(
-    (drinkId: number, updater: (drink: Drink) => Drink) => {
-      const keys: any[] = [
-        ['drinks.all'],
-        ['drinks.partners'],
-      ];
-      if (serverUserId) {
-        keys.push(['drinks.byUser', serverUserId]);
-        keys.push(['users.savedDrinks', serverUserId]);
-      }
-      keys.forEach((key) => {
-        queryClient.setQueryData<Drink[]>(key, (existing) => {
-          if (!existing) return existing;
-          return existing.map((item) => (item.id === drinkId ? updater(item) : item));
-        });
-      });
-      queryClient.setQueryData<Drink>(['drinks.detail', drinkId], (existing) => {
-        if (!existing) return existing;
-        return updater(existing);
-      });
-    },
-    [queryClient, serverUserId]
-  );
+  const shouldShowUserResults = isUserQuery && userQuery.length >= 2;
+  const shouldShowUserMinChars = hasSearchTerm && (isUserQuery ? userQuery.length < 2 : !isDrinkSearch);
+  const shouldShowDrinkResults = isDrinkSearch;
 
   const cheerMutation = useMutation({
     mutationFn: async (drinkId: number) => {
@@ -169,13 +163,16 @@ export default function ExploreScreen({ navigation }: any) {
       });
     },
     onSuccess: (result, drinkId) => {
-      hydrateDrinkCollections(drinkId, (drink) => ({
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
         ...drink,
         isLiked: result.cheered,
         cheersCount: result.cheersCount,
       }));
     },
-    onError: () => Alert.alert(t('errors.cheerFailed')),
+    onError: (error, drinkId) => Alert.alert(
+      t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.cheerFailed')
+    ),
   });
 
   const saveMutation = useMutation({
@@ -189,41 +186,27 @@ export default function ExploreScreen({ navigation }: any) {
       });
     },
     onSuccess: (result, drinkId) => {
-      hydrateDrinkCollections(drinkId, (drink) => ({
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
         ...drink,
         isSaved: result.saved,
       }));
-      if (serverUserId) {
-        queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
-      }
+      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
     },
-    onError: () => Alert.alert(t('errors.partnerFailed')),
+    onError: (error, drinkId) => Alert.alert(
+      t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.saveFailed')
+    ),
   });
 
-  const partnerMutation = useMutation({
-    mutationFn: async (targetUserId: string) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ isPartner: boolean }>(`/api/drink-partners/${targetUserId}`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users.search', userQuery] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-      queryClient.invalidateQueries({ queryKey: ['friends.count'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-    onError: () => Alert.alert(t('errors.saveFailed')),
-  });
+  const { pressPartner, pendingTargetId } = usePartnerAction();
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('explore.title')}</Text>
       </View>
+
+      <AgeGateBanner />
 
       <View style={styles.searchContainer}>
         <View style={styles.searchBox}>
@@ -249,6 +232,12 @@ export default function ExploreScreen({ navigation }: any) {
           <View style={styles.searchHints}>
             <Text style={styles.searchHint}>{t('explore.tipUsers')}</Text>
             <Text style={[styles.searchHint, styles.searchHintLast]}>{t('explore.tipPlaces')}</Text>
+          </View>
+        )}
+
+        {shouldShowUserMinChars && (
+          <View style={styles.searchHints}>
+            <Text style={[styles.searchHint, styles.searchHintLast]}>{t('explore.searchMinChars')}</Text>
           </View>
         )}
 
@@ -284,9 +273,11 @@ export default function ExploreScreen({ navigation }: any) {
             ) : (
               users.map((result) => {
                 const isSelf = result.id === serverUserId;
+                const partnerStatus = result.partnerStatus ?? 'none';
+                const isPartnerFilled = partnerStatus === 'partner' || partnerStatus === 'incoming';
                 const displayName = result.firstName
                   ? `${result.firstName} ${result.lastName || ''}`.trim()
-                  : result.email;
+                  : t('common.unknownUser');
                 return (
                   <View key={result.id} style={styles.userResult}>
                     <TouchableOpacity
@@ -304,27 +295,31 @@ export default function ExploreScreen({ navigation }: any) {
                         </Text>
                       </View>
                       <View style={styles.userInfo}>
-                        <Text style={styles.userName}>{displayName}</Text>
-                        {result.city && <Text style={styles.userCity}>{result.city}</Text>}
+                        <Text style={styles.userName} numberOfLines={1}>{displayName}</Text>
+                        {result.city ? <Text style={styles.userCity} numberOfLines={1}>{result.city}</Text> : null}
                       </View>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[
                         styles.partnerButton,
-                        result.isPartner && styles.partnerButtonActive,
+                        isPartnerFilled && styles.partnerButtonActive,
+                        partnerStatus === 'requested' && styles.partnerButtonRequested,
                         isSelf && styles.partnerButtonDisabled,
                       ]}
-                      onPress={() => partnerMutation.mutate(result.id)}
-                      disabled={isSelf}
+                      onPress={() => pressPartner(result.id, partnerStatus)}
+                      disabled={isSelf || pendingTargetId === result.id}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={isSelf ? t('common.you') : t(getPartnerLabelKey(partnerStatus))}
                     >
                       <Text
-                        style={[styles.partnerButtonText, result.isPartner && styles.partnerButtonTextActive]}
+                        style={[
+                          styles.partnerButtonText,
+                          isPartnerFilled && styles.partnerButtonTextActive,
+                          partnerStatus === 'requested' && styles.partnerButtonTextRequested,
+                        ]}
                       >
-                        {isSelf
-                          ? t('common.you')
-                          : result.isPartner
-                          ? t('profile.drinkPartners')
-                          : t('common.addPartner')}
+                        {isSelf ? t('common.you') : t(getPartnerLabelKey(partnerStatus))}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -340,7 +335,14 @@ export default function ExploreScreen({ navigation }: any) {
                 {t('explore.sections.searchResults', { query: rawQuery })}
               </Text>
             </View>
-            {matchingDrinks.length === 0 ? (
+            {searchPages === undefined ? (
+              <ListLoadState
+                isError={isSearchError}
+                isFetching={isSearchFetching}
+                message={t('explore.loadError')}
+                onRetry={() => refetchSearch()}
+              />
+            ) : matchingDrinks.length === 0 ? (
               <View style={styles.emptyState}>
                 <Ionicons name="wine-outline" size={48} color="#6B7280" />
                 <Text style={styles.emptyTitle}>{t('explore.sections.noDrinksTitle')}</Text>
@@ -354,6 +356,7 @@ export default function ExploreScreen({ navigation }: any) {
                   onCheer={() => cheerMutation.mutate(drink.id)}
                   onComment={() => setCommentDrinkId(drink.id)}
                   onSave={() => saveMutation.mutate(drink.id)}
+                  onMore={() => setActionsDrink(drink)}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
@@ -366,6 +369,7 @@ export default function ExploreScreen({ navigation }: any) {
                 />
               ))
             )}
+            {hasMoreSearch && <LoadMoreButton onPress={() => fetchMoreSearch()} isLoading={isFetchingMoreSearch} />}
           </View>
         ) : (
           <>
@@ -421,6 +425,20 @@ export default function ExploreScreen({ navigation }: any) {
                 <Ionicons name="menu" size={18} color="#8B5FBF" />
                 <Text style={styles.sectionTitle}>{t('explore.sections.discover')}</Text>
               </View>
+              {discoverPages === undefined ? (
+                <ListLoadState
+                  isError={isDiscoverError}
+                  isFetching={isDiscoverFetching}
+                  message={t('explore.loadError')}
+                  onRetry={() => refetchDiscover()}
+                />
+              ) : filteredDrinks.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="wine-outline" size={48} color="#6B7280" />
+                  <Text style={styles.emptyTitle}>{t('explore.sections.noDrinksTitle')}</Text>
+                  <Text style={styles.emptySubtitle}>{t('explore.sections.noDrinksSubtitle')}</Text>
+                </View>
+              ) : null}
               {filteredDrinks.map((drink) => (
                 <DrinkPostCard
                   key={drink.id}
@@ -428,6 +446,7 @@ export default function ExploreScreen({ navigation }: any) {
                   onCheer={() => cheerMutation.mutate(drink.id)}
                   onComment={() => setCommentDrinkId(drink.id)}
                   onSave={() => saveMutation.mutate(drink.id)}
+                  onMore={() => setActionsDrink(drink)}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
@@ -439,12 +458,16 @@ export default function ExploreScreen({ navigation }: any) {
                   }
                 />
               ))}
+              {hasMoreDiscover && (activeFilter === 'all' || isNonAlcoholicFilter) && (
+                <LoadMoreButton onPress={() => fetchMoreDiscover()} isLoading={isFetchingMoreDiscover} />
+              )}
             </View>
           </>
         )}
       </ScrollView>
 
       <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
+      <PostActionsSheet drink={actionsDrink} onClose={() => setActionsDrink(null)} />
     </SafeAreaView>
   );
 }
@@ -597,6 +620,12 @@ const styles = StyleSheet.create({
   },
   partnerButtonTextActive: {
     color: '#FFFFFF',
+  },
+  partnerButtonRequested: {
+    borderColor: '#374151',
+  },
+  partnerButtonTextRequested: {
+    color: '#9CA3AF',
   },
   emptyState: {
     alignItems: 'center',

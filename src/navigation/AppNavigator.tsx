@@ -1,6 +1,7 @@
-import React from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, View, ActivityIndicator } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { useLocalization } from '../context/LocalizationContext';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -19,6 +20,11 @@ import EditProfileScreen from '../screens/EditProfileScreen';
 import RecipeResultsScreen from '../screens/RecipeResultsScreen';
 import LanguageSettingsScreen from '../screens/LanguageSettingsScreen';
 import PartnersListScreen from '../screens/PartnersListScreen';
+import SessionErrorScreen from '../screens/SessionErrorScreen';
+import VerifyEmailScreen from '../screens/VerifyEmailScreen';
+import AgeGateScreen from '../screens/AgeGateScreen';
+import OnboardingScreen, { PRIVACY_NOTICE_VERSION } from '../screens/OnboardingScreen';
+import BlockedUsersScreen from '../screens/BlockedUsersScreen';
 
 type TabParamList = {
   Home: undefined;
@@ -30,6 +36,8 @@ type TabParamList = {
 
 type RootStackParamList = {
   Auth: undefined;
+  SessionError: undefined;
+  VerifyEmail: undefined;
   Main: undefined;
   CreatePost: undefined;
   DrinkDetail: { drinkId: number };
@@ -38,6 +46,7 @@ type RootStackParamList = {
   LanguageSettings: undefined;
   PartnersList: undefined;
   UserProfile: { userId: string };
+  BlockedUsers: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -90,7 +99,32 @@ function TabNavigator() {
 }
 
 export function AppNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, sessionStatus, profile, serverUserId, accountDeletedNotice, clearAccountDeletedNotice, signInAgainNotice, clearSignInAgainNotice } = useAuth();
+  const { t } = useLocalization();
+  // Only for this session: declining is not stored, so the gate returns on the next launch or sign-in.
+  const [declinedAgeGateUid, setDeclinedAgeGateUid] = useState<string | null>(null);
+  // The same for "Later" on the name prompt. The notice has no such way out.
+  const [skippedNameUid, setSkippedNameUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setDeclinedAgeGateUid(null);
+      setSkippedNameUid(null);
+    }
+  }, [isAuthenticated]);
+
+  // Without this, signing in to a deleted account would just return to the sign-in screen with no reason.
+  useEffect(() => {
+    if (!accountDeletedNotice) return;
+    clearAccountDeletedNotice();
+    Alert.alert(t('deleteAccount.action'), t('deleteAccount.done'));
+  }, [accountDeletedNotice, clearAccountDeletedNotice, t]);
+
+  useEffect(() => {
+    if (!signInAgainNotice) return;
+    clearSignInAgainNotice();
+    Alert.alert(t('verifyEmail.signInAgain'));
+  }, [signInAgainNotice, clearSignInAgainNotice, t]);
 
   if (isLoading) {
     return (
@@ -100,10 +134,35 @@ export function AppNavigator() {
     );
   }
 
+  // profile is set only once the session is ready, so an unknown answer never shows the gate.
+  if (
+    isAuthenticated &&
+    sessionStatus === 'ready' &&
+    profile &&
+    profile.ageConfirmed !== true &&
+    declinedAgeGateUid !== serverUserId
+  ) {
+    return <AgeGateScreen onDecline={() => setDeclinedAgeGateUid(serverUserId)} />;
+  }
+
+  // After the age gate, whatever the answer to it was.
+  if (
+    isAuthenticated &&
+    sessionStatus === 'ready' &&
+    profile &&
+    ((profile.privacyNoticeVersion ?? 0) < PRIVACY_NOTICE_VERSION || (profile.needsName === true && skippedNameUid !== serverUserId))
+  ) {
+    return <OnboardingScreen onLater={() => setSkippedNameUid(serverUserId)} />;
+  }
+
   return (
     <Stack.Navigator id={undefined} screenOptions={{ headerShown: false }}>
       {!isAuthenticated ? (
         <Stack.Screen name="Auth" component={AuthScreen} />
+      ) : sessionStatus === 'error' ? (
+        <Stack.Screen name="SessionError" component={SessionErrorScreen} />
+      ) : sessionStatus === 'verification_required' ? (
+        <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
       ) : (
         <>
           <Stack.Screen name="Main" component={TabNavigator} />
@@ -111,7 +170,6 @@ export function AppNavigator() {
             name="CreatePost"
             component={CreatePostScreen}
             options={{
-              presentation: 'fullScreenModal',
               headerShown: false,
             }}
           />
@@ -143,6 +201,11 @@ export function AppNavigator() {
           <Stack.Screen
             name="UserProfile"
             component={ProfileScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="BlockedUsers"
+            component={BlockedUsersScreen}
             options={{ headerShown: false }}
           />
         </>
