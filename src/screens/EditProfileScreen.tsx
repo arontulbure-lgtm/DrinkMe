@@ -4,8 +4,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError } from '../lib/api';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DeleteAccountModal from '../components/DeleteAccountModal';
@@ -22,6 +23,7 @@ export default function EditProfileScreen({ navigation }: Props) {
   const [city, setCity] = useState('');
   const [bio, setBio] = useState('');
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const { data: profileData, isLoading, isError } = useQuery<BaseUser>({
     queryKey: ['users.detail', serverUserId],
@@ -55,8 +57,9 @@ export default function EditProfileScreen({ navigation }: Props) {
       Alert.alert(t('editProfile.title'), t('editProfile.success'));
       navigation.goBack();
     },
-    onError: () => {
-      Alert.alert(t('editProfile.title'), t('editProfile.error'));
+    onError: (error) => {
+      refreshIfSuspended(error);
+      Alert.alert(t('editProfile.title'), t(isAccountSuspendedError(error) ? ACCOUNT_SUSPENDED_ERROR_KEY : 'editProfile.error'));
     },
   });
 

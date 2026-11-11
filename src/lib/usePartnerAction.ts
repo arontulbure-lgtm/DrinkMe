@@ -3,9 +3,10 @@ import { Alert } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { apiFetch, ApiError, isNotFoundError } from './api';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, ApiError, isAccountSuspendedError, isNotFoundError } from './api';
 import { invalidateAfterPartnerChange, invalidateAfterPartnerRequest, setPartnerStatusInCaches } from './drinkCache';
 import { PartnerActionResult, PartnerStatus } from '../types/api';
+import { useRefreshIfSuspended } from './useRefreshIfSuspended';
 
 // Translation key for the button that shows how the signed-in user stands with someone.
 export function getPartnerLabelKey(status: PartnerStatus): string {
@@ -17,6 +18,7 @@ export function getPartnerLabelKey(status: PartnerStatus): string {
 
 // Translation key for a partner action that failed.
 export function getPartnerErrorKey(error: unknown): string {
+  if (isAccountSuspendedError(error)) return ACCOUNT_SUSPENDED_ERROR_KEY;
   if (error instanceof ApiError && error.code === 'partner_request_limit') return 'partners.requestLimit';
   if (error instanceof ApiError && error.status === 507) return 'common.serviceUnavailable';
   return 'errors.partnerFailed';
@@ -39,6 +41,7 @@ export function usePartnerAction() {
   const { serverUserId } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
 
   const { mutate, isPending, variables } = useMutation({
     mutationFn: async ({ targetId, status }: { targetId: string; status: PartnerStatus }): Promise<PartnerActionResult & { isStale?: boolean }> => {
@@ -67,6 +70,7 @@ export function usePartnerAction() {
     onError: (error, { targetId }) => {
       // Blocked or gone since this screen loaded: the refetch shows that.
       if (isNotFoundError(error) && isCurrentAuthUser(serverUserId)) invalidateAfterPartnerRequest(queryClient, targetId);
+      refreshIfSuspended(error);
       Alert.alert(t(getPartnerErrorKey(error)));
     },
   });

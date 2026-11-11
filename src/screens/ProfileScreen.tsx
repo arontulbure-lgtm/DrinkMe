@@ -14,9 +14,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
-import { apiFetch, ApiError, getImageSource, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
+import {
+  ACCOUNT_SUSPENDED_ERROR_KEY,
+  apiFetch,
+  ApiError,
+  getImageSource,
+  isAccountSuspendedError,
+  isNotFoundError,
+  isStorageFullError,
+  retryUnlessNotFound,
+} from '../lib/api';
 import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, trimAndInvalidate, updateDrinkInCaches } from '../lib/drinkCache';
 import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser, Drink, Page } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DrinkPostCard from '../components/DrinkPostCard';
@@ -24,6 +34,7 @@ import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
+import ModerationNotice, { SuspensionBanner } from '../components/ModerationNotice';
 
 interface ProfileScreenProps {
   navigation: any;
@@ -32,8 +43,9 @@ interface ProfileScreenProps {
 
 export default function ProfileScreen({ navigation, route }: ProfileScreenProps) {
   const queryClient = useQueryClient();
-  const { profile, serverUserId, logout, getJwtToken, setProfile, refreshProfile, user: firebaseUser } = useAuth();
+  const { profile, serverUserId, logout, getJwtToken, setProfile, user: firebaseUser } = useAuth();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
 
   const viewedUserId = route?.params?.userId ?? serverUserId;
   const isSelf = !route?.params?.userId || route.params.userId === serverUserId;
@@ -203,6 +215,8 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       if (status === 413) message = t('profile.avatarTooLarge');
       if (status === 400) message = t('profile.avatarInvalidFormat');
       if (status === 507) message = t(code === 'user_image_quota' ? 'common.imageQuotaReached' : 'common.serviceUnavailable');
+      if (isAccountSuspendedError(error)) message = t(ACCOUNT_SUSPENDED_ERROR_KEY);
+      refreshIfSuspended(error);
       Alert.alert(t('profile.title'), message);
     },
   });
@@ -301,6 +315,10 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
         </View>
       ) : (
       <ScrollView style={styles.content}>
+        {isSelf && <SuspensionBanner />}
+        {isSelf && profileData?.hiddenPendingReview && (
+          <ModerationNotice messageKey="moderation.hiddenProfile" style={styles.hiddenProfileNotice} />
+        )}
         <View style={styles.profileSection}>
           <TouchableOpacity
             style={styles.avatar}
@@ -740,6 +758,10 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
     fontWeight: '600',
+  },
+  hiddenProfileNotice: {
+    marginHorizontal: 16,
+    marginTop: 12,
   },
   profileGone: {
     flex: 1,

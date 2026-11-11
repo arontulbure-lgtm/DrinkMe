@@ -217,7 +217,13 @@ const assertOthersIntact = (dbFile, extraUserIds = []) => {
   assert.equal(db.limitEventsByUser[BOB].length, 1);
   assert.deepEqual(db.notificationsByUser[BOB].map((n) => n.id), [5, 6]);
   assert.deepEqual(db.notificationsByUser[CAROL].map((n) => n.id), [7]);
-  assert.deepEqual(db.reports.map((r) => r.id).sort(), [7, 8]);
+  // Report 1, the victim's open report about Bob's post, stays under an anonymous id with no details,
+  // so it still counts towards the auto-hide until an admin resolves it (owner decision of 2026-11-10).
+  assert.deepEqual(db.reports.map((r) => r.id).sort(), [1, 7, 8]);
+  const victimsOpenReport = db.reports.find((r) => r.id === 1);
+  assert.match(victimsOpenReport.reporterId, /^deleted-[0-9a-f]{16}$/);
+  assert.equal(victimsOpenReport.details, null);
+  assert.equal(victimsOpenReport.status, 'open');
   const resolvedByVictim = db.reports.find((r) => r.id === 7);
   assert.equal(resolvedByVictim.reporterId, BOB);
   assert.ok(!('resolvedBy' in resolvedByVictim));
@@ -849,11 +855,11 @@ const daysAgo = (days) => Date.now() - days * DAY_MS;
 test('old backups go by their exact name, and everything else stays', async (t) => {
   const { dir, dbFile } = makeDbDir(t);
   const expired = [
-    place(dir, `${DB_NAME}.corrupt-${daysAgo(31)}`),
+    place(dir, `${DB_NAME}.corrupt-${daysAgo(22)}`),
     place(dir, `${DB_NAME}.pre-migration-${daysAgo(400)}`),
   ];
   const kept = [
-    place(dir, `${DB_NAME}.corrupt-${daysAgo(29)}`),
+    place(dir, `${DB_NAME}.corrupt-${daysAgo(20)}`),
     place(dir, `${DB_NAME}.pre-migration-${daysAgo(1)}`),
     place(dir, `${DB_NAME}.corrupt-${Date.now() + 90 * DAY_MS}`), // in the future
     // Old timestamps, but not a backup's exact name.
@@ -907,37 +913,50 @@ test('a symlink with a backup\'s name is left alone, and so is what it points to
   assert.equal(fs.readFileSync(target, 'utf8'), 'keep me');
 });
 
-for (const value of ['0', '-5', 'abc', '1.5', '1e3', '36501', '30days']) {
-  test(`CORRUPT_BACKUP_RETENTION_DAYS=${value} falls back to 30 days`, async (t) => {
+for (const value of ['0', '-5', 'abc', '1.5', '1e3', '30days']) {
+  test(`CORRUPT_BACKUP_RETENTION_DAYS=${value} falls back to 21 days`, async (t) => {
     const { dir, dbFile } = makeDbDir(t);
-    const recentBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(29)}`);
-    const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(31)}`);
+    const recentBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(20)}`);
+    const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(22)}`);
     const { getOutput } = await startOn(t, { DB_FILE: dbFile, CORRUPT_BACKUP_RETENTION_DAYS: value });
     assert.equal(exists(dir, recentBackup), true);
     assert.equal(exists(dir, oldBackup), false);
-    assert.match(getOutput(), /CORRUPT_BACKUP_RETENTION_DAYS must be/);
+    assert.match(getOutput(), /CORRUPT_BACKUP_RETENTION_DAYS must be a whole number from 1 to 21/);
   });
 }
 
-test('a valid CORRUPT_BACKUP_RETENTION_DAYS is used, and a value above 30 warns about the promise', async (t) => {
+// Owner decision (2026-11-10): deleted accounts are gone from backups within 30 days, so 21 plus the 7-day hold.
+for (const value of ['22', '30', '60', '36501']) {
+  test(`CORRUPT_BACKUP_RETENTION_DAYS=${value} is capped at 21 days with a warning`, async (t) => {
+    const { dir, dbFile } = makeDbDir(t);
+    const recentBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(20)}`);
+    const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(22)}`);
+    const { getOutput } = await startOn(t, { DB_FILE: dbFile, CORRUPT_BACKUP_RETENTION_DAYS: value });
+    assert.equal(exists(dir, recentBackup), true);
+    assert.equal(exists(dir, oldBackup), false, 'the cap applies, not the value given');
+    assert.match(getOutput(), /CORRUPT_BACKUP_RETENTION_DAYS is above 21 — using 21\. The app tells users backups are removed within 30 days/);
+  });
+}
+
+test('a valid CORRUPT_BACKUP_RETENTION_DAYS up to 21 is used without a warning', async (t) => {
   const { dir, dbFile } = makeDbDir(t);
   const within = place(dir, `${DB_NAME}.corrupt-${daysAgo(5)}`);
   const beyond = place(dir, `${DB_NAME}.corrupt-${daysAgo(8)}`);
   const server = await startOn(t, { DB_FILE: dbFile, CORRUPT_BACKUP_RETENTION_DAYS: '7' });
   assert.equal(exists(dir, within), true);
   assert.equal(exists(dir, beyond), false);
-  assert.doesNotMatch(server.getOutput(), /above 30/);
+  assert.doesNotMatch(server.getOutput(), /CORRUPT_BACKUP_RETENTION_DAYS/);
   await server.stop();
 
-  const longer = await startOn(t, { DB_FILE: dbFile, CORRUPT_BACKUP_RETENTION_DAYS: '60' });
-  assert.match(longer.getOutput(), /above 30/);
+  const atMax = await startOn(t, { DB_FILE: dbFile, CORRUPT_BACKUP_RETENTION_DAYS: '21' });
+  assert.doesNotMatch(atMax.getOutput(), /CORRUPT_BACKUP_RETENTION_DAYS/);
   assert.equal(exists(dir, within), true);
 });
 
-test('a corrupt start purges nothing, then or on the timer', async (t) => {
+test('a corrupt start purges nothing within the 30-day ceiling, then or on the timer', async (t) => {
   const { dir, dbFile } = makeDbDir(t, '{ not json');
-  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
-  const oldMigration = place(dir, `${DB_NAME}.pre-migration-${daysAgo(90)}`);
+  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
+  const oldMigration = place(dir, `${DB_NAME}.pre-migration-${daysAgo(25)}`);
 
   const { getOutput } = await startOn(t, { DB_FILE: dbFile, DB_BACKUP_PURGE_INTERVAL_MS: '200' });
   await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -951,7 +970,7 @@ test('a corrupt start purges nothing, then or on the timer', async (t) => {
 test('a start with no database file purges nothing, and neither do the restarts that follow', async (t) => {
   const { dir, dbFile } = makeDbDir(t);
   fs.rmSync(dbFile);
-  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
+  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
   const server = await startOn(t, { DB_FILE: dbFile });
   assert.equal(exists(dir, oldBackup), true);
   assert.equal(typeof readDb(dbFile).recoveryStartedAt, 'number');
@@ -972,7 +991,7 @@ test('a start with no database file purges nothing, and neither do the restarts 
 
 test('a corrupt start holds the purge across a restart, once real data exists', async (t) => {
   const { dir, dbFile } = makeDbDir(t, '{ not json');
-  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
+  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
   const server = await startOn(t, { DB_FILE: dbFile });
   await devSignIn(server.baseUrl, 'new-user');
   assert.equal(typeof readDb(dbFile).recoveryStartedAt, 'number');
@@ -983,7 +1002,7 @@ test('a corrupt start holds the purge across a restart, once real data exists', 
 });
 
 test('the recovery hold releases by itself after 7 days', async (t) => {
-  const oldName = `${DB_NAME}.corrupt-${daysAgo(90)}`;
+  const oldName = `${DB_NAME}.corrupt-${daysAgo(25)}`;
   const { dir, dbFile } = makeDbDir(t, { dbSchemaVersion: 2, users: [KEEPER], recoveryStartedAt: daysAgo(6) });
   place(dir, oldName);
   const server = await startOn(t, { DB_FILE: dbFile });
@@ -999,7 +1018,7 @@ test('the recovery hold releases by itself after 7 days', async (t) => {
 });
 
 test('a file with no users gets a saved hold, and expired backups still go once it lapses', async (t) => {
-  const oldName = `${DB_NAME}.corrupt-${daysAgo(90)}`;
+  const oldName = `${DB_NAME}.corrupt-${daysAgo(25)}`;
   const { dir, dbFile } = makeDbDir(t, { dbSchemaVersion: 2, users: [] });
   place(dir, oldName);
   const server = await startOn(t, { DB_FILE: dbFile });
@@ -1017,7 +1036,7 @@ test('a file with no users gets a saved hold, and expired backups still go once 
 });
 
 test('the last user deleting their account starts a saved hold on a running server', async (t) => {
-  const oldName = `${DB_NAME}.corrupt-${Date.now() - 30 * DAY_MS + 3000}`;
+  const oldName = `${DB_NAME}.corrupt-${Date.now() - 21 * DAY_MS + 3000}`;
   const { dir, dbFile } = makeDbDir(t);
   place(dir, oldName);
   const { baseUrl } = await startOn(t, { DB_FILE: dbFile, DB_BACKUP_PURGE_INTERVAL_MS: '200' });
@@ -1035,7 +1054,7 @@ for (const [label, prepare] of [
   test(`a ${label} start looks at the backups when its hold ends`, async (t) => {
     const { dir, dbFile } = makeDbDir(t);
     prepare(dbFile);
-    const oldName = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
+    const oldName = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
     await startOn(t, { DB_FILE: dbFile, DB_RECOVERY_PURGE_HOLD_MS: '4000' });
     assert.equal(exists(dir, oldName), true, 'held');
     await waitFor(() => !exists(dir, oldName), 'the hold to end');
@@ -1051,7 +1070,7 @@ const heldUntilIn = (output) => {
 test('the recovery hold is 7 days by default, to the millisecond', async (t) => {
   const startedAt = daysAgo(3);
   const { dir, dbFile } = makeDbDir(t, { dbSchemaVersion: 2, users: [KEEPER], recoveryStartedAt: startedAt });
-  const oldName = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
+  const oldName = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
   const { getOutput } = await startOn(t, { DB_FILE: dbFile });
   assert.equal(heldUntilIn(getOutput()), startedAt + 7 * DAY_MS);
   assert.equal(exists(dir, oldName), true);
@@ -1059,7 +1078,7 @@ test('the recovery hold is 7 days by default, to the millisecond', async (t) => 
 
 test('a recoveryStartedAt ahead of the clock is clamped to now, so it cannot hold the purge for longer', async (t) => {
   const { dir, dbFile } = makeDbDir(t, { dbSchemaVersion: 2, users: [KEEPER], recoveryStartedAt: Date.now() + 365 * DAY_MS });
-  const oldName = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
+  const oldName = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
   const startedBefore = Date.now();
   const { baseUrl, getOutput } = await startOn(t, { DB_FILE: dbFile });
   const startedAfter = Date.now();
@@ -1097,7 +1116,7 @@ test('only temp files of the exact form are removed at load', async (t) => {
 
 test('a start that just migrated keeps its backups until the timer', async (t) => {
   const { dir, dbFile } = makeDbDir(t, { nextDrinkId: 1, users: [KEEPER] }); // no version: the migration runs
-  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(90)}`);
+  const oldBackup = place(dir, `${DB_NAME}.corrupt-${daysAgo(25)}`);
 
   await startOn(t, { DB_FILE: dbFile, DB_BACKUP_PURGE_INTERVAL_MS: '3000' });
 
@@ -1111,7 +1130,7 @@ test('a start that just migrated keeps its backups until the timer', async (t) =
 
 test('the timer removes a backup at the moment it expires, not up to a day later', async (t) => {
   const { dir, dbFile } = makeDbDir(t);
-  const soon = place(dir, `${DB_NAME}.corrupt-${Date.now() - 30 * DAY_MS + 15_000}`);
+  const soon = place(dir, `${DB_NAME}.corrupt-${Date.now() - 21 * DAY_MS + 15_000}`);
   const later = place(dir, `${DB_NAME}.corrupt-${daysAgo(10)}`);
 
   await startOn(t, { DB_FILE: dbFile });

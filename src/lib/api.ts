@@ -151,6 +151,13 @@ export function isAgeRequiredError(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'age_required';
 }
 
+// An admin suspended this account: posting, commenting, partner requests, profile edits and reports are refused.
+export function isAccountSuspendedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.code === 'account_suspended';
+}
+
+export const ACCOUNT_SUSPENDED_ERROR_KEY = 'moderation.actionBlocked';
+
 // For queries about one post. Neither a deleted post nor a missing age confirmation is worth the app's one retry.
 export function retryUnlessNotFound(failureCount: number, error: unknown): boolean {
   return !isNotFoundError(error) && !isAgeRequiredError(error) && failureCount < 1;
@@ -159,6 +166,7 @@ export function retryUnlessNotFound(failureCount: number, error: unknown): boole
 // Translation key for a failed comment POST, shared by the comment drawer and the detail screen.
 export function getCommentErrorKey(error: unknown): string {
   if (!(error instanceof ApiError)) return 'errors.commentFailed';
+  if (isAccountSuspendedError(error)) return ACCOUNT_SUSPENDED_ERROR_KEY;
   if (error.code === 'age_required') return 'ageGate.required';
   if (error.code === 'daily_comment_limit') return 'errors.commentDailyLimit';
   if (error.status === 429) return 'common.tooManyRequests';
@@ -169,6 +177,7 @@ export function getCommentErrorKey(error: unknown): string {
 // Translation keys for a failed report or block, shown inside the actions sheet.
 export function getReportErrorKey(error: unknown): string {
   if (!(error instanceof ApiError)) return 'report.failed';
+  if (isAccountSuspendedError(error)) return ACCOUNT_SUSPENDED_ERROR_KEY;
   if (error.code === 'daily_report_limit') return 'report.dailyLimit';
   if (error.status === 429) return 'common.tooManyRequests';
   if (error.status === 507) return 'common.serviceUnavailable';

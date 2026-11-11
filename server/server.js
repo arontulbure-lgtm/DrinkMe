@@ -281,8 +281,9 @@ app.get('/media/drinks/:id', (req, res) => {
   // An admin must be able to see what they review: a poster who blocks them cannot hide an image. This route only.
   // requireSignedInAdult runs first, so the admin has confirmed 18+ by now and only a block can be bypassed.
   const isReviewAccess = Boolean(found) && ADMIN_USER_IDS.has(viewerId) && !canViewDrink(found, viewerId);
-  // A block answers exactly like a post that does not exist, and neither answer may be reused after an unblock.
-  const drink = found && (isReviewAccess || !isBlockedBetween(found.userId, viewerId)) ? found : undefined;
+  // A block, or a hide after reports, answers exactly like a post that does not exist, and neither
+  // answer may be reused after an unblock or a resolution.
+  const drink = found && (isReviewAccess || (!isBlockedBetween(found.userId, viewerId) && !isDrinkHiddenFrom(found, viewerId))) ? found : undefined;
   // The answer depends on who asks, so a cache must not reuse it for another viewer.
   res.vary('Authorization');
   if (!drink) res.set('Cache-Control', 'no-store');
@@ -296,9 +297,13 @@ app.get('/media/drinks/:id', (req, res) => {
 
 // The v query parameter only makes a new avatar a new URL for image caches. A provider photo is not
 // a data URL, so it gets a 404 and is never fetched through this server.
+// A profile hidden after reports has no avatar for others, the same 404 as none at all.
 app.get('/media/avatars/:userId', (req, res) => {
   const owner = isLiveAccount(req.params.userId) ? userIndex.get(req.params.userId) : undefined;
-  const avatar = owner && !owner.noticePending ? owner.avatar : undefined;
+  const avatar = owner && !owner.noticePending && !isUserHiddenFrom(owner.id, req.userId) ? owner.avatar : undefined;
+  // The answer can depend on who asks while a profile is hidden.
+  res.vary('Authorization');
+  if (avatar === undefined) res.set('Cache-Control', 'no-store');
   sendStoredImage(req, res, `avatar:${req.params.userId}`, avatar);
 });
 
@@ -1060,11 +1065,15 @@ const registerUserIfNeeded = ({ id, email, emailFromToken = false, emailVerified
       ...(nameParts[0] && { nameSetByUser: true }),
       // Cleared by the privacy acknowledgement. Accounts from before the notice never get it.
       noticePending: true,
+      // Read by the auto-hide: a reporter counts only once the account is 48 hours old. Accounts from
+      // before this field have none and count as old enough (see getAutoHideReporterStatus).
+      createdAt: new Date().toISOString(),
     });
   } else {
     const existing = userIndex.get(id);
-    // Never replace an existing avatar: the client sends the Google photo on every app launch.
-    if (photoURL && !existing.avatar && !existing.avatarClearedByAdmin) existing.avatar = photoURL;
+    // Never replace an existing avatar: the client sends the Google photo on every app launch. A suspended
+    // user cannot change their avatar, so sign-in does not set one for them either.
+    if (photoURL && !existing.avatar && !existing.avatarClearedByAdmin && !getActiveSuspension(existing)) existing.avatar = photoURL;
     if (!isOlderIdToken(existing, tokenIat)) {
       if (emailFromToken && email && existing.email !== email) {
         // Compared against the old address, so a changed email cannot unmask the old prefix.
@@ -1536,6 +1545,162 @@ const getVisiblePartnerIds = (ownerId, viewerId) => Array.from(partnersByUser.ge
 // Retention: only the uid, for 1 hour after the deletion finished, and gone within one retry interval after that.
 const ACCOUNT_TOMBSTONE_MS = parseTestOnlyLimit(process.env.ACCOUNT_TOMBSTONE_MS, 60 * 60 * 1000);
 
+// ── Auto-hide after reports ───────────────────────────────────────────────────
+// Owner decision (2026-11-10): a post, comment or profile with this many DISTINCT counting reporters among
+// its open reports is hidden from everyone but its owner and the admins until an admin resolves them.
+// Derived from the open reports and never stored, so resolving them (a dismiss too) unhides it at once.
+// A reporter counts only once their account is AUTO_HIDE_MIN_REPORTER_AGE_MS old and has accepted the
+// privacy notice, so a batch of fresh accounts cannot hide content (lead decision, fix loop 1). Every
+// report still reaches the admin queue. A counting reporter who was blocked keeps counting while the
+// report is open. A deleted one keeps counting only if they counted when the account was deleted: their
+// open reports keep an anonymous id and that fact (see deleteUserDataCascade), and never age into counting.
+const AUTO_HIDE_REPORTER_THRESHOLD = 3;
+const AUTO_HIDE_MIN_REPORTER_AGE_MS = 48 * 60 * 60 * 1000;
+
+// A comment is named by its post too, like the reports do.
+const reportTargetKey = ({ targetType, targetId, drinkId }) => (
+  targetType === 'comment' ? `comment:${drinkId}:${targetId}` : `${targetType}:${targetId}`
+);
+
+// { counts, eligibleAt? }. eligibleAt is when a reporter too new to count will start counting.
+// An account with no createdAt was made before the field existed (2026-11-11), so it counts as old enough.
+// An unreadable createdAt does not count: the safe side.
+const getAutoHideReporterStatus = (user) => {
+  if (!user || user.noticePending) return { counts: false };
+  if (user.createdAt === undefined) return { counts: true };
+  const createdMs = new Date(user.createdAt).getTime();
+  if (!Number.isFinite(createdMs)) return { counts: false };
+  const eligibleAt = createdMs + AUTO_HIDE_MIN_REPORTER_AGE_MS;
+  return Date.now() >= eligibleAt ? { counts: true } : { counts: false, eligibleAt };
+};
+
+// Target key to { all, counting }: Sets of the distinct reporters of its open reports, and of those who
+// count towards the hide. Rebuilt on the first read after a change to the reports, a privacy
+// acknowledgement or an account deletion, and once a new reporter's account becomes old enough. So a feed
+// costs one Map lookup per item, never a scan. Every such change, rollbacks included, calls markReportsChanged.
+let openReportersByTarget = new Map();
+let isReportIndexStale = true;
+let reportIndexRebuildAt = Infinity;
+const markReportsChanged = () => {
+  isReportIndexStale = true;
+};
+
+const getOpenReportersByTarget = () => {
+  if (!isReportIndexStale && Date.now() < reportIndexRebuildAt) return openReportersByTarget;
+  const index = new Map();
+  let rebuildAt = Infinity;
+  for (const report of reports) {
+    if (!isPlainObject(report) || report.status !== 'open' || typeof report.reporterId !== 'string') continue;
+    const key = reportTargetKey(report);
+    if (!index.has(key)) index.set(key, { all: new Set(), counting: new Set() });
+    const entry = index.get(key);
+    entry.all.add(report.reporterId);
+    const status = report.reporterDeleted === true
+      ? { counts: report.countsForAutoHide === true }
+      : getAutoHideReporterStatus(userIndex.get(report.reporterId));
+    if (status.counts) entry.counting.add(report.reporterId);
+    else if (status.eligibleAt !== undefined) rebuildAt = Math.min(rebuildAt, status.eligibleAt);
+  }
+  openReportersByTarget = index;
+  isReportIndexStale = false;
+  reportIndexRebuildAt = rebuildAt;
+  return index;
+};
+
+// Every distinct open reporter, for the admin queue.
+const countOpenReporters = (target) => getOpenReportersByTarget().get(reportTargetKey(target))?.all.size ?? 0;
+// Only those who count towards the hide.
+const countAutoHideReporters = (target) => getOpenReportersByTarget().get(reportTargetKey(target))?.counting.size ?? 0;
+const isTargetAutoHidden = (target) => countAutoHideReporters(target) >= AUTO_HIDE_REPORTER_THRESHOLD;
+
+// ADMIN_USER_IDS is read further down; these run only while requests are served.
+const isAdmin = (uid) => typeof uid === 'string' && ADMIN_USER_IDS.has(uid);
+
+// For everyone but its owner and the admins, hidden content answers exactly like content that does not exist.
+const isHiddenFrom = (target, ownerId, viewerId) => (
+  viewerId !== ownerId && !isAdmin(viewerId) && isTargetAutoHidden(target)
+);
+const isDrinkHiddenFrom = (drink, viewerId) => isHiddenFrom({ targetType: 'drink', targetId: drink.id }, drink.userId, viewerId);
+const isCommentHiddenFrom = (comment, drinkId, viewerId) => (
+  isHiddenFrom({ targetType: 'comment', targetId: comment?.id, drinkId }, comment?.userId, viewerId)
+);
+// A hidden profile is shown stripped, like one whose privacy notice is pending, and is left out of search.
+const isUserHiddenFrom = (userId, viewerId) => isHiddenFrom({ targetType: 'user', targetId: userId }, userId, viewerId);
+
+// ── Suspension ────────────────────────────────────────────────────────────────
+// Owner decision (2026-11-10): an admin can suspend an account. The first suspension lasts 7 days; any
+// later one, with an earlier counted suspension on record, is permanent. It ends by date, or when an admin
+// lifts it. A suspension lifted with void: true was a mistake: it stays in the history, marked voided, and
+// does not count towards "a repeat is permanent". While one is in force a new one is refused
+// (already_suspended) unless the admin sends permanent: true to escalate it (lead decision, fix loop 1).
+// A suspended user can still read, cheer, save, block, log out, delete the account and get their data,
+// but cannot post, comment, send or accept partner requests, change profile text or avatar, or report.
+// The history on the user record keeps only dates, the permanent and voided flags, the reason and admin ids.
+const SUSPENSION_FIRST_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const SUSPENSION_REASON_MAX_LENGTH = 300;
+
+const getSuspensionHistory = (user) => (Array.isArray(user?.suspensions) ? user.suspensions.filter(isPlainObject) : []);
+// The entries that count towards a permanent repeat.
+const getCountedSuspensions = (user) => getSuspensionHistory(user).filter((entry) => entry.voided !== true);
+
+// The latest entry while it is in force. Expiry is read from the date, so nothing runs when it ends.
+const getActiveSuspension = (user) => {
+  const latest = getSuspensionHistory(user).at(-1);
+  if (!latest || latest.endedAt || latest.voided === true) return null;
+  if (latest.permanent === true) return latest;
+  return new Date(latest.until).getTime() > Date.now() ? latest : null;
+};
+
+// until is null for a permanent suspension.
+const toSuspensionState = (suspension) => ({
+  suspendedUntil: suspension.permanent === true ? null : suspension.until,
+  suspendedPermanently: suspension.permanent === true,
+});
+
+const respondAccountSuspended = (res, suspension) => {
+  const { suspendedUntil } = toSuspensionState(suspension);
+  return res.status(403).json({
+    error: suspendedUntil
+      ? `Your account is suspended until ${suspendedUntil}, so you cannot do this.`
+      : 'Your account is suspended, so you cannot do this.',
+    code: 'account_suspended',
+    until: suspendedUntil,
+  });
+};
+
+// Runs after requireAuth and any ownership check, and before a body parser or upload.
+const refuseIfSuspended = (req, res, next) => {
+  const suspension = getActiveSuspension(userIndex.get(req.userId));
+  if (suspension) return respondAccountSuspended(res, suspension);
+  next();
+};
+
+// Adds a suspension and returns the undo, for a save that fails. The history is replaced, never changed in place.
+// forcePermanent: the admin asked for a permanent suspension.
+const suspendUser = (user, adminId, reason, { forcePermanent = false } = {}) => {
+  const previous = user.suspensions;
+  const now = Date.now();
+  const permanent = forcePermanent || getCountedSuspensions(user).length > 0;
+  user.suspensions = [...getSuspensionHistory(user), {
+    at: new Date(now).toISOString(),
+    until: permanent ? null : new Date(now + SUSPENSION_FIRST_DURATION_MS).toISOString(),
+    permanent,
+    reason: reason || null,
+    by: adminId,
+  }];
+  return () => {
+    if (previous === undefined) delete user.suspensions;
+    else user.suspensions = previous;
+  };
+};
+
+// True when a suspension is in force and the request does not escalate it: a double tap, or a second
+// report on the same user, must not turn a 7-day suspension into a permanent one by accident.
+const isAlreadySuspended = (user, forcePermanent) => {
+  const active = getActiveSuspension(user);
+  return Boolean(active) && (!forcePermanent || active.permanent === true);
+};
+
 // ── Report retention ──────────────────────────────────────────────────────────
 const RESOLVED_REPORTER_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -1606,8 +1771,10 @@ const isAgeConfirmed = (userId) => {
 // requireSignedInAdult already refuses unconfirmed and logged-out viewers on every route; this stays as
 // defence in depth, and for blocks, which still matter per post.
 const isAlcoholicDrink = (drink) => drink.isAlcoholic !== false;
+// Content hidden after reports is refused here too, so every list and route that uses this leaves it out.
 const canViewDrink = (drink, viewerId) => (
-  !isBlockedBetween(drink.userId, viewerId) && (!isAlcoholicDrink(drink) || isAgeConfirmed(viewerId))
+  !isBlockedBetween(drink.userId, viewerId) && !isDrinkHiddenFrom(drink, viewerId)
+  && (!isAlcoholicDrink(drink) || isAgeConfirmed(viewerId))
 );
 
 const respondAgeRequired = (res) => res.status(403).json({
@@ -1665,10 +1832,10 @@ function requireSignedInAdult(req, res, next) {
   next();
 }
 
-// For a post canViewDrink refused. A block comes first and reads exactly like a post that does not
-// exist, so the answer says nothing about the post's flag or the viewer's age.
+// For a post canViewDrink refused. A block or a hide after reports comes first and reads exactly like a
+// post that does not exist, so the answer says nothing about the post's flag or the viewer's age.
 const respondDrinkHidden = (res, drink, viewerId) => (
-  isBlockedBetween(drink.userId, viewerId)
+  isBlockedBetween(drink.userId, viewerId) || isDrinkHiddenFrom(drink, viewerId)
     ? res.status(404).json({ error: 'Drink not found' })
     : respondAgeRequired(res)
 );
@@ -1691,10 +1858,12 @@ const toVisibleNotification = ({ drinkId, actorId, ...notification }, viewerId) 
 
 // What other users may see. An allowlist, so a new field on the user record stays private by default.
 // ageConfirmed must stay owner-only (toOwnerUser): the client takes its presence as proof that a JWT is the owner's.
-const toPublicUser = (user) => {
+// viewerId: who asks. Without it, a profile hidden after reports is always shown stripped.
+const toPublicUser = (user, viewerId) => {
   if (!user) return undefined;
   // Hidden until the owner has read what becomes public, so a user who leaves at the notice was never public.
-  if (user.noticePending) return { id: user.id, lastName: '', city: '', bio: '', avatar: null };
+  // A profile hidden after reports looks the same to others, so the answer does not tell the two apart.
+  if (user.noticePending || isUserHiddenFrom(user.id, viewerId)) return { id: user.id, lastName: '', city: '', bio: '', avatar: null };
   const { id, firstName, lastName, city, bio } = user;
   return { id, ...(!isEmailDerivedName(user) && { firstName }), lastName, city, bio, avatar: toAvatarUrl(user) };
 };
@@ -1705,7 +1874,8 @@ const toPublicUser = (user) => {
 // and the highest is stored, so older builds still answering their own notice are never stranded.
 // Its partner sentence is untrue with PARTNER_CONSENT_REQUIRED=false, an emergency rollback only: anyone
 // can then add themselves and read the list.
-// Version 2: nothing is visible without signing in (requireSignedInAdult).
+// Version 2: nothing is visible without signing in (requireSignedInAdult). Still unreleased, it also
+// covers the hide after reports, suspensions and the 30-day backup rule (owner decisions of 2026-11-10).
 const PRIVACY_NOTICE_VERSION = 2;
 
 const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVersion) ? user.privacyNoticeVersion : null);
@@ -1715,6 +1885,7 @@ const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVe
 // A masked name still comes back in firstName, to the owner only.
 const toOwnerUser = (user) => {
   const { id, email, emailVerified, firstName, lastName, city, bio } = user;
+  const suspension = getActiveSuspension(user);
   return {
     id,
     email,
@@ -1727,11 +1898,17 @@ const toOwnerUser = (user) => {
     ageConfirmed: isAgeConfirmed(id),
     needsName: !firstName || isEmailDerivedName(user),
     privacyNoticeVersion: getPrivacyNoticeVersion(user),
+    // Only while true, so the client can explain it.
+    ...(isTargetAutoHidden({ targetType: 'user', targetId: id }) && { hiddenPendingReview: true }),
+    ...(suspension && toSuspensionState(suspension)),
   };
 };
 
 const getPublicName = (publicUser) => `${publicUser.firstName ?? ''} ${publicUser.lastName ?? ''}`.trim();
 
+// No viewer is passed on purpose: the result is stored in notification text that other users read, so a
+// profile hidden after reports is stored as "Someone". That stays even after the profile is unhidden,
+// which is deliberate: a stored notification must never leak a name that was hidden when it was made.
 const getDisplayName = (userId) => {
   const publicUser = toPublicUser(userIndex.get(userId));
   return (publicUser && getPublicName(publicUser)) || 'Someone';
@@ -1745,18 +1922,22 @@ const decorateDrink = (drink, currentUserId) => {
   return {
     ...drink,
     imageUrl: toDrinkImageUrl(drink),
-    user: toPublicUser(user),
+    user: toPublicUser(user, currentUserId),
     isLiked:   likedSet.has(drink.id),
     isSaved:   savedSet.has(drink.id),
     isPartner: currentUserId
       ? (partnerSet.has(drink.userId) || drink.userId === currentUserId)
       : false,
+    // Only the owner and the admins ever get a hidden post, so only they see this.
+    ...(isTargetAutoHidden({ targetType: 'drink', targetId: drink.id }) && { hiddenPendingReview: true }),
   };
 };
 
-const decorateComment = (comment) => ({
+// drinkId: the post the comment is listed under, which is how reports name it.
+const decorateComment = (comment, viewerId, drinkId = comment.drinkId) => ({
   ...comment,
-  user: toPublicUser(userIndex.get(comment.userId)),
+  user: toPublicUser(userIndex.get(comment.userId), viewerId),
+  ...(isTargetAutoHidden({ targetType: 'comment', targetId: comment.id, drinkId }) && { hiddenPendingReview: true }),
 });
 
 const toDataUrl = (buffer, mime = 'image/jpeg') => {
@@ -1907,14 +2088,38 @@ const deleteUserDataCascade = (uid) => {
   }
 
   // Reports and notifications first: finding them needs the posts, comments and name removed below.
+  // An open report the user filed about someone else stays, under an anonymous reporter id and without
+  // its details, so it still reaches the admin queue. One id for all of them, so they stay one reporter.
+  // It keeps counting towards the auto-hide only if the user counted at this moment (old enough, notice
+  // accepted): the flag is fixed here, so a deleted account never ages into counting. The flag is a plain
+  // boolean, which says nothing more about the person. Their resolved reports go, as before.
+  const anonymousReporterId = `deleted-${crypto.randomBytes(8).toString('hex')}`;
+  const countedForAutoHide = getAutoHideReporterStatus(user).counts;
   for (let index = reports.length - 1; index >= 0; index--) {
     const report = reports[index];
-    const isAboutUser = report.reporterId === uid
-      || (report.targetType === 'user' && report.targetId === uid)
+    const isAboutUser = (report.targetType === 'user' && report.targetId === uid)
       || (report.targetType === 'drink' && ownDrinkIds.has(report.targetId))
       || (report.targetType === 'comment' && (ownCommentKeys.has(`${report.drinkId}:${report.targetId}`) || ownDrinkIds.has(report.drinkId)));
-    if (isAboutUser) reports.splice(index, 1);
-    else if (report.resolvedBy === uid) delete report.resolvedBy;
+    const isOwnReport = report.reporterId === uid;
+    if (isAboutUser || (isOwnReport && report.status !== 'open')) {
+      reports.splice(index, 1);
+      continue;
+    }
+    if (isOwnReport) {
+      Object.assign(report, { reporterId: anonymousReporterId, details: null, reporterDeleted: true, countsForAutoHide: countedForAutoHide });
+    }
+    if (report.resolvedBy === uid) delete report.resolvedBy;
+  }
+  markReportsChanged();
+  // Another account's suspension history names the admin who acted; that id goes with the admin's account.
+  for (const other of userIndex.values()) {
+    const history = getSuspensionHistory(other);
+    if (!history.some((entry) => entry.by === uid || entry.endedBy === uid)) continue;
+    other.suspensions = history.map(({ by, endedBy, ...entry }) => ({
+      ...entry,
+      ...(by !== undefined && by !== uid && { by }),
+      ...(endedBy !== undefined && endedBy !== uid && { endedBy }),
+    }));
   }
   const legacyPrefixes = user ? toLegacyNotificationPrefixes(user) : [];
   for (const [ownerId, list] of notificationsByUser) {
@@ -2287,8 +2492,10 @@ app.get('/api/users/search', requireAuth, searchLimiter, (req, res) => {
   const normalized    = (req.query.q ?? '').toString().trim().replace(/^@+/, '').toLowerCase();
   if (normalized.length < USER_SEARCH_MIN_QUERY_LENGTH) return res.json([]);
   const allUsers      = Array.from(userIndex.values())
-    .filter((user) => isLiveAccount(user.id) && !user.noticePending && !isBlockedBetween(req.userId, user.id))
-    .map(toPublicUser);
+    .filter((user) => (
+      isLiveAccount(user.id) && !user.noticePending && !isBlockedBetween(req.userId, user.id) && !isUserHiddenFrom(user.id, req.userId)
+    ))
+    .map((user) => toPublicUser(user, req.userId));
   // Only public fields are searched: matching on email would let anyone test for an address.
   const filtered = allUsers
     .filter((c) => (
@@ -2310,7 +2517,7 @@ app.get('/api/users/:id', (req, res) => {
   if (viewerId === user.id) return res.json({ ...toOwnerUser(user), partnerCount: getVisiblePartnerIds(user.id, viewerId).length });
   // No logged-out branch: requireSignedInAdult answers 401 before this route.
   res.json({
-    ...toPublicUser(user),
+    ...toPublicUser(user, viewerId),
     partnerStatus: getPartnerStatus(viewerId, user.id),
     ...(isListedPartner(user.id, viewerId) && { partnerCount: getVisiblePartnerIds(user.id, viewerId).length }),
   });
@@ -2326,7 +2533,7 @@ app.get('/api/users/:id/partners', requireAuth, (req, res) => {
   }
   const requesterPartners = ensurePartnerSet(requesterId);
   res.json(getVisiblePartnerIds(targetId, requesterId)
-    .map((id) => ({ ...toPublicUser(userIndex.get(id)), isPartner: requesterPartners.has(id) })));
+    .map((id) => ({ ...toPublicUser(userIndex.get(id), requesterId), isPartner: requesterPartners.has(id) })));
 });
 
 app.put('/api/users/:id', requireAuth, (req, res) => {
@@ -2334,6 +2541,8 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
   if (req.userId !== req.params.id) {
     return res.status(403).json({ error: 'Forbidden: cannot edit another user\'s profile' });
   }
+  const suspension = getActiveSuspension(userIndex.get(req.userId));
+  if (suspension) return respondAccountSuspended(res, suspension);
   const user = userIndex.get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const { firstName, lastName, city, bio, nameChosen } = req.body || {};
@@ -2400,7 +2609,10 @@ app.post('/api/users/:id/acknowledgements', requireAuth, (req, res) => {
       user.privacyNoticeAt = new Date().toISOString();
     }
     delete user.noticePending;
+    // The user's open reports may now count towards an auto-hide.
+    markReportsChanged();
     if (!saveDbOrRespond(res)) {
+      markReportsChanged();
       if (previousVersion === undefined) delete user.privacyNoticeVersion;
       else user.privacyNoticeVersion = previousVersion;
       if (previousAt === undefined) delete user.privacyNoticeAt;
@@ -2429,7 +2641,7 @@ const requireAvatarOwner = (req, res, next) => {
   next();
 };
 
-app.post('/api/users/:id/avatar', requireAuth, requireAvatarOwner, avatarBodyParser, parseUpload(avatarUpload.single('avatar')), (req, res) => {
+app.post('/api/users/:id/avatar', requireAuth, requireAvatarOwner, refuseIfSuspended, avatarBodyParser, parseUpload(avatarUpload.single('avatar')), (req, res) => {
   // The account can have been deleted while the body arrived, after requireAuth.
   if (!isLiveAccount(req.userId)) return res.status(401).json({ error: 'Authentication required' });
   const user = userIndex.get(req.params.id);
@@ -2575,7 +2787,7 @@ app.get('/api/drink-partners', requireAuth, (req, res) => {
   const partnerSet = Array.from(ensurePartnerSet(req.userId));
   res.json(partnerSet
     .filter((id) => isLiveAccount(id) && !isBlockedBetween(req.userId, id))
-    .map((id) => toPublicUser(userIndex.get(id)))
+    .map((id) => toPublicUser(userIndex.get(id), req.userId))
     .filter(Boolean));
 });
 
@@ -2607,18 +2819,19 @@ const acceptPartnerRequestOrRespond = (res, userId, fromId) => (
   ))
 );
 
-const toPartnerRequestUsers = (requests) => requests
-  .map(({ otherId, createdAt }) => ({ ...toPublicUser(userIndex.get(otherId)), createdAt }))
+const toPartnerRequestUsers = (requests, viewerId) => requests
+  .map(({ otherId, createdAt }) => ({ ...toPublicUser(userIndex.get(otherId), viewerId), createdAt }))
   .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
 app.get('/api/drink-partners/requests', requireAuth, (req, res) => {
   res.json({
-    incoming: toPartnerRequestUsers(getIncomingPartnerRequests(req.userId)),
-    outgoing: toPartnerRequestUsers(getOutgoingPartnerRequests(req.userId)),
+    incoming: toPartnerRequestUsers(getIncomingPartnerRequests(req.userId), req.userId),
+    outgoing: toPartnerRequestUsers(getOutgoingPartnerRequests(req.userId), req.userId),
   });
 });
 
-app.post('/api/drink-partners/requests/:fromId/accept', requireAuth, (req, res) => {
+// Comments and partner requests are the app's messaging, so a suspension refuses both sending and accepting.
+app.post('/api/drink-partners/requests/:fromId/accept', requireAuth, refuseIfSuspended, (req, res) => {
   const userId = req.userId;
   const fromId = req.params.fromId;
   if (!isLivePartnerRequest(fromId, userId)) return res.status(404).json({ error: 'Request not found' });
@@ -2644,7 +2857,7 @@ app.delete('/api/drink-partners/requests/:fromId', requireAuth, (req, res) => {
 });
 
 // Not a toggle: a partner is removed through DELETE below, so a repeat never undoes anything.
-app.post('/api/drink-partners/:targetId', requireAuth, (req, res) => {
+app.post('/api/drink-partners/:targetId', requireAuth, refuseIfSuspended, (req, res) => {
   const userId   = req.userId;
   const targetId = req.params.targetId;
   if (!isLiveAccount(targetId)) return res.status(404).json({ error: 'User not found' });
@@ -2712,7 +2925,7 @@ app.get('/api/friends/count', requireAuth, (req, res) => {
 });
 
 app.get('/api/stories', (req, res) => {
-  res.json(stories.map((story) => ({ ...story, user: toPublicUser(userIndex.get(story.userId)) })));
+  res.json(stories.map((story) => ({ ...story, user: toPublicUser(userIndex.get(story.userId), getUserId(req)) })));
 });
 
 app.get('/api/drinks', (req, res) => {
@@ -2785,13 +2998,16 @@ app.get('/api/drinks/:id/comments', (req, res) => {
   if (!drink) return res.status(404).json({ error: 'Drink not found' });
   const viewerId = getUserId(req);
   if (!canViewDrink(drink, viewerId)) return respondDrinkHidden(res, drink, viewerId);
-  // Before paging. The author of a comment can be blocked when the post's owner is not.
-  const visibleComments = (commentsByDrink.get(drinkId) ?? []).filter((comment) => !isBlockedBetween(comment?.userId, viewerId));
+  // Before paging. The author of a comment can be blocked when the post's owner is not, and a comment
+  // can be hidden after reports for everyone but its author and the admins.
+  const visibleComments = (commentsByDrink.get(drinkId) ?? []).filter((comment) => (
+    !isBlockedBetween(comment?.userId, viewerId) && !isCommentHiddenFrom(comment, drinkId, viewerId)
+  ));
   const { items, nextCursor } = paginateById(visibleComments, page);
-  res.json({ items: items.map(decorateComment), nextCursor });
+  res.json({ items: items.map((comment) => decorateComment(comment, viewerId, drinkId)), nextCursor });
 });
 
-app.post('/api/drinks/:id/comments', requireAuth, (req, res) => {
+app.post('/api/drinks/:id/comments', requireAuth, refuseIfSuspended, (req, res) => {
   const currentUserId = req.userId;
   const drinkId = parsePositiveInteger(req.params.id);
   const { content } = req.body || {};
@@ -2836,7 +3052,7 @@ app.post('/api/drinks/:id/comments', requireAuth, (req, res) => {
     }
     return;
   }
-  res.status(201).json(decorateComment(comment));
+  res.status(201).json(decorateComment(comment, currentUserId, drinkId));
 });
 
 // No growth check, like deleting a post. A comment's author and the post's owner can always remove
@@ -2850,7 +3066,9 @@ app.delete('/api/drinks/:id/comments/:commentId', requireAuth, (req, res) => {
   const comment = (commentsByDrink.get(drinkId) ?? []).find((item) => item?.id === commentId);
   const canRemove = drink.userId === currentUserId || comment?.userId === currentUserId;
   if (!canRemove && !canViewDrink(drink, currentUserId)) return respondDrinkHidden(res, drink, currentUserId);
-  if (!comment || (!canRemove && isBlockedBetween(comment.userId, currentUserId))) {
+  // A comment hidden after reports is missing for everyone else, but the post's owner may still remove it
+  // from their own post (lead decision, fix loop 1), even though their comment list leaves it out.
+  if (!comment || (!canRemove && isBlockedBetween(comment.userId, currentUserId)) || (!canRemove && isCommentHiddenFrom(comment, drinkId, currentUserId))) {
     return res.status(404).json({ error: 'Comment not found' });
   }
   if (!canRemove) return res.status(403).json({ error: 'Forbidden' });
@@ -2871,7 +3089,7 @@ app.get('/api/drinks/user/:userId', (req, res) => {
   res.json({ items: items.map((d) => decorateDrink(d, currentUserId)), nextCursor, total: list.length });
 });
 
-app.post('/api/drinks', requireAuth, postBodyParser, (req, res) => {
+app.post('/api/drinks', requireAuth, refuseIfSuspended, postBodyParser, (req, res) => {
   // The account can have been deleted while the body arrived, after requireAuth.
   if (!isLiveAccount(req.userId)) return res.status(401).json({ error: 'Authentication required' });
   const currentUserId = req.userId;
@@ -3083,7 +3301,7 @@ const BLOCKS_MAX_PER_USER = 200;
 app.get('/api/blocks', requireAuth, (req, res) => {
   const blocked = Array.from(blocksByUser.get(req.userId) ?? []);
   res.json(blocked.map((id) => {
-    const user = isLiveAccount(id) ? toPublicUser(userIndex.get(id)) : undefined;
+    const user = isLiveAccount(id) ? toPublicUser(userIndex.get(id), req.userId) : undefined;
     if (!user || !hasBlocked(id, req.userId)) return user;
     // They blocked the caller too, so only what the caller needs to recognize the entry.
     return { id: user.id, firstName: user.firstName, lastName: user.lastName };
@@ -3194,12 +3412,13 @@ const findVisibleTargetOwner = (targetType, targetId, viewerId) => {
   const found = findComment(targetId);
   const drink = found && drinks.find((d) => d.id === found.drinkId);
   return drink && !isAccountDeletionPending(found.comment.userId) && canViewDrink(drink, viewerId) && !isBlockedBetween(found.comment.userId, viewerId)
+    && !isCommentHiddenFrom(found.comment, found.drinkId, viewerId)
     ? found.comment.userId
     : null;
 };
 
 // The answer holds only the id: reporter and details are for admins.
-app.post('/api/reports', requireAuth, (req, res) => {
+app.post('/api/reports', requireAuth, refuseIfSuspended, (req, res) => {
   const reporterId = req.userId;
   const { targetType, reason, details } = req.body || {};
   if (!REPORT_TARGET_TYPES.has(targetType) || !REPORT_REASONS.has(reason)) {
@@ -3242,8 +3461,10 @@ app.post('/api/reports', requireAuth, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   reports.push(report);
+  markReportsChanged();
   if (!saveDbOrRespond(res)) {
     reports.pop();
+    markReportsChanged();
     nextReportId = report.id;
     return;
   }
@@ -3251,27 +3472,56 @@ app.post('/api/reports', requireAuth, (req, res) => {
 });
 
 // Public fields only, so the target user's email never reaches a report. Null once the target is gone.
-const toAdminReportTarget = ({ targetType, targetId, drinkId }) => {
-  if (targetType === 'user') return toPublicUser(userIndex.get(targetId)) ?? null;
+// viewerId is the admin, who sees a profile hidden after reports in full.
+const toAdminReportTarget = ({ targetType, targetId, drinkId }, viewerId) => {
+  if (targetType === 'user') return toPublicUser(userIndex.get(targetId), viewerId) ?? null;
   if (targetType === 'drink') {
     const drink = drinks.find((d) => d.id === targetId);
     if (!drink) return null;
     const { id, userId, name, description, location, isAlcoholic, createdAt } = drink;
-    return { id, userId, name, description, location, isAlcoholic, createdAt, imageUrl: toDrinkImageUrl(drink), user: toPublicUser(userIndex.get(userId)) };
+    return { id, userId, name, description, location, isAlcoholic, createdAt, imageUrl: toDrinkImageUrl(drink), user: toPublicUser(userIndex.get(userId), viewerId) };
   }
   const comment = (commentsByDrink.get(drinkId) ?? []).find((item) => item?.id === targetId);
   if (!comment) return null;
   const { id, userId, content, createdAt } = comment;
-  return { id, drinkId, userId, content, createdAt, user: toPublicUser(userIndex.get(userId)) };
+  return { id, drinkId, userId, content, createdAt, user: toPublicUser(userIndex.get(userId), viewerId) };
 };
-const toAdminReport = (report) => ({ ...report, target: toAdminReportTarget(report) });
+const toAdminReport = (report, viewerId) => ({ ...report, target: toAdminReportTarget(report, viewerId) });
+
+// Owner decision (2026-11-10): an open report should be reviewed within this time.
+const REPORT_REVIEW_TARGET_MS = 24 * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
+
+const reportAgeMs = (report, now) => now - new Date(report.createdAt).getTime();
+const isReportOverdue = (report, now) => report.status === 'open' && reportAgeMs(report, now) > REPORT_REVIEW_TARGET_MS;
+
+// Fields added for the review queue only; the stored report has none of them.
+// openReporterCount: every distinct open reporter. autoHideReporterCount: those who count towards the
+// hide (account 48 hours old and notice accepted), so an admin can see a hide that a batch of new accounts did not reach.
+const toAdminReportListItem = (report, viewerId, now) => {
+  const ageMs = reportAgeMs(report, now);
+  return {
+    ...toAdminReport(report, viewerId),
+    ageHours: Number.isFinite(ageMs) ? Math.max(0, Math.floor(ageMs / MS_PER_HOUR)) : null,
+    overdue: isReportOverdue(report, now),
+    openReporterCount: countOpenReporters(report),
+    autoHideReporterCount: countAutoHideReporters(report),
+    autoHidden: isTargetAutoHidden(report),
+  };
+};
 
 // Oldest first and with no paging, so working through the queue reaches every report.
+// overdueCount always counts the open queue, whichever status is listed.
 app.get('/api/admin/reports', requireAuth, requireAdmin, (req, res) => {
   const { status = 'open' } = req.query;
   if (status !== 'open' && status !== 'resolved') return res.status(400).json({ error: 'Invalid status' });
+  const now = Date.now();
   const matching = reports.filter((r) => r.status === status);
-  res.json({ items: matching.slice(0, ADMIN_REPORTS_MAX_ITEMS).map(toAdminReport), total: matching.length });
+  res.json({
+    items: matching.slice(0, ADMIN_REPORTS_MAX_ITEMS).map((r) => toAdminReportListItem(r, req.userId, now)),
+    total: matching.length,
+    overdueCount: reports.filter((r) => isReportOverdue(r, now)).length,
+  });
 });
 
 // Returns the undo, or null when the target is already gone.
@@ -3281,13 +3531,58 @@ const removeReportTarget = ({ targetType, targetId, drinkId }) => {
   return deleteCommentFromDrink(drinkId, targetId);
 };
 
+// Whose content a report names, or undefined once it is gone.
+const findReportTargetOwnerId = ({ targetType, targetId, drinkId }) => {
+  if (targetType === 'user') return targetId;
+  if (targetType === 'drink') return drinks.find((d) => d.id === targetId)?.userId;
+  return (commentsByDrink.get(drinkId) ?? []).find((item) => item?.id === targetId)?.userId;
+};
+
+const respondCannotSuspendAdmin = (res) => res.status(403).json({ error: 'An admin account cannot be suspended.', code: 'cannot_suspend_admin' });
+
+// The account an admin may suspend, or null once a response was sent.
+const findSuspendableUser = (res, userId) => {
+  const user = typeof userId === 'string' && isLiveAccount(userId) ? userIndex.get(userId) : undefined;
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return null;
+  }
+  // Covers the admin's own account too.
+  if (isAdmin(userId)) {
+    respondCannotSuspendAdmin(res);
+    return null;
+  }
+  return user;
+};
+
+// suspensionCount counts the suspensions that count towards a permanent repeat, so not voided ones.
+const toAdminSuspensionResult = (user) => {
+  const suspension = getActiveSuspension(user);
+  return {
+    userId: user.id,
+    suspended: Boolean(suspension),
+    suspendedUntil: suspension ? toSuspensionState(suspension).suspendedUntil : null,
+    suspendedPermanently: suspension ? suspension.permanent === true : false,
+    suspensionCount: getCountedSuspensions(user).length,
+  };
+};
+
+const ALREADY_SUSPENDED_MESSAGE = 'This account is already suspended. Send permanent: true to make it permanent.';
+
 // Either action resolves every open report on the same target. No growth check: this frees storage.
+// suspend: true also suspends the owner of the reported content (see suspendUser), and permanent: true makes
+// that suspension permanent. Checked before anything changes: an admin owner (403) or content that is
+// already gone (409 suspend_target_gone) resolves nothing. An owner who is already suspended is not
+// suspended again unless permanent: true escalates it; the report is still resolved, and the answer's
+// suspension says applied: false with code already_suspended.
 app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res) => {
   const reportId = parsePositiveInteger(req.params.id);
   const report = reports.find((r) => r.id === reportId);
   if (!report) return res.status(404).json({ error: 'Report not found' });
-  const { action } = req.body || {};
+  const { action, suspend, permanent } = req.body || {};
   if (!['dismiss', 'remove_content', 'clear_profile'].includes(action)) return res.status(400).json({ error: 'Invalid action' });
+  if (suspend !== undefined && typeof suspend !== 'boolean') return res.status(400).json({ error: 'Invalid suspend' });
+  if (permanent !== undefined && typeof permanent !== 'boolean') return res.status(400).json({ error: 'Invalid permanent' });
   if (action === 'remove_content' && report.targetType === 'user') {
     return res.status(400).json({ error: 'A user cannot be removed this way' });
   }
@@ -3295,6 +3590,18 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
     return res.status(400).json({ error: 'Only a user profile can be cleared' });
   }
   if (report.status !== 'open') return res.status(409).json({ error: 'Report already resolved' });
+  // Before the removal below, which would lose who owned the content.
+  let userToSuspend = null;
+  if (suspend === true) {
+    const ownerId = findReportTargetOwnerId(report);
+    if (typeof ownerId !== 'string' || !isLiveAccount(ownerId)) {
+      return res.status(409).json({ error: 'The reported content or its owner no longer exists.', code: 'suspend_target_gone' });
+    }
+    userToSuspend = findSuspendableUser(res, ownerId);
+    if (!userToSuspend) return;
+  }
+  const forcePermanent = permanent === true;
+  const skipsSuspension = Boolean(userToSuspend) && isAlreadySuspended(userToSuspend, forcePermanent);
 
   const undoRemoval = action === 'dismiss' ? null : removeReportTarget(report);
   const removed = Boolean(undoRemoval); // false for a target that was already gone
@@ -3304,8 +3611,14 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
   ));
   const previousDetails = resolved.map((item) => item.details);
   for (const item of resolved) Object.assign(item, { status: 'resolved', action, removed, details: null, resolvedAt, resolvedBy: req.userId });
+  markReportsChanged();
   pruneResolvedReporters();
+  // The reason names the report and its fixed reason code, never the reporter's text.
+  const undoSuspension = userToSuspend && !skipsSuspension
+    ? suspendUser(userToSuspend, req.userId, `report ${report.id}: ${report.reason}`, { forcePermanent })
+    : null;
   if (!saveDbOrRespond(res)) {
+    undoSuspension?.();
     undoRemoval?.();
     resolved.forEach((item, index) => {
       item.status = 'open';
@@ -3315,9 +3628,63 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
       delete item.resolvedAt;
       delete item.resolvedBy;
     });
+    markReportsChanged();
     return;
   }
-  res.json(toAdminReport(report));
+  res.json({
+    ...toAdminReport(report, req.userId),
+    ...(userToSuspend && {
+      suspension: {
+        ...toAdminSuspensionResult(userToSuspend),
+        applied: !skipsSuspension,
+        ...(skipsSuspension && { code: 'already_suspended' }),
+      },
+    }),
+  });
+});
+
+// Optional { reason } (up to 300 characters) and { permanent: true }. A first suspension lasts 7 days, any
+// later counted one is permanent. One in force answers 409 already_suspended with the current state,
+// unless permanent: true escalates a temporary one, so a double tap changes nothing.
+// No growth check: the entry is small, and moderation must keep working once storage is full.
+app.post('/api/admin/users/:id/suspend', requireAuth, requireAdmin, (req, res) => {
+  const { reason, permanent } = req.body || {};
+  if (reason !== undefined && reason !== null && typeof reason !== 'string') return res.status(400).json({ error: 'Invalid reason' });
+  if (permanent !== undefined && typeof permanent !== 'boolean') return res.status(400).json({ error: 'Invalid permanent' });
+  const user = findSuspendableUser(res, req.params.id);
+  if (!user) return;
+  const forcePermanent = permanent === true;
+  if (isAlreadySuspended(user, forcePermanent)) {
+    return res.status(409).json({ error: ALREADY_SUSPENDED_MESSAGE, code: 'already_suspended', ...toAdminSuspensionResult(user) });
+  }
+  const undoSuspension = suspendUser(user, req.userId, sanitizeOptional(reason, SUSPENSION_REASON_MAX_LENGTH), { forcePermanent });
+  if (!saveDbOrRespond(res)) {
+    undoSuspension();
+    return;
+  }
+  res.json(toAdminSuspensionResult(user));
+});
+
+// Ends a suspension in force now. The entry stays in the history, so a later suspension is still permanent,
+// unless { void: true } marks it voided: a suspension made by mistake, kept for the record, that does not
+// count towards a permanent repeat. Nothing in force: nothing changes.
+app.post('/api/admin/users/:id/unsuspend', requireAuth, requireAdmin, (req, res) => {
+  const { void: isVoid } = req.body || {};
+  if (isVoid !== undefined && typeof isVoid !== 'boolean') return res.status(400).json({ error: 'Invalid void' });
+  const user = isLiveAccount(req.params.id) ? userIndex.get(req.params.id) : undefined;
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const active = getActiveSuspension(user);
+  if (!active) return res.json(toAdminSuspensionResult(user));
+  const previous = user.suspensions;
+  const endedAt = new Date().toISOString();
+  user.suspensions = getSuspensionHistory(user).map((entry) => (
+    entry === active ? { ...entry, endedAt, endedBy: req.userId, ...(isVoid === true && { voided: true }) } : entry
+  ));
+  if (!saveDbOrRespond(res)) {
+    user.suspensions = previous;
+    return;
+  }
+  res.json(toAdminSuspensionResult(user));
 });
 
 // ── AI endpoints (off unless AI_ENABLED=true; the client flags are separate) ───
@@ -3616,10 +3983,14 @@ app.use((err, req, res, next) => {
 
 // ── Backup retention ──────────────────────────────────────────────────────────
 // Corrupt and pre-migration backups hold personal data, including of deleted accounts, and cannot be
-// edited person by person. The app tells users they are gone within 40 days: these 30, plus up to 7 for
-// the recovery hold below, and a little for a purge that waits for a healthy start.
-const DEFAULT_DB_BACKUP_RETENTION_DAYS = 30;
-const DB_BACKUP_RETENTION_MAX_DAYS = 36_500; // keeps the dates below valid
+// edited person by person. Owner decision (2026-11-10): a deleted account is gone from backups within
+// 30 days, and the app says so. These 21 days plus up to 7 for the recovery hold below make 28, which
+// leaves 2 days for a purge that waits for a healthy start. Whatever happens, DB_BACKUP_HARD_MAX_DAYS
+// (30) is a ceiling no backup outlives, recovery hold or not. The scheduled backups of scripts/backup.js
+// (7 daily, 4 weekly) stay within 30 days on their own.
+const DEFAULT_DB_BACKUP_RETENTION_DAYS = 21;
+// The most CORRUPT_BACKUP_RETENTION_DAYS may give: a longer period would break the promise above.
+const DB_BACKUP_RETENTION_MAX_DAYS = DEFAULT_DB_BACKUP_RETENTION_DAYS;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DB_BACKUP_PURGE_INTERVAL_MS = parseTestOnlyLimit(process.env.DB_BACKUP_PURGE_INTERVAL_MS, MS_PER_DAY);
 const DB_BACKUP_PURGE_MIN_WAIT_MS = 1000;
@@ -3627,22 +3998,28 @@ const DB_BACKUP_MARKERS = ['.corrupt-', '.pre-migration-'];
 // Exactly what Date.now() writes in a backup's name, so a name with other digits is not a backup of ours.
 const DB_BACKUP_TIMESTAMP_PATTERN = /^[1-9]\d{12}$/;
 
+// A shorter period is allowed. A longer one is capped at the maximum with a warning, because the app
+// tells users backups are removed within 30 days.
 const parseBackupRetentionDays = (rawValue) => {
   const value = (rawValue ?? '').trim();
   if (!value) return DEFAULT_DB_BACKUP_RETENTION_DAYS;
-  if (/^[1-9]\d*$/.test(value) && Number(value) <= DB_BACKUP_RETENTION_MAX_DAYS) return Number(value);
-  console.warn(`[config] CORRUPT_BACKUP_RETENTION_DAYS must be a whole number from 1 to ${DB_BACKUP_RETENTION_MAX_DAYS} — using ${DEFAULT_DB_BACKUP_RETENTION_DAYS}.`);
-  return DEFAULT_DB_BACKUP_RETENTION_DAYS;
+  if (!/^[1-9]\d*$/.test(value)) {
+    console.warn(`[config] CORRUPT_BACKUP_RETENTION_DAYS must be a whole number from 1 to ${DB_BACKUP_RETENTION_MAX_DAYS} — using ${DEFAULT_DB_BACKUP_RETENTION_DAYS}.`);
+    return DEFAULT_DB_BACKUP_RETENTION_DAYS;
+  }
+  if (Number(value) > DB_BACKUP_RETENTION_MAX_DAYS) {
+    console.warn(`[config] CORRUPT_BACKUP_RETENTION_DAYS is above ${DB_BACKUP_RETENTION_MAX_DAYS} — using ${DB_BACKUP_RETENTION_MAX_DAYS}. The app tells users backups are removed within 30 days: ${DB_BACKUP_RETENTION_MAX_DAYS} days plus the 7-day recovery hold and a purge delay.`);
+    return DB_BACKUP_RETENTION_MAX_DAYS;
+  }
+  return Number(value);
 };
 const DB_BACKUP_RETENTION_DAYS = parseBackupRetentionDays(process.env.CORRUPT_BACKUP_RETENTION_DAYS);
-if (DB_BACKUP_RETENTION_DAYS > DEFAULT_DB_BACKUP_RETENTION_DAYS) {
-  console.warn(`[config] CORRUPT_BACKUP_RETENTION_DAYS is above ${DEFAULT_DB_BACKUP_RETENTION_DAYS}, but the app tells users backups are removed within 40 days, which assumes ${DEFAULT_DB_BACKUP_RETENTION_DAYS}.`);
-}
 
 // Held after a start that lost its data, however many restarts follow: an empty database with old
 // backups beside it is what recovery looks like, and those backups may be the only copy. It also starts
 // when the last user leaves. It always ends: the saved time stays while there are no users, so a
 // restart cannot start it again and the 30-day promise still holds after the last account is deleted.
+// Retention plus this hold must stay within 30 days; see DEFAULT_DB_BACKUP_RETENTION_DAYS.
 const DB_RECOVERY_PURGE_HOLD_MS = parseTestOnlyLimit(process.env.DB_RECOVERY_PURGE_HOLD_MS, 7 * MS_PER_DAY);
 
 const isDbBackupPurgeHeld = () => {
@@ -3684,26 +4061,23 @@ const describeBackupsLeft = (backups) => {
   return `${backups.length} backup(s) remain, the last expiring ${lastExpiry}`;
 };
 
-// The age comes from the name, so a copied file or a changed clock on the file does not extend it, and
-// a timestamp in the future is simply kept. Never throws, whatever fails is logged and retried later.
-// Returns when the next backup expires, or Infinity.
-function purgeExpiredDbBackups() {
-  let nextExpiry = Infinity;
+// Removes every backup whose deadline (from deadlineOf) has passed, logging each with describe. Returns
+// the next deadline, or Infinity. Never throws: whatever fails is logged and retried later.
+const removeDbBackupsPastDeadline = (deadlineOf, describe) => {
+  let nextDeadline = Infinity;
   try {
-    if (isDbBackupPurgeHeld()) return recoveryStartedAt + DB_RECOVERY_PURGE_HOLD_MS;
     let backups = listDbBackups();
     const now = Date.now();
-    const aheadCount = backups.filter((backup) => backup.timestamp > now).length;
-    if (aheadCount > 0) console.warn(`[db] ${aheadCount} backup(s) have a timestamp ahead of the current time, and are kept until they expire from it.`);
-    for (const backup of backups) {
-      if (backup.expiresAt > now) {
-        nextExpiry = Math.min(nextExpiry, backup.expiresAt);
+    for (const backup of [...backups]) {
+      const deadline = deadlineOf(backup);
+      if (deadline > now) {
+        nextDeadline = Math.min(nextDeadline, deadline);
         continue;
       }
       try {
         fs.unlinkSync(backup.file);
         backups = backups.filter((item) => item !== backup);
-        console.log(`[db] Removed an expired backup, ${describeBackupsLeft(backups)}.`);
+        console.log(`[db] ${describe}, ${describeBackupsLeft(backups)}.`);
       } catch (err) {
         console.warn('[db] Could not remove an expired backup:', describeDbError(err));
       }
@@ -3711,7 +4085,32 @@ function purgeExpiredDbBackups() {
   } catch (err) {
     console.warn('[db] Could not check backups for expiry:', describeDbError(err));
   }
-  return nextExpiry;
+  return nextDeadline;
+};
+
+// The hard ceiling (lead decision, fix loop 1): a backup older than this goes even while the recovery
+// hold is on, and even at a start that lost its data or just migrated, so no copy of a deleted account
+// outlives the 30 days the app promises. Counted from the name's timestamp, like the retention.
+const DB_BACKUP_HARD_MAX_DAYS = 30;
+const purgeDbBackupsPastCeiling = () => removeDbBackupsPastDeadline(
+  (backup) => backup.timestamp + DB_BACKUP_HARD_MAX_DAYS * MS_PER_DAY,
+  `Removed a backup older than the ${DB_BACKUP_HARD_MAX_DAYS}-day ceiling, recovery hold or not`,
+);
+
+// The age comes from the name, so a copied file or a changed clock on the file does not extend it, and
+// a timestamp in the future is simply kept. Never throws, whatever fails is logged and retried later.
+// Returns when the next backup expires, or Infinity. While the recovery hold is on, only the ceiling applies.
+function purgeExpiredDbBackups() {
+  try {
+    if (isDbBackupPurgeHeld()) return Math.min(recoveryStartedAt + DB_RECOVERY_PURGE_HOLD_MS, purgeDbBackupsPastCeiling());
+    const now = Date.now();
+    const aheadCount = listDbBackups().filter((backup) => backup.timestamp > now).length;
+    if (aheadCount > 0) console.warn(`[db] ${aheadCount} backup(s) have a timestamp ahead of the current time, and are kept until they expire from it.`);
+  } catch (err) {
+    console.warn('[db] Could not check backups for expiry:', describeDbError(err));
+    return Infinity;
+  }
+  return removeDbBackupsPastDeadline((backup) => backup.expiresAt, 'Removed an expired backup');
 }
 
 // Every 24 hours, or sooner when a backup expires sooner, so none outlives the period by up to a day.
@@ -3721,10 +4120,10 @@ function scheduleDbBackupPurge(nextExpiry) {
   setTimeout(() => scheduleDbBackupPurge(purgeExpiredDbBackups()), wait).unref();
 }
 
-// Not at a start that lost its data: an operator may need those backups to recover, so the first look
-// comes when the hold ends. A start that just migrated waits for the timer.
-if (isDbLoaded) scheduleDbBackupPurge(didBackUpDbOnLoad ? Infinity : purgeExpiredDbBackups());
-else scheduleDbBackupPurge(recoveryStartedAt + DB_RECOVERY_PURGE_HOLD_MS);
+// A start that lost its data purges only past the ceiling: an operator may need the rest to recover, so
+// the full look comes when the hold ends. A start that just migrated applies the ceiling and waits for the timer.
+if (isDbLoaded) scheduleDbBackupPurge(didBackUpDbOnLoad ? purgeDbBackupsPastCeiling() : purgeExpiredDbBackups());
+else scheduleDbBackupPurge(Math.min(recoveryStartedAt + DB_RECOVERY_PURGE_HOLD_MS, purgeDbBackupsPastCeiling()));
 
 resumePendingAccountDeletions();
 setInterval(retryAccountDeletions, ACCOUNT_DELETION_RETRY_INTERVAL_MS).unref();

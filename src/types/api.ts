@@ -12,6 +12,18 @@ export interface BaseUser {
   partnerStatus?: PartnerStatus; // signed-in viewers, about another user
   partnerCount?: number; // only for the owner and that user's partners
   avatar?: string | null;
+  // Owner only, and only while true: the profile is hidden from others after reports until an admin reviews it.
+  hiddenPendingReview?: boolean;
+  // Owner only, and only while suspended. suspendedUntil is null for a permanent suspension.
+  suspendedUntil?: string | null;
+  suspendedPermanently?: boolean;
+}
+
+// The 403 a suspended account gets for posting, commenting, partner requests, profile edits and reports.
+export interface AccountSuspendedError {
+  error: string;
+  code: 'account_suspended';
+  until: string | null;
 }
 
 export type PartnerStatus = 'none' | 'requested' | 'incoming' | 'partner';
@@ -53,6 +65,8 @@ export interface Drink {
   imageUrl?: string | null; // /media path, or null when the post has no usable image
   isPartner?: boolean;
   user?: BaseUser;
+  // Only the owner and admins ever receive a hidden post: hidden from others after reports, pending review.
+  hiddenPendingReview?: boolean;
 }
 
 export interface Story {
@@ -70,10 +84,55 @@ export interface Comment {
   content: string;
   createdAt: string;
   user?: BaseUser;
+  // Only the author and admins ever receive a hidden comment.
+  hiddenPendingReview?: boolean;
 }
 
 export type ReportTargetType = 'drink' | 'comment' | 'user';
 export type ReportReason = 'spam' | 'harassment' | 'underage' | 'dangerous_drinking' | 'mislabeled_alcohol' | 'other';
+
+// Unused until the admin screen exists. Admin API: GET /api/admin/reports. The review target is 24 hours.
+export interface AdminReport {
+  id: number;
+  reporterId?: string; // a deleted reporter's open report holds an anonymous "deleted-..." id
+  targetType: ReportTargetType;
+  targetId: string | number;
+  drinkId?: number; // comment reports only
+  reason: ReportReason;
+  details: string | null;
+  status: 'open' | 'resolved';
+  createdAt: string;
+  action?: 'dismiss' | 'remove_content' | 'clear_profile';
+  removed?: boolean;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  target: unknown; // the public view of the post, comment or profile, or null once gone
+  ageHours: number | null;
+  overdue: boolean; // open and older than 24 hours
+  openReporterCount: number; // distinct reporters among the open reports on the same target
+  autoHideReporterCount: number; // of those, the ones who count (account 48 h old, privacy notice accepted)
+  autoHidden: boolean; // 3 or more distinct open reporters
+}
+
+// Unused until the admin screen exists.
+export interface AdminReportList {
+  items: AdminReport[];
+  total: number;
+  overdueCount: number; // open reports older than 24 hours, whichever status is listed
+}
+
+// Unused until the admin screen exists. POST /api/admin/users/:id/suspend { reason?, permanent? } and
+// /unsuspend { void? }, and `suspension` on a resolve with suspend: true. A suspend while one is in force
+// answers 409 already_suspended with this shape; on resolve, applied is false and code is already_suspended.
+export interface AdminSuspensionResult {
+  userId: string;
+  suspended: boolean;
+  suspendedUntil: string | null;
+  suspendedPermanently: boolean;
+  suspensionCount: number; // voided suspensions are not counted
+  applied?: boolean; // resolve only
+  code?: 'already_suspended'; // resolve only, when applied is false
+}
 
 export interface SmartBarItem {
   id: number;

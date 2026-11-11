@@ -4,6 +4,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { Drink } from '../types/api';
 import { getImageSource } from '../lib/api';
 import { useLocalization } from '../context/LocalizationContext';
+import ModerationNotice from './ModerationNotice';
 
 interface DrinkPostCardProps {
   drink: Drink;
@@ -96,6 +97,9 @@ export default function DrinkPostCard({
           </TouchableOpacity>
         )}
       </View>
+
+      {/* The server sends this flag only to the owner and admins of a post hidden after reports. */}
+      {drink.hiddenPendingReview && <ModerationNotice messageKey="moderation.hiddenPost" style={styles.hiddenNotice} />}
 
       <View style={styles.content}>
         {drink.imageUrl ? (
@@ -205,6 +209,9 @@ const styles = StyleSheet.create({
   },
   content: {
     marginBottom: 16,
+  },
+  hiddenNotice: {
+    marginBottom: 12,
   },
   image: {
     width: '100%',

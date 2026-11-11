@@ -19,6 +19,7 @@ import {
   setPartnerStatusInCaches,
 } from '../lib/drinkCache';
 import { getPartnerErrorKey, usePartnerAction } from '../lib/usePartnerAction';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser, PartnerActionResult, PartnerRequests } from '../types/api';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
@@ -36,6 +37,7 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
   const { t } = useLocalization();
   const { serverUserId } = useAuth();
   const queryClient = useQueryClient();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const userId = route?.params?.userId;
   const isOwner = !userId || userId === serverUserId;
 
@@ -93,6 +95,7 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
     onError: (error, { fromId }) => {
       // The other side cancelled, or a block started: the refetch takes the row away.
       if (isNotFoundError(error) && isCurrentAuthUser(serverUserId)) invalidateAfterPartnerRequest(queryClient, fromId);
+      refreshIfSuspended(error);
       Alert.alert(t(getPartnerErrorKey(error)));
     },
   });

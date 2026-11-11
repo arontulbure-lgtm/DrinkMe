@@ -5,7 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { apiFetch } from '../lib/api';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError } from '../lib/api';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
 
@@ -29,6 +30,7 @@ interface Props {
 export default function OnboardingScreen({ onLater }: Props) {
   const { profile, serverUserId, setProfile, logout } = useAuth();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [errorKey, setErrorKey] = useState<string | null>(null);
@@ -44,9 +46,11 @@ export default function OnboardingScreen({ onLater }: Props) {
     queryClient.setQueryData<BaseUser>(['users.detail', serverUserId], updated);
   };
 
-  const handleSaveError = () => {
+  // A suspended user cannot set a name (PUT /api/users/:id is refused); "Later" still lets them in.
+  const handleSaveError = (error: unknown) => {
     if (!isCurrentAuthUser(serverUserId)) return;
-    setErrorKey('onboarding.saveFailed');
+    refreshIfSuspended(error);
+    setErrorKey(isAccountSuspendedError(error) ? ACCOUNT_SUSPENDED_ERROR_KEY : 'onboarding.saveFailed');
     // A 401 on the JWT in use already makes apiFetch rebuild the session, which brings this screen back.
   };
 
@@ -134,6 +138,8 @@ export default function OnboardingScreen({ onLater }: Props) {
               <Text style={styles.body}>{t('onboarding.privacyPartners')}</Text>
               <Text style={styles.body}>{t('onboarding.privacyPartnersOfPartners')}</Text>
               <Text style={styles.body}>{t('onboarding.privacyModerators')}</Text>
+              <Text style={styles.body}>{t('onboarding.privacyModeration')}</Text>
+              <Text style={styles.body}>{t('onboarding.privacyBackups')}</Text>
               <Text style={styles.body}>{t('onboarding.privacyPrivate')}</Text>
               {errorKey ? <Text style={styles.error} accessibilityLiveRegion="polite">{t(errorKey)}</Text> : null}
               <TouchableOpacity

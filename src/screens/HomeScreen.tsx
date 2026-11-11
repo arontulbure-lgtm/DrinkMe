@@ -19,6 +19,7 @@ import StoriesSection from '../components/StoriesSection';
 import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
 import LoadMoreButton from '../components/LoadMoreButton';
+import { SuspensionBanner } from '../components/ModerationNotice';
 import { apiFetch, isAgeRequiredError } from '../lib/api';
 import { flattenPages, getNextCursor, invalidateAfterPartnerChange, invalidateAfterPartnerRequest, removeDrinkIfNotFound, syncSavedList, trimToFirstPage, updateDrinkInCaches } from '../lib/drinkCache';
 import { Drink, Page, Story, NotificationItem } from '../types/api';
@@ -207,6 +208,7 @@ export default function HomeScreen({ navigation }: any) {
         contentContainerStyle={styles.contentContainer}
         refreshControl={<RefreshControl tintColor="#8B5FBF" refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        <SuspensionBanner />
         {STORIES_ENABLED && <StoriesSection stories={stories} isLoading={isLoading} />}
 
         <Text style={styles.sectionLabel}>{t('home.sections.feed')}</Text>

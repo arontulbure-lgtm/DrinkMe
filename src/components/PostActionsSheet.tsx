@@ -23,6 +23,7 @@ import {
 } from '../lib/drinkCache';
 import { Comment, Drink, ReportReason } from '../types/api';
 import ReportSheet from './ReportSheet';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 
 export type ActionsTarget =
   | { type: 'drink'; drink: Drink }
@@ -48,6 +49,7 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
   const { serverUserId } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const [step, setStep] = useState<ActionsStep>('menu');
   // Closing does not cancel a request, so its callbacks must not close whatever opened since.
   const isClosedRef = useRef(false);
@@ -129,6 +131,7 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
       if (target.type === 'comment' && isNotFoundError(error) && isCurrentAuthUser(serverUserId)) {
         removeCommentFromCache(queryClient, target.comment.drinkId, target.comment.id);
       }
+      refreshIfSuspended(error);
     },
   });
 

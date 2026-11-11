@@ -27,6 +27,8 @@ import { useLocalization } from '../context/LocalizationContext';
 import { ActionsPanel } from './PostActionsSheet';
 import ListLoadState from './ListLoadState';
 import LoadMoreButton from './LoadMoreButton';
+import ModerationNotice from './ModerationNotice';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DRAWER_HEIGHT = SCREEN_HEIGHT * 0.72;
@@ -57,6 +59,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
   const { profile, serverUserId, getJwtToken } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
 
   const [text, setText] = useState('');
   const [actionsComment, setActionsComment] = useState<Comment | null>(null);
@@ -127,6 +130,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
         handleClose();
         return;
       }
+      refreshIfSuspended(error);
       Alert.alert(t('drinkDetail.title'), t(getCommentErrorKey(error)));
     },
   });
@@ -240,6 +244,10 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
                         </TouchableOpacity>
                       </View>
                       <Text style={styles.commentContent}>{comment.content}</Text>
+                      {/* Only the author and admins receive a comment hidden after reports. */}
+                      {comment.hiddenPendingReview && (
+                        <ModerationNotice messageKey="moderation.hiddenComment" style={styles.hiddenNotice} />
+                      )}
                     </View>
                   </View>
                 );
@@ -412,6 +420,9 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 14,
     lineHeight: 20,
+  },
+  hiddenNotice: {
+    marginTop: 6,
   },
   inputArea: {
     flexDirection: 'row',

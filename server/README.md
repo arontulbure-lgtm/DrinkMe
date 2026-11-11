@@ -40,7 +40,7 @@ Core:
 Database:
 - `DB_FILE`: Database file path (default `server/data/db.json`). Must be absolute in production. Give it a directory of its own: temp files and backups are written next to it, and the backup purge deletes files there whose names match the database's.
 - `ALLOW_EMPTY_DB`: `true` lets production start with no database file, or start empty after a corrupt one is backed up. Use it for a first deploy only, then remove it.
-- `CORRUPT_BACKUP_RETENTION_DAYS`: Days to keep `.corrupt-*` and `.pre-migration-*` backups (default `30`, allowed `1` to `36500`; anything else uses `30` with a warning). A value above `30` logs a warning, because the app tells users backup copies are removed within 40 days.
+- `CORRUPT_BACKUP_RETENTION_DAYS`: Days to keep `.corrupt-*` and `.pre-migration-*` backups (default `21`, allowed `1` to `21`). A larger whole number is capped at `21` with a warning, and anything else uses `21` with a warning, because the app tells users backup copies are removed within 30 days: 21 days plus the 7-day recovery hold and a purge delay.
 
 Accounts and moderation:
 - `ADMIN_USER_IDS`: Comma-separated Firebase uids allowed to use `/api/admin/*` (default empty, so every admin route returns 403 and nobody can review reports; production logs a warning). Ids are never logged, only a count of ids that match no user.
@@ -79,10 +79,12 @@ With production rules, the server exits at startup and names the setting to fix,
 
 ### Backups and retention
 - `.corrupt-<timestamp>` and `.pre-migration-<timestamp>` backups hold personal data, including that of deleted accounts. They are deleted once older than `CORRUPT_BACKUP_RETENTION_DAYS`, counted from the timestamp in the name. The check runs every 24 hours, or earlier when a backup is due.
-- After a start that lost its data (no file, a corrupt file, or no users), nothing is deleted for 7 days, so there is time to recover. The start time is saved as `recoveryStartedAt`, so restarts do not reset it. The hold also starts when the last user deletes their account.
+- Whatever else applies, a backup older than 30 days is always deleted, during the recovery hold too.
+- After a start that lost its data (no file, a corrupt file, or no users), nothing younger than 30 days is deleted for 7 days, so there is time to recover. The start time is saved as `recoveryStartedAt`, so restarts do not reset it. The hold also starts when the last user deletes their account.
 - Restoring a backup that has users but no `recoveryStartedAt` ends a running hold, and the next check deletes expired backups. Move any backup you want to keep out of the directory before restoring.
 - Restoring a backup brings back accounts deleted since it was made: repeat those deletions. A start from a corrupt file loses pending account deletions, because they were stored in that file.
 - Host snapshots and hand-made copies are outside this retention and must be handled separately.
+- **Rule (the app promises deleted accounts leave backups within 30 days):** host and volume snapshot retention must be 30 days or less, and `npm run backup` (scripts/backup.js: 7 daily, 4 weekly) must run daily. Keep no hand-made copy longer than 30 days.
 
 ### Account deletion
 `POST /api/users/:id/delete-account` saves a pending entry first, removes every record that holds or names the user, then deletes the Firebase user. Unfinished deletions resume at startup and every 15 minutes. A finished deletion keeps only the uid for about 1 hour, so a Firebase token issued before the deletion cannot recreate the account.

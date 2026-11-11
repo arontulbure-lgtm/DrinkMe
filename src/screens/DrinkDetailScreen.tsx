@@ -20,8 +20,10 @@ import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, upda
 import { Drink, Comment, Page } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
+import ModerationNotice from '../components/ModerationNotice';
 import PostActionsSheet from '../components/PostActionsSheet';
 import { useConfirmAge } from '../lib/useConfirmAge';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 
@@ -35,6 +37,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
   const { getJwtToken, profile, serverUserId } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const [commentText, setCommentText] = useState('');
   const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
   const [actionsComment, setActionsComment] = useState<Comment | null>(null);
@@ -157,6 +160,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
     },
     onError: (error) => {
       if (leaveIfDrinkGone(error)) return;
+      refreshIfSuspended(error);
       Alert.alert(t('drinkDetail.title'), t(getCommentErrorKey(error)));
     },
   });
@@ -267,6 +271,9 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     </View>
                   )}
                   <Text style={styles.heroDescription}>{drink.description}</Text>
+                  {drink.hiddenPendingReview && (
+                    <ModerationNotice messageKey="moderation.hiddenPost" style={styles.hiddenPostNotice} />
+                  )}
                   {drink.tags?.length ? (
                     <View style={styles.tagsRow}>
                       {drink.tags.map((tag) => (
@@ -343,6 +350,9 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                               </View>
                             </View>
                             <Text style={styles.commentText}>{comment.content}</Text>
+                            {comment.hiddenPendingReview && (
+                              <ModerationNotice messageKey="moderation.hiddenComment" style={styles.hiddenCommentNotice} />
+                            )}
                           </View>
                         </View>
                       );
@@ -632,6 +642,12 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 14,
     lineHeight: 20,
+  },
+  hiddenCommentNotice: {
+    marginTop: 6,
+  },
+  hiddenPostNotice: {
+    marginTop: 12,
   },
   commentInputContainer: {
     flexDirection: 'row',

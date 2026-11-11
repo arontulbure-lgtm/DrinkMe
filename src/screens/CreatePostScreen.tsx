@@ -16,8 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
-import { apiFetch, ApiError } from '../lib/api';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, ApiError, isAccountSuspendedError } from '../lib/api';
 import { prependDrink } from '../lib/drinkCache';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { useLocalization } from '../context/LocalizationContext';
 import { Drink } from '../types/api';
 import LocationPickerModal from '../components/LocationPickerModal';
@@ -48,6 +49,7 @@ export default function CreatePostScreen({ navigation }: any) {
   const [isAlcoholic, setIsAlcoholic] = useState(isAgeConfirmed);
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const insets = useSafeAreaInsets();
   const extraScrollInset = useMemo(() => insets.bottom + 120, [insets.bottom]);
 
@@ -118,6 +120,8 @@ export default function CreatePostScreen({ navigation }: any) {
       if (status === 429) message = t(code === 'daily_post_limit' ? 'createPost.dailyLimit' : 'common.tooManyRequests');
       if (status === 507) message = t(code === 'user_image_quota' ? 'common.imageQuotaReached' : 'common.serviceUnavailable');
       if (code === 'age_required') message = t('ageGate.required');
+      if (isAccountSuspendedError(error)) message = t(ACCOUNT_SUSPENDED_ERROR_KEY);
+      refreshIfSuspended(error);
       Alert.alert(t('createPost.title'), message);
     },
   });

@@ -83,6 +83,17 @@ const translations = {
       notFound: 'This post is no longer available.',
       loadError: 'Could not load this post.',
     },
+    moderation: {
+      hiddenPost: 'Hidden from others after several reports while a moderator reviews it. Only you and the moderators can see it.',
+      hiddenComment: 'Hidden from others after several reports while a moderator reviews it.',
+      hiddenProfile: 'Your profile is hidden from others after several reports while a moderator reviews it. They see only a blank profile.',
+      suspendedTitle: 'Your account is suspended',
+      suspendedUntil:
+        'Until {{date}} you cannot post, comment, send or accept partner requests, edit your profile or report. You can still browse, cheer and save posts.',
+      suspendedPermanent:
+        'You can no longer post, comment, send or accept partner requests, edit your profile or report. You can still browse, cheer and save posts, and delete your account.',
+      actionBlocked: 'Your account is suspended, so you cannot do this. See your profile for details.',
+    },
     errors: {
       cheerFailed: 'Failed to send cheers. Please try again.',
       saveFailed: 'Failed to save post. Please try again.',
@@ -148,7 +159,7 @@ const translations = {
     },
     deleteAccount: {
       action: 'Delete account',
-      warning: 'This permanently deletes your profile, posts, comments, saved posts and Smart Bar. Backup copies are removed within 40 days.',
+      warning: 'This permanently deletes your profile, posts, comments, saved posts and Smart Bar. Your account is removed from our backups within 30 days.',
       typePrompt: 'Type DELETE to confirm.',
       confirmWord: 'DELETE',
       passwordPrompt: 'Enter your password.',
@@ -321,6 +332,10 @@ const translations = {
       privacyPartners: 'Your drink partner list is visible only to you and your drink partners.',
       privacyPartnersOfPartners: "Your partners' other partners can see that you are partnered with them.",
       privacyModerators: 'Moderators can see reported content and who reported it.',
+      privacyModeration:
+        'Content reported by several people is hidden from others until a moderator reviews it, and moderators can suspend accounts that break the rules. Open reports you filed are kept without your name or details until they are reviewed, even if you delete your account, and the suspension history of an account is kept so repeat offences can be handled.',
+      privacyBackups:
+        'Backup copies of our data are kept for a limited time, so a deleted account is removed from our backups within 30 days.',
       privacyPrivate:
         'Your email, saved posts and Smart Bar stay private. You can delete your account at any time from Edit Profile.',
       privacyAccept: 'I understand',
@@ -405,6 +420,17 @@ const translations = {
       notFound: 'Această postare nu mai este disponibilă.',
       loadError: 'Nu am putut încărca această postare.',
     },
+    moderation: {
+      hiddenPost: 'Ascunsă pentru ceilalți după mai multe raportări, cât timp un moderator o verifică. Doar tu și moderatorii o puteți vedea.',
+      hiddenComment: 'Ascuns pentru ceilalți după mai multe raportări, cât timp un moderator îl verifică.',
+      hiddenProfile: 'Profilul tău este ascuns pentru ceilalți după mai multe raportări, cât timp un moderator îl verifică. Ei văd doar un profil gol.',
+      suspendedTitle: 'Contul tău este suspendat',
+      suspendedUntil:
+        'Până la {{date}} nu poți publica, comenta, trimite sau accepta cereri de parteneriat, edita profilul sau raporta. Poți în continuare să navighezi, să dai noroc și să salvezi postări.',
+      suspendedPermanent:
+        'Nu mai poți publica, comenta, trimite sau accepta cereri de parteneriat, edita profilul sau raporta. Poți în continuare să navighezi, să dai noroc, să salvezi postări și să îți ștergi contul.',
+      actionBlocked: 'Contul tău este suspendat, așa că nu poți face asta. Vezi detalii în profilul tău.',
+    },
     errors: {
       cheerFailed: 'Nu am putut trimite norocul. Încearcă din nou.',
       saveFailed: 'Nu am putut salva postarea. Încearcă din nou.',
@@ -470,7 +496,7 @@ const translations = {
     },
     deleteAccount: {
       action: 'Șterge contul',
-      warning: 'Acest lucru îți șterge definitiv profilul, postările, comentariile, postările salvate și Smart Bar. Copiile de siguranță sunt eliminate în cel mult 40 de zile.',
+      warning: 'Acest lucru îți șterge definitiv profilul, postările, comentariile, postările salvate și Smart Bar. Contul dispare din copiile noastre de siguranță în cel mult 30 de zile.',
       typePrompt: 'Scrie STERGE pentru a confirma.',
       confirmWord: 'STERGE',
       passwordPrompt: 'Introdu parola.',
@@ -642,6 +668,10 @@ const translations = {
       privacyPartners: 'Lista partenerilor tăi de băuturi este vizibilă doar pentru tine și partenerii tăi.',
       privacyPartnersOfPartners: 'Ceilalți parteneri ai partenerilor tăi pot vedea că sunteți parteneri.',
       privacyModerators: 'Moderatorii pot vedea conținutul raportat și cine l-a raportat.',
+      privacyModeration:
+        'Conținutul raportat de mai multe persoane este ascuns pentru ceilalți până când un moderator îl verifică, iar moderatorii pot suspenda conturile care încalcă regulile. Raportările tale încă deschise sunt păstrate fără numele tău și fără detalii până sunt verificate, chiar dacă îți ștergi contul, iar istoricul suspendărilor unui cont este păstrat pentru a putea trata abaterile repetate.',
+      privacyBackups:
+        'Copiile de siguranță ale datelor noastre sunt păstrate un timp limitat, astfel încât un cont șters dispare din copiile noastre de siguranță în cel mult 30 de zile.',
       privacyPrivate:
         'E-mailul, postările salvate și Smart Bar rămân private. Îți poți șterge contul oricând din ecranul Editează profilul.',
       privacyAccept: 'Am înțeles',
