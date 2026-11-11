@@ -19,7 +19,6 @@ import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, trim
 import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
 import { BaseUser, Drink, Page } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
-import AgeGateBanner from '../components/AgeGateBanner';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
@@ -428,8 +427,6 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
             </TouchableOpacity>
           )}
         </View>
-
-        {isSelf && <AgeGateBanner />}
 
         {/* Posts tab */}
         {activeTab === 'posts' && (

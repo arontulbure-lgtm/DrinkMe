@@ -96,6 +96,9 @@ const signIn = async (baseUrl, uid) => {
     displayName: 'Harness Tester',
   });
   assert.equal(status, 200);
+  // Every route but the first-run ones needs the 18+ confirmation.
+  const age = await postJson(`${baseUrl}/api/users/${uid}/acknowledgements`, { type: 'age', confirmed: true }, body.token);
+  assert.equal(age.status, 200);
   return body.token;
 };
 
@@ -119,7 +122,7 @@ test('a fixture in the saveDb format loads with its users and drinks', async () 
   const { baseUrl } = server;
   const token = await signIn(baseUrl, FIXTURE_USER.id);
   const user = await getJson(`${baseUrl}/api/users/${FIXTURE_USER.id}`, token);
-  assert.deepEqual(user, { ...FIXTURE_USER, ageConfirmed: false, needsName: false, privacyNoticeVersion: null, partnerCount: 1 });
+  assert.deepEqual(user, { ...FIXTURE_USER, ageConfirmed: true, needsName: false, privacyNoticeVersion: null, partnerCount: 1 });
   const partner = await getJson(`${baseUrl}/api/users/${FIXTURE_PARTNER.id}`, token);
   const { email: _partnerEmail, ...publicPartner } = FIXTURE_PARTNER;
   assert.deepEqual(partner, { ...publicPartner, partnerStatus: 'partner', partnerCount: 1 });
@@ -130,7 +133,7 @@ test('a fixture in the saveDb format loads with its users and drinks', async () 
   assert.equal(drinks[0].name, FIXTURE_DRINK.name);
   assert.equal(drinks[0].isLiked, true);
 
-  const { items: comments } = await getJson(`${baseUrl}/api/drinks/${FIXTURE_DRINK.id}/comments`);
+  const { items: comments } = await getJson(`${baseUrl}/api/drinks/${FIXTURE_DRINK.id}/comments`, token);
   assert.equal(comments.length, 1);
   assert.equal(comments[0].content, 'Synthetic comment');
 
@@ -147,10 +150,10 @@ test('the server creates DB_FILE and a mutation persists across a restart', asyn
   await server.restart({ dbFixture: null }); // no file: the server must create it
   const { baseUrl, dbFile } = server;
   assert.equal(fs.existsSync(dbFile), true);
-  assert.deepEqual(await getJson(`${baseUrl}/api/drinks`), { items: [], nextCursor: null });
 
   const uid = 'persistence-user';
   const token = await signIn(baseUrl, uid);
+  assert.deepEqual(await getJson(`${baseUrl}/api/drinks`, token), { items: [], nextCursor: null });
   const created = await postJson(
     `${baseUrl}/api/drinks`,
     { name: 'Persisted Tea', description: 'Survives a restart', rating: 5, isAlcoholic: false, imageData: TINY_PNG },
@@ -160,12 +163,12 @@ test('the server creates DB_FILE and a mutation persists across a restart', asyn
 
   await server.restart();
 
-  const { items: drinks } = await getJson(`${baseUrl}/api/drinks`);
+  const { items: drinks } = await getJson(`${baseUrl}/api/drinks`, token);
   assert.equal(drinks.length, 1);
   assert.equal(drinks[0].id, created.body.id);
   assert.equal(drinks[0].name, 'Persisted Tea');
   assert.equal(drinks[0].userId, uid);
-  assert.equal((await getJson(`${baseUrl}/api/users/${uid}`)).id, uid);
+  assert.equal((await getJson(`${baseUrl}/api/users/${uid}`, token)).id, uid);
 });
 
 test('the harness refuses unsafe DB_FILE values before spawning', async () => {

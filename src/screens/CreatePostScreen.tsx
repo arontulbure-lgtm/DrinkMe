@@ -281,6 +281,7 @@ export default function CreatePostScreen({ navigation }: any) {
                   </Text>
                 </TouchableOpacity>
               </View>
+              {/* Defence in depth: the hard age gate means an unconfirmed user never reaches this screen. */}
               {!isAgeConfirmed && <Text style={styles.toggleHint}>{t('ageGate.banner')}</Text>}
             </View>
 

@@ -93,6 +93,7 @@ const authedStatus = async (baseUrl, path, token, init = {}) => {
   return res.status;
 };
 
+// Confirmed 18+, so the probes below reach their routes: every route but the first-run ones needs it.
 const makeUser = (fields = {}) => ({
   id: UID,
   email: EMAIL,
@@ -101,6 +102,7 @@ const makeUser = (fields = {}) => ({
   city: '',
   bio: '',
   avatar: null,
+  ageConfirmedAt: '2026-01-01T00:00:00.000Z',
   ...fields,
 });
 
@@ -204,12 +206,12 @@ test('flag on: a JWT with no ev counts as logged out on every kind of route', as
   assert.equal(await authedStatus(baseUrl, `/api/users/${UID}`, token, { method: 'PUT', body: '{"bio":"x"}' }), 401);
   assert.equal(await authedStatus(baseUrl, `/api/users/${UID}/delete-account`, token, { method: 'POST', body: '{}' }), 401);
 
-  // A public read works, but without the owner's view.
+  // Nothing is readable logged out either, so the profile read is refused too.
   const res = await fetch(`${baseUrl}/api/users/${UID}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 401);
   assert.equal((await res.json()).email, undefined);
 });
 
@@ -224,21 +226,26 @@ for (const [label, fields] of [['with no stored value', {}], ['stored as verifie
   });
 }
 
-test('flag off: only a verified sign-in JWT carries ev, and both JWTs work', async (t) => {
+// The first verified sign-in also starts a new session generation, which logs out the unverified JWT
+// (account-takeover.test.js). The own profile is the probe: it works before the 18+ confirmation.
+test('flag off: only a verified sign-in JWT carries ev, and it replaces the unverified one', async (t) => {
   const server = await startOn(t, firebaseEnv);
   const { body } = await postAuth(server.baseUrl, passwordClaims(false));
   const payload = JSON.parse(Buffer.from(body.token.split('.')[1], 'base64url').toString());
   assert.equal(payload.ev, undefined);
+  assert.equal(await authedStatus(server.baseUrl, `/api/users/${UID}`, body.token), 200);
   const verified = await postAuth(server.baseUrl, passwordClaims(true));
   assert.equal(JSON.parse(Buffer.from(verified.body.token.split('.')[1], 'base64url').toString()).ev, true);
-  assert.equal(await authedStatus(server.baseUrl, '/api/notifications', body.token), 200);
+  assert.equal(await authedStatus(server.baseUrl, `/api/users/${UID}`, verified.body.token), 200);
+  assert.equal(await authedStatus(server.baseUrl, `/api/users/${UID}`, body.token), 401);
 });
 
 test('flag on: a verified new user gets a working JWT', async (t) => {
   const { baseUrl, dbFile } = await startOn(t, flagOn);
   const { status, body } = await postAuth(baseUrl, passwordClaims(true));
   assert.equal(status, 200);
-  assert.equal(await authedStatus(baseUrl, '/api/notifications', body.token), 200);
+  // The own profile: a new user has not confirmed 18+ yet, and this route does not need it.
+  assert.equal(await authedStatus(baseUrl, `/api/users/${UID}`, body.token), 200);
   assert.equal(storedUser(dbFile).emailVerified, true);
 });
 
@@ -277,7 +284,7 @@ test('flag on: a Google sign-in works for a new user, whatever its auth_time', a
   const { baseUrl, dbFile } = await startOn(t, flagOn);
   const { status, body } = await postAuth(baseUrl, googleClaims());
   assert.equal(status, 200);
-  assert.equal(await authedStatus(baseUrl, '/api/notifications', body.token), 200);
+  assert.equal(await authedStatus(baseUrl, `/api/users/${UID}`, body.token), 200);
   assert.equal(storedUser(dbFile).emailVerified, true);
 });
 
@@ -294,7 +301,7 @@ test('flag on: dev mode has no stored value and passes', async (t) => {
   const { status, body } = await postJson(`${baseUrl}/api/auth/mobile`, { idToken: 'dev-fallback-token', uid: UID, email: EMAIL });
   assert.equal(status, 200);
   assert.equal(storedUser(dbFile).emailVerified, undefined);
-  assert.equal(await authedStatus(baseUrl, '/api/notifications', body.token), 200);
+  assert.equal(await authedStatus(baseUrl, `/api/users/${UID}`, body.token), 200);
 });
 
 test('flag on: in dev mode a stored false and a JWT with no ev both pass', async (t) => {
@@ -384,7 +391,8 @@ for (const [label, iatAgo] of [['a newer', -5], ['an older', 100]]) {
   });
 }
 
-test('floor: the first verified sign-in sets it from auth_time for password and iat for Google', async (t) => {
+// A Google floor is one second past the iat, so an auth_time in the same second is below it.
+test('floor: the first verified sign-in sets it from auth_time for password and iat + 1 for Google', async (t) => {
   const { baseUrl, dbFile } = await startOn(t, flagOn);
   const authTime = nowSeconds(30);
   await postAuth(baseUrl, passwordClaims(true, { auth_time: authTime }));
@@ -392,7 +400,7 @@ test('floor: the first verified sign-in sets it from auth_time for password and 
 
   const iat = nowSeconds(10);
   await postAuth(baseUrl, { ...googleClaims(), uid: 'google-user', iat });
-  assert.equal(readDb(dbFile).users.find((user) => user.id === 'google-user').verifiedAuthFloor, iat);
+  assert.equal(readDb(dbFile).users.find((user) => user.id === 'google-user').verifiedAuthFloor, iat + 1);
 });
 
 test('floor: the owner stays in on later refreshes and new sign-ins, and the floor does not move', async (t) => {
@@ -466,14 +474,19 @@ test('floor: it stays out of every response and goes with the record', async (t)
   assert.ok(!fs.readFileSync(dbFile, 'utf8').includes('verifiedAuthFloor'));
 });
 
-test('floor: with the flag off nothing sets or checks it', async (t) => {
+// The takeover guard checks and sets the floor whatever the flag (account-takeover.test.js).
+test('floor: with the flag off it is still checked, and a strong sign-in of a new user sets it', async (t) => {
   const { baseUrl, dbFile } = await startOn(t, firebaseEnv, { dbFixture: { users: [makeUser({ emailVerified: true, verifiedAuthFloor: nowSeconds() })] } });
-  const { status } = await postAuth(baseUrl, keptToken());
-  assert.equal(status, 200);
+  assertSignInAgain(await postAuth(baseUrl, keptToken()));
+  assert.equal((await postAuth(baseUrl, passwordClaims(true))).status, 200);
 
-  const created = await postAuth(baseUrl, passwordClaims(true, { uid: 'brand-new-user' }));
+  const authTime = nowSeconds();
+  const created = await postAuth(baseUrl, passwordClaims(true, { uid: 'brand-new-user', auth_time: authTime }));
   assert.equal(created.status, 200);
-  assert.equal(readDb(dbFile).users.find((user) => user.id === 'brand-new-user').verifiedAuthFloor, undefined);
+  assert.equal(readDb(dbFile).users.find((user) => user.id === 'brand-new-user').verifiedAuthFloor, authTime);
+  // An unconfirmed new user sets none.
+  assert.equal((await postAuth(baseUrl, passwordClaims(false, { uid: 'unconfirmed-user' }))).status, 200);
+  assert.equal(readDb(dbFile).users.find((user) => user.id === 'unconfirmed-user').verifiedAuthFloor, undefined);
 });
 
 test('an auth_time ahead of the margin logs one warning with no uid, and is refused', async (t) => {

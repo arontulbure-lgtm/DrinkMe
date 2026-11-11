@@ -21,7 +21,8 @@ const LARGER_IMAGE = dataUrl('png', Buffer.concat([PNG, Buffer.alloc(30, 0x41)])
 const postBody = (name = 'Limit test') => ({ name, description: 'Synthetic', rating: 4, isAlcoholic: false, imageData: SMALL_IMAGE });
 const ago = (hours) => new Date(Date.now() - hours * HOUR_MS).toISOString();
 const tokenFor = (uid) => jwt.sign({ uid }, HARNESS_JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
-const userOf = (id, extra = {}) => ({ id, email: `${id}@example.test`, firstName: 'Test', lastName: '', city: '', bio: '', avatar: null, ...extra });
+// Confirmed 18+: every route but the first-run ones needs it.
+const userOf = (id, extra = {}) => ({ id, email: `${id}@example.test`, firstName: 'Test', lastName: '', city: '', bio: '', avatar: null, ageConfirmedAt: '2026-01-01T00:00:00.000Z', ...extra });
 const drinkOf = (id, userId, extra = {}) => ({
   id, userId, name: 'Fixture', description: 'Fixture', rating: 4, isAlcoholic: false, tags: [], cheersCount: 0, createdAt: ago(48), imageUrl: SMALL_IMAGE, ...extra,
 });
@@ -121,16 +122,16 @@ describe('database growth guard', () => {
       assertGrowthBlocked(await call(server, 'POST', '/api/smart-bar', ownerToken, { name: 'Rum', quantity: '1' }), 'smart bar');
       assertGrowthBlocked(await signIn(server, 'guard-new-user'), 'new user');
       assert.deepEqual(fs.readFileSync(server.dbFile), dbBytes);
-      assert.deepEqual((await call(server, 'GET', '/api/drinks/1/comments')).body.items, []);
+      assert.deepEqual((await call(server, 'GET', '/api/drinks/1/comments', tokenFor(OTHER))).body.items, []);
       assert.equal((await call(server, 'GET', '/api/smart-bar', ownerToken)).body.length, 2);
-      assert.equal((await call(server, 'GET', '/api/users/guard-new-user')).status, 404);
+      assert.equal((await call(server, 'GET', '/api/users/guard-new-user', tokenFor(OTHER))).status, 404);
     });
 
     test('a post gets 507 and state does not change', async () => {
       const dbBytes = fs.readFileSync(server.dbFile);
       assertGrowthBlocked(await call(server, 'POST', '/api/drinks', ownerToken, postBody()), 'post');
       assert.deepEqual(fs.readFileSync(server.dbFile), dbBytes);
-      assert.equal((await call(server, 'GET', '/api/drinks')).body.items.length, 2);
+      assert.equal((await call(server, 'GET', '/api/drinks', tokenFor(OTHER))).body.items.length, 2);
     });
 
     test('an avatar that grows the database gets 507, on both paths, and state does not change', async () => {
@@ -160,7 +161,7 @@ describe('database growth guard', () => {
       assertGrowthBlocked(await call(server, 'POST', `/api/drink-partners/${THIRD}`, ownerToken), 'partner');
       assert.deepEqual(fs.readFileSync(server.dbFile), dbBytes);
 
-      assert.equal((await call(server, 'GET', '/api/drinks/1')).body.cheersCount, 0);
+      assert.equal((await call(server, 'GET', '/api/drinks/1', tokenFor(OTHER))).body.cheersCount, 0);
       assert.deepEqual((await call(server, 'GET', '/api/notifications', tokenFor(THIRD))).body.notifications, []);
       assert.deepEqual((await call(server, 'GET', '/api/notifications', tokenFor(OTHER))).body.notifications, []);
     });
@@ -343,10 +344,10 @@ describe('text sanitizing and comment input', () => {
 
 test('a legacy name equal to the old escaped email prefix stays masked', async (t) => {
   const legacy = await startServer({}, {
-    dbFixture: { users: [userOf('legacy-name', { email: 'a&\x01b@example.test', firstName: 'a&amp;\x01b' })] },
+    dbFixture: { users: [userOf('legacy-name', { email: 'a&\x01b@example.test', firstName: 'a&amp;\x01b' }), userOf('viewer')] },
   });
   t.after(() => legacy.stop());
-  const { status, body } = await call(legacy, 'GET', '/api/users/legacy-name');
+  const { status, body } = await call(legacy, 'GET', '/api/users/legacy-name', tokenFor('viewer'));
   assert.equal(status, 200);
   assert.equal(body.firstName, undefined);
 });

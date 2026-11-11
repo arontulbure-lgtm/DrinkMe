@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { apiFetch, isStaleJwtError } from '../lib/api';
+import { apiFetch } from '../lib/api';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
 
@@ -15,7 +15,8 @@ import { BaseUser } from '../types/api';
 // anyone can then add themselves and read the list.
 // Rollout: deploy the server first, then release the client. The server accepts any version from 1 up to
 // its own and stores the highest, so older builds still answering their own notice are never stranded.
-export const PRIVACY_NOTICE_VERSION = 1;
+// Version 2: nothing is visible without signing in, or before the 18+ confirmation.
+export const PRIVACY_NOTICE_VERSION = 2;
 
 const NAME_MAX_LENGTH = 120;
 
@@ -26,7 +27,7 @@ interface Props {
 // Two steps, each shown only if needed: the notice, which cannot be skipped, then the name.
 // AppNavigator removes the screen once the profile says nothing is left to ask.
 export default function OnboardingScreen({ onLater }: Props) {
-  const { profile, serverUserId, setProfile, logout, retrySession } = useAuth();
+  const { profile, serverUserId, setProfile, logout } = useAuth();
   const { t } = useLocalization();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
@@ -43,11 +44,10 @@ export default function OnboardingScreen({ onLater }: Props) {
     queryClient.setQueryData<BaseUser>(['users.detail', serverUserId], updated);
   };
 
-  const handleSaveError = (error: unknown) => {
+  const handleSaveError = () => {
     if (!isCurrentAuthUser(serverUserId)) return;
     setErrorKey('onboarding.saveFailed');
-    // Every retry would fail the same way, so the session is rebuilt, which brings this screen back.
-    if (isStaleJwtError(error)) retrySession();
+    // A 401 on the JWT in use already makes apiFetch rebuild the session, which brings this screen back.
   };
 
   const acknowledgeMutation = useMutation({

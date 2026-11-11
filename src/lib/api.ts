@@ -18,6 +18,16 @@ export function getApiToken(): string | null {
   return _apiToken;
 }
 
+// AuthContext rebuilds the session when the server stops accepting the JWT in use, for example after a
+// verified sign-in elsewhere logged out every earlier one. The new exchange either gives a fresh JWT or
+// ends on the sign-in or session error screen.
+// The handler answers whether it started a rebuild. A rebuild clears the token itself (setApiToken(null)).
+let _staleTokenHandler: (() => boolean) | null = null;
+
+export function setStaleTokenHandler(handler: (() => boolean) | null): void {
+  _staleTokenHandler = handler;
+}
+
 // ── Config ─────────────────────────────────────────────────────────────────
 const RAW_BASE_URL = Constants.expoConfig?.extra?.apiUrl || process.env.EXPO_PUBLIC_API_URL;
 const API_BASE_URL = RAW_BASE_URL ? RAW_BASE_URL.replace(/\/$/, '') : '';
@@ -74,6 +84,10 @@ export async function apiFetch<T>(path: string, config: RequestConfig = {}): Pro
   if (!hasAuthHeader && _apiToken) {
     finalHeaders.Authorization = `Bearer ${_apiToken}`;
   }
+  // The token in use, whether injected here or passed by a screen from getJwtToken(). A header holding any
+  // other token, such as the stored one checked at session start, says nothing about the current session.
+  const sentAuthorization = Object.entries(finalHeaders).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
+  const usedToken = _apiToken && sentAuthorization === `Bearer ${_apiToken}` ? _apiToken : null;
 
   const response = await fetch(url, {
     headers: finalHeaders,
@@ -82,7 +96,16 @@ export async function apiFetch<T>(path: string, config: RequestConfig = {}): Pro
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new ApiError(text || response.statusText, response.status, parseErrorCode(text));
+    const error = new ApiError(text || response.statusText, response.status, parseErrorCode(text));
+    // Only for the token in use: a request that ran with a token since replaced says nothing about the
+    // current session, and sign-in itself is the rebuild. A started rebuild clears the token at once, so
+    // the other requests failing alongside this one do not start it again. When the handler declines
+    // (throttled, or no ready session) the token stays, so a later 401 can still start the rebuild and
+    // the app is never left signed in with no token.
+    if (usedToken && usedToken === _apiToken && path !== '/api/auth/mobile' && isStaleJwtError(error)) {
+      _staleTokenHandler?.();
+    }
+    throw error;
   }
 
   if (response.status === 204) {

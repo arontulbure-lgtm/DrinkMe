@@ -14,7 +14,6 @@ import {
 import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
 import LoadMoreButton from '../components/LoadMoreButton';
 import PostActionsSheet from '../components/PostActionsSheet';
-import AgeGateBanner from '../components/AgeGateBanner';
 
 // ── Beta flag — set to false to re-enable AI recipe generation ────────────────
 const AI_RECIPES_ENABLED = false;
@@ -548,7 +547,6 @@ export default function SmartBarScreen({ navigation }: any) {
       >
         {activeTab === 'inventory' && inventoryContent}
         {activeTab === 'recipes' && recipesContent}
-        {activeTab === 'saved' && <AgeGateBanner />}
         {activeTab === 'saved' && savedContent}
 
         {activeTab === 'inventory' && (

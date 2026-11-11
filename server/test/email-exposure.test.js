@@ -34,6 +34,8 @@ const signIn = async (baseUrl, uid, fields = {}) => {
     ...fields,
   });
   assert.equal(status, 200);
+  // Every route but the first-run ones needs the 18+ confirmation.
+  assert.equal((await post(baseUrl, `/api/users/${uid}/acknowledgements`, body.token, { type: 'age', confirmed: true })).status, 200);
   return body.token;
 };
 
@@ -117,7 +119,7 @@ describe('a new user with an email and no displayName', () => {
     assertNoLeak('B: stories', await get(baseUrl, '/api/stories', tokenB));
   });
 
-  test('logged-out reads of the public routes carry A\'s data, with no email', async () => {
+  test('logged-out reads get 401 and carry nothing of A\'s', async () => {
     const { baseUrl } = server;
     const routes = [
       '/api/users/userA',
@@ -129,10 +131,10 @@ describe('a new user with an email and no displayName', () => {
     assert.equal((await get(baseUrl, '/api/users/userB/partners')).status, 401);
     for (const route of routes) {
       const response = await get(baseUrl, route);
-      assertNoLeak(`logged out: ${route}`, response);
-      assert.ok(response.text.includes('"userA"'), `${route} should include user A`);
+      assertNoLeak(`logged out: ${route}`, response, 401);
+      assert.ok(!response.text.includes('"userA"'), `${route} must not include user A`);
     }
-    assertNoLeak('logged out: stories', await get(baseUrl, '/api/stories'));
+    assertNoLeak('logged out: stories', await get(baseUrl, '/api/stories'), 401);
   });
 
   test('comment POST responses have no email', async () => {
@@ -280,7 +282,8 @@ describe('legacy accounts whose firstName came from the email', () => {
       const owner = await signIn(server.baseUrl, 'legacy');
       assert.equal((await put(server, 'legacy', owner, { bio: 'Only the bio' })).status, 200);
 
-      assertNoLeak('logged out', await get(server.baseUrl, '/api/users/legacy'));
+      const viewer = await signIn(server.baseUrl, 'viewer');
+      assertNoLeak('another user', await get(server.baseUrl, '/api/users/legacy', viewer));
       assert.equal(readStored(server, 'legacy').nameSetByUser, undefined);
     });
 
@@ -299,7 +302,7 @@ describe('legacy accounts whose firstName came from the email', () => {
         const stored = readStored(server, id);
         assert.equal(stored.firstName, storedName);
         assert.equal(stored.nameSetByUser, undefined);
-        const { body } = await get(server.baseUrl, `/api/users/${id}`);
+        const { body } = await get(server.baseUrl, `/api/users/${id}`, await signIn(server.baseUrl, 'viewer'));
         assert.equal('firstName' in body, false);
       });
     }
@@ -316,7 +319,7 @@ describe('legacy accounts whose firstName came from the email', () => {
       assert.equal((await post(baseUrl, '/api/users/aron/acknowledgements', owner, { type: 'privacy', version: 1 })).status, 200);
 
       await server.restart();
-      const { body, text } = await get(baseUrl, '/api/users/aron');
+      const { body, text } = await get(baseUrl, '/api/users/aron', viewer);
       assert.equal(body.firstName, 'Aron');
       assert.ok(!text.includes('nameSetByUser'));
       assert.deepEqual((await get(baseUrl, '/api/users/search?q=aron', viewer)).body.map((u) => u.id), ['aron']);
@@ -327,7 +330,8 @@ describe('legacy accounts whose firstName came from the email', () => {
       t.after(() => server.stop());
       const owner = await signIn(server.baseUrl, 'legacy');
       assert.equal((await put(server, 'legacy', owner, { firstName: 'Lena' })).status, 200);
-      assert.equal((await get(server.baseUrl, '/api/users/legacy')).body.firstName, 'Lena');
+      const viewer = await signIn(server.baseUrl, 'viewer');
+      assert.equal((await get(server.baseUrl, '/api/users/legacy', viewer)).body.firstName, 'Lena');
       assert.equal(readStored(server, 'legacy').nameSetByUser, true);
     });
   });
@@ -337,18 +341,18 @@ describe('legacy accounts whose firstName came from the email', () => {
     t.after(() => server.stop());
     const { baseUrl } = server;
     await signIn(baseUrl, 'brandNew', { email: 'brand.new@example.test' });
-    await signIn(baseUrl, 'viewer');
+    const viewer = await signIn(baseUrl, 'viewer');
 
-    const { body } = await get(baseUrl, '/api/users/brandNew');
+    const { body } = await get(baseUrl, '/api/users/brandNew', viewer);
     assert.equal(body.city, '');
     assert.equal(body.bio, '');
-    assert.equal((await get(baseUrl, '/api/users/viewer')).body.city, 'Cluj');
+    assert.equal((await get(baseUrl, '/api/users/viewer', viewer)).body.city, 'Cluj');
   });
 
   test('a comment by a missing user still loads, with no user', async (t) => {
     const server = await startServer({}, { dbFixture: fixture() });
     t.after(() => server.stop());
-    const { status, body } = await get(server.baseUrl, '/api/drinks/1/comments');
+    const { status, body } = await get(server.baseUrl, '/api/drinks/1/comments', await signIn(server.baseUrl, 'viewer'));
     assert.equal(status, 200);
     assert.equal(body.items[0].user, undefined);
   });
@@ -389,13 +393,14 @@ describe('request logs', () => {
           client_email: 'log-test@drinkme-log-test.example.test',
         }),
       },
-      /"GET \/api\/drinks HTTP\/1\.1" 200/,
+      /"GET \/api\/drinks HTTP\/1\.1" 401/,
     ],
   ]) {
+    // Logged out, so the answer is 401: the request is still logged.
     test(`${label} logs the path and not the query string`, async (t) => {
       const server = await startServer(env);
       t.after(() => server.stop());
-      assert.equal((await get(server.baseUrl, `/api/drinks?city=${CANARY}`)).status, 200);
+      assert.equal((await get(server.baseUrl, `/api/drinks?city=${CANARY}`)).status, 401);
       await waitForLogLine(server, pattern);
       assert.ok(!server.getOutput().includes(CANARY));
     });

@@ -46,9 +46,10 @@ const post = (server, uid, imageData = SMALL_IMAGE) => (
   call(server, 'POST', '/api/drinks', uid, { name: 'New', description: 'New', rating: 4, isAlcoholic: false, imageData })
 );
 const comment = (server, id, uid) => call(server, 'POST', `/api/drinks/${id}/comments`, uid, { content: 'Hello' });
-const media = (server, id) => fetch(`${server.baseUrl}/media/drinks/${id}`);
+// Nothing is readable logged out, so images are fetched as another confirmed user.
+const media = (server, id, headers = {}) => fetch(`${server.baseUrl}/media/drinks/${id}`, { headers: { Authorization: `Bearer ${tokenFor(OTHER)}`, ...headers } });
 
-const user = (id) => ({ id, email: `${id}@example.test`, firstName: id, lastName: '', city: '', bio: '', nameSetByUser: true, avatar: null });
+const user = (id) => ({ id, email: `${id}@example.test`, firstName: id, lastName: '', city: '', bio: '', nameSetByUser: true, avatar: null, ageConfirmedAt: ago(1000) });
 const drink = (id, userId, extra = {}) => ({
   id, userId, name: `Drink ${id}`, description: 'Plain', rating: 4, location: null, isAlcoholic: false,
   createdAt: ago(48), cheersCount: 0, tags: [], imageUrl: SMALL_IMAGE, ...extra,
@@ -80,7 +81,7 @@ describe('DELETE /api/drinks/:id', () => {
     for (const badId of ['abc', '1e0', '0x1', '-1', '1.0']) {
       assert.equal((await remove(server, badId, OWNER)).status, 404, badId);
     }
-    assert.equal((await call(server, 'GET', '/api/drinks/1')).status, 200, 'the post is still there');
+    assert.equal((await call(server, 'GET', '/api/drinks/1', THIRD)).status, 200, 'the post is still there');
   });
 
   test('the owner gets 204, and the post, comments, cheers and saves are gone, also after a restart', async (t) => {
@@ -92,8 +93,8 @@ describe('DELETE /api/drinks/:id', () => {
     assert.equal(res.body, undefined);
 
     const assertGone = async () => {
-      assert.equal((await call(server, 'GET', '/api/drinks/1')).status, 404);
-      assert.equal((await call(server, 'GET', '/api/drinks/1/comments')).status, 404);
+      assert.equal((await call(server, 'GET', '/api/drinks/1', THIRD)).status, 404);
+      assert.equal((await call(server, 'GET', '/api/drinks/1/comments', THIRD)).status, 404);
       assert.equal((await call(server, 'POST', '/api/drinks/1/like', OTHER)).status, 404);
       assert.equal((await call(server, 'POST', '/api/drinks/1/save', OTHER)).status, 404);
       assert.equal((await comment(server, 1, OTHER)).status, 404);
@@ -125,7 +126,7 @@ describe('DELETE /api/drinks/:id', () => {
     const gone = await media(server, 1);
     assert.equal(gone.status, 404);
     assert.equal(gone.headers.get('x-media-cache'), 'miss');
-    const revalidated = await fetch(`${server.baseUrl}/media/drinks/1`, { headers: { 'If-None-Match': cached.headers.get('etag') } });
+    const revalidated = await media(server, 1, { 'If-None-Match': cached.headers.get('etag') });
     assert.equal(revalidated.status, 404, 'a device holding the old ETag must not get a 304');
   });
 
@@ -162,7 +163,7 @@ describe('DELETE /api/drinks/:id', () => {
     assert.equal(detail.body.isLiked, true);
     assert.equal(detail.body.isSaved, true);
     assert.equal(detail.body.cheersCount, 2);
-    assert.equal((await call(server, 'GET', '/api/drinks/1/comments')).body.items.length, 2);
+    assert.equal((await call(server, 'GET', '/api/drinks/1/comments', THIRD)).body.items.length, 2);
     const image = await media(server, 1);
     assert.equal(image.status, 200);
     assert.equal(image.headers.get('x-media-cache'), 'miss');
@@ -177,7 +178,7 @@ describe('DELETE /api/drinks/:id', () => {
 
     assert.equal((await remove(server, 1, OWNER)).status, 204, 'deleting works once saves do');
     await server.restart();
-    assert.equal((await call(server, 'GET', '/api/drinks/1')).status, 404);
+    assert.equal((await call(server, 'GET', '/api/drinks/1', THIRD)).status, 404);
   });
 
   test('works above the growth limit, and frees it', async (t) => {
@@ -424,15 +425,18 @@ describe('limit events', () => {
   test('a limitEventsByUser value of the wrong shape counts as a corrupt database', async (t) => {
     const server = await startServer({}, { dbFixture: baseFixture({ drinks: [drink(1, OWNER)], limitEventsByUser: { [OWNER]: 'x' } }) });
     t.after(() => server.stop());
-    assert.deepEqual((await call(server, 'GET', '/api/drinks')).body.items, []);
     assert.ok(fs.readdirSync(path.dirname(server.dbFile)).some((name) => name.includes('.corrupt-')));
+    // The database started empty, so the reader signs in (dev fallback) and confirms first.
+    const signIn = await call(server, 'POST', '/api/auth/mobile', undefined, { idToken: 'dev-fallback-token', uid: THIRD });
+    assert.equal((await call(server, 'POST', `/api/users/${THIRD}/acknowledgements`, THIRD, { type: 'age', confirmed: true })).status, 200, signIn.status);
+    assert.deepEqual((await call(server, 'GET', '/api/drinks', THIRD)).body.items, []);
   });
 
   test('reads and a logged-out request create no entry', async (t) => {
     const server = await startServer({}, { dbFixture: baseFixture({ drinks: [drink(1, OTHER)] }) });
     t.after(() => server.stop());
 
-    await call(server, 'GET', '/api/drinks');
+    await call(server, 'GET', '/api/drinks', THIRD);
     assert.equal((await post(server, undefined)).status, 401);
     assert.equal((await post(server, OWNER, 'not an image')).status, 400);
     assert.equal((await comment(server, 999, OWNER)).status, 404);
@@ -450,8 +454,8 @@ describe('post ids in the URL', () => {
     t.after(() => server.stop());
 
     for (const badId of ['1e0', '0x1', '1.0', '01', '+1', '%201', '0', '-1']) {
-      assert.equal((await call(server, 'GET', `/api/drinks/${badId}`)).status, 404, `detail ${badId}`);
-      assert.equal((await call(server, 'GET', `/api/drinks/${badId}/comments`)).status, 404, `comments ${badId}`);
+      assert.equal((await call(server, 'GET', `/api/drinks/${badId}`, THIRD)).status, 404, `detail ${badId}`);
+      assert.equal((await call(server, 'GET', `/api/drinks/${badId}/comments`, THIRD)).status, 404, `comments ${badId}`);
     }
     for (const badId of ['1e0', '0x1', '1.0', '01']) {
       assert.equal((await comment(server, badId, OWNER)).status, 404, `comment ${badId}`);
@@ -462,8 +466,8 @@ describe('post ids in the URL', () => {
     assert.equal(db.drinks[0].cheersCount, 0);
     assert.equal(db.commentsByDrink[1].length, 1);
 
-    assert.equal((await call(server, 'GET', '/api/drinks/1')).status, 200);
-    assert.equal((await call(server, 'GET', '/api/drinks/1/comments')).status, 200);
+    assert.equal((await call(server, 'GET', '/api/drinks/1', THIRD)).status, 200);
+    assert.equal((await call(server, 'GET', '/api/drinks/1/comments', THIRD)).status, 200);
     assert.equal((await comment(server, 1, OWNER)).status, 201);
     assert.equal((await call(server, 'POST', '/api/drinks/1/like', OWNER)).body.cheersCount, 1);
     assert.equal((await call(server, 'POST', '/api/drinks/1/save', OWNER)).body.saved, true);

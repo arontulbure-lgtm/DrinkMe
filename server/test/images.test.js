@@ -88,6 +88,9 @@ const signIn = async (baseUrl, uid) => {
     uid,
   });
   assert.equal(status, 200);
+  // Every route but the first-run ones needs the 18+ confirmation.
+  const age = await sendJson(baseUrl, 'POST', `/api/users/${uid}/acknowledgements`, body.token, { type: 'age', confirmed: true });
+  assert.equal(age.status, 200);
   return body.token;
 };
 
@@ -706,18 +709,18 @@ describe('failed saves', () => {
     const nextId = readDb(server.dbFile).nextDrinkId;
     assertSaveFailed(await whileSavesFail(() => call('POST', '/api/drinks', tokenB, body)), 'post');
     const namedRollback = (drinks) => drinks.filter((drink) => drink.name === 'Rollback post');
-    assert.deepEqual(namedRollback((await call('GET', '/api/drinks')).body.items), []);
+    assert.deepEqual(namedRollback((await call('GET', '/api/drinks', tokenA)).body.items), []);
 
     const retry = await call('POST', '/api/drinks', tokenB, body);
     assert.equal(retry.status, 201);
     assert.equal(retry.body.id, nextId);
-    assert.equal(namedRollback((await call('GET', '/api/drinks')).body.items).length, 1);
+    assert.equal(namedRollback((await call('GET', '/api/drinks', tokenA)).body.items).length, 1);
     assert.equal(namedRollback(readDb(server.dbFile).drinks).length, 1);
   });
 
   test('a comment that failed to save leaves no comment or notification, and a retry creates one of each', async () => {
     const path = `/api/drinks/${drinkId}/comments`;
-    const comments = async () => (await call('GET', path)).body.items.filter((c) => c.content === 'Rollback comment');
+    const comments = async () => (await call('GET', path, tokenA)).body.items.filter((c) => c.content === 'Rollback comment');
     const notifications = async () => (await call('GET', '/api/notifications', tokenA)).body.notifications
       .filter((n) => n.type === 'comment');
     const notificationsBefore = (await notifications()).length;
@@ -752,7 +755,7 @@ describe('failed saves', () => {
     assertSaveFailed(await whileSavesFail(() => call('POST', path, tokenB, { imageData: toBase64(PNG) })), 'avatar');
     // The memory state, not the file: the URL and the bytes both went back to the saved avatar.
     assert.equal((await call('GET', `/api/users/${USER_B}`, tokenB)).body.avatar, saved.body.avatar);
-    const image = await fetch(`${server.baseUrl}${saved.body.avatar}`);
+    const image = await fetch(`${server.baseUrl}${saved.body.avatar}`, { headers: { Authorization: `Bearer ${tokenA}` } });
     assert.deepEqual(Buffer.from(await image.arrayBuffer()), JPEG);
   });
 
@@ -885,8 +888,9 @@ test('the mutation limiter runs before body parsing', async (t) => {
     headers: { 'Content-Type': 'application/json' },
     body: '{ not json',
   });
+  // Logged out, so the sign-in gate refuses each one before the body is parsed, after the limiter counted it.
   for (let i = 0; i < MUTATION_LIMIT; i++) {
-    assert.equal((await sendBadJson()).status, 400);
+    assert.equal((await sendBadJson()).status, 401);
   }
   assert.equal((await sendBadJson()).status, 429);
 });
@@ -1049,8 +1053,8 @@ describe('data stored before this validation', () => {
     assert.equal(db.users.find((u) => u.id === 'legacy-data').avatar, LEGACY_SVG_AVATAR);
     assert.equal(db.drinks[0].imageUrl, LEGACY_IMAGE);
 
-    assert.equal((await send(server.baseUrl, 'GET', '/api/users/legacy-photo')).body.avatar, GOOGLE_PHOTO);
-    assert.equal((await send(server.baseUrl, 'GET', '/api/users/legacy-data')).body.avatar, null);
-    assert.equal((await send(server.baseUrl, 'GET', '/api/drinks/1')).body.imageUrl, '/media/drinks/1');
+    assert.equal((await send(server.baseUrl, 'GET', '/api/users/legacy-photo', token)).body.avatar, GOOGLE_PHOTO);
+    assert.equal((await send(server.baseUrl, 'GET', '/api/users/legacy-data', token)).body.avatar, null);
+    assert.equal((await send(server.baseUrl, 'GET', '/api/drinks/1', token)).body.imageUrl, '/media/drinks/1');
   });
 });

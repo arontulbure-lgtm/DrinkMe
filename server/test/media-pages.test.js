@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { after, before, describe, test } from 'node:test';
 
-import { startServer } from './helpers/harness.js';
+import jwt from 'jsonwebtoken';
+
+import { startServer as startHarnessServer } from './helpers/harness.js';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 5, 6, 7, 8]);
@@ -15,7 +17,22 @@ const MAX_T1_7_RESPONSE_BYTES = 256 * 1024;
 const dataUrl = (mime, bytes) => `data:image/${mime};base64,${bytes.toString('base64')}`;
 const readDb = (dbFile) => JSON.parse(fs.readFileSync(dbFile, 'utf8'));
 
-const call = async (server, path, { token, method = 'GET', body } = {}) => {
+// Nothing is readable logged out, or before the 18+ confirmation. Every fixture here gets a confirmed
+// reader, and requests without a token are sent as that reader; token: null sends none.
+const READER = 'reader';
+const readerToken = jwt.sign({ uid: READER }, 'test-only-jwt-secret', { algorithm: 'HS256', expiresIn: '1h' });
+const withReader = (dbFixture) => dbFixture && {
+  ...dbFixture,
+  users: [...(dbFixture.users ?? []), {
+    id: READER, email: 'reader@example.test', firstName: 'Reader', lastName: 'Test', city: '', bio: '', nameSetByUser: true, avatar: null,
+    ageConfirmedAt: '2026-01-01T00:00:00.000Z',
+  }],
+};
+const startServer = (env, { dbFixture, ...options } = {}) => startHarnessServer(env, { ...options, dbFixture: withReader(dbFixture) });
+const asReader = (token) => (token === undefined ? readerToken : token);
+
+const call = async (server, path, { token: requestedToken, method = 'GET', body } = {}) => {
+  const token = asReader(requestedToken);
   const res = await fetch(`${server.baseUrl}${path}`, {
     method,
     headers: {
@@ -28,8 +45,9 @@ const call = async (server, path, { token, method = 'GET', body } = {}) => {
   return { status: res.status, headers: res.headers, text, body: text ? JSON.parse(text) : undefined };
 };
 
-const media = async (server, path) => {
-  const res = await fetch(`${server.baseUrl}${path}`);
+const media = async (server, path, token) => {
+  const authorization = asReader(token);
+  const res = await fetch(`${server.baseUrl}${path}`, { headers: authorization ? { Authorization: `Bearer ${authorization}` } : {} });
   return { status: res.status, headers: res.headers, bytes: Buffer.from(await res.arrayBuffer()) };
 };
 
@@ -254,7 +272,7 @@ describe('GET /api/drinks filters', () => {
 
   test('scope=discover hides own and partner posts, and needs a signed-in user', async () => {
     assert.deepEqual(await ids('scope=discover', viewerToken), [5, 4, 3]);
-    assert.equal((await call(server, '/api/drinks?scope=discover')).status, 401);
+    assert.equal((await call(server, '/api/drinks?scope=discover', { token: null })).status, 401);
     assert.equal((await call(server, '/api/drinks?scope=discover', { token: 'not-a-token' })).status, 401);
   });
 
@@ -445,7 +463,7 @@ describe('media routes', () => {
     const { hostname, port } = new URL(server.baseUrl);
     const status = await new Promise((resolve, reject) => {
       const req = http.request({
-        hostname, port, path: '/media/drinks/1', method: 'GET', headers: { 'Content-Type': 'application/json', 'Content-Length': '9' },
+        hostname, port, path: '/media/drinks/1', method: 'GET', headers: { 'Content-Type': 'application/json', 'Content-Length': '9', Authorization: `Bearer ${readerToken}` },
       }, (res) => {
         res.resume();
         res.on('end', () => resolve(res.statusCode));
@@ -534,7 +552,7 @@ describe('media cache', () => {
   // Not fetch: it adds Cache-Control: no-cache to a request with If-None-Match, which forces a full reply.
   const getWithEtag = (etag) => new Promise((resolve, reject) => {
     const { hostname, port } = new URL(server.baseUrl);
-    http.get({ hostname, port, path: '/media/drinks/1', headers: { 'If-None-Match': etag } }, (res) => {
+    http.get({ hostname, port, path: '/media/drinks/1', headers: { 'If-None-Match': etag, Authorization: `Bearer ${readerToken}` } }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, bytes: Buffer.concat(chunks) }));
@@ -544,7 +562,7 @@ describe('media cache', () => {
   test('a repeated GET or HEAD uses the decoded bytes', async () => {
     assert.equal(await cacheState('/media/drinks/1'), 'miss');
     assert.equal(await cacheState('/media/drinks/1'), 'hit');
-    const head = await fetch(`${server.baseUrl}/media/drinks/1`, { method: 'HEAD' });
+    const head = await fetch(`${server.baseUrl}/media/drinks/1`, { method: 'HEAD', headers: { Authorization: `Bearer ${readerToken}` } });
     assert.equal(head.status, 200);
     assert.equal(head.headers.get('x-media-cache'), 'hit');
     assert.equal(head.headers.get('content-length'), String(PNG.length));
@@ -696,6 +714,8 @@ describe('stored images stay raw', () => {
     assert.equal((await media(server, '/media/avatars/google-new')).status, 404);
     assert.equal(readDb(server.dbFile).users.find((u) => u.id === 'google-new').avatar, GOOGLE_PHOTO);
 
+    const age = await call(server, '/api/users/google-new/acknowledgements', { token, method: 'POST', body: { type: 'age', confirmed: true } });
+    assert.equal(age.status, 200);
     const upload = await call(server, '/api/users/google-new/avatar', {
       token,
       method: 'POST',

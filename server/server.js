@@ -34,7 +34,13 @@ const JWT_SECRET = hasJwtSecret ? process.env.JWT_SECRET : crypto.randomBytes(64
 
 const verifyApiToken = (token) => jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] });
 // ev marks a JWT issued for a confirmed address. Older JWTs have none, so they stop working when REQUIRE_VERIFIED_EMAIL goes on.
-const signApiToken = (uid, emailVerified = false) => jwt.sign({ uid, ...(emailVerified && { ev: true }) }, JWT_SECRET, { algorithm: JWT_ALGORITHM, expiresIn: '30d' });
+// sg is the user's session generation (user.sessionGen). It is left out at 0, so JWTs from before it
+// existed stay valid until a sign-in raises the generation, which logs out every earlier JWT.
+const signApiToken = (uid, emailVerified = false, sessionGen = 0) => jwt.sign(
+  { uid, ...(emailVerified && { ev: true }), ...(sessionGen > 0 && { sg: sessionGen }) },
+  JWT_SECRET,
+  { algorithm: JWT_ALGORITHM, expiresIn: '30d' }
+);
 
 if (!hasJwtSecret && !isProduction) {
   console.warn('[auth] JWT_SECRET not set — using a random secret for this process. Tokens stop working on restart.');
@@ -249,6 +255,8 @@ const mediaLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/media', mediaLimiter);
+// Signed in and 18+ confirmed; see requireSignedInAdult.
+app.use('/media', requireSignedInAdult);
 
 // A stored value that is not a usable image is a 404, like one that does not exist.
 const sendStoredImage = (req, res, cacheKey, storedValue, cacheControl = MEDIA_CACHE_CONTROL) => {
@@ -271,6 +279,7 @@ app.get('/media/drinks/:id', (req, res) => {
   const found = drinks.find((d) => d.id === drinkId);
   const viewerId = getUserId(req);
   // An admin must be able to see what they review: a poster who blocks them cannot hide an image. This route only.
+  // requireSignedInAdult runs first, so the admin has confirmed 18+ by now and only a block can be bypassed.
   const isReviewAccess = Boolean(found) && ADMIN_USER_IDS.has(viewerId) && !canViewDrink(found, viewerId);
   // A block answers exactly like a post that does not exist, and neither answer may be reused after an unblock.
   const drink = found && (isReviewAccess || !isBlockedBetween(found.userId, viewerId)) ? found : undefined;
@@ -322,6 +331,8 @@ const mutationLimiter = rateLimit({
   skip: (req) => req.method === 'GET', // only rate-limit writes
 });
 app.use('/api', mutationLimiter);
+// Before the body parsers, so a refused request is never parsed. See requireSignedInAdult.
+app.use('/api', requireSignedInAdult);
 
 const DEFAULT_BODY_LIMIT = '100kb';
 const POST_BODY_LIMIT    = '10mb';
@@ -1402,7 +1413,7 @@ const parseSearchText = (value) => {
 const textIncludes = (value, lowercasedText) => typeof value === 'string' && value.toLowerCase().includes(lowercasedText);
 
 // ── Blocks ────────────────────────────────────────────────────────────────────
-// A block works in both directions and only for signed-in viewers: logged-out reads stay public.
+// A block works in both directions. Every read needs a signed-in, confirmed viewer (requireSignedInAdult).
 const hasBlocked = (blockerId, targetId) => blocksByUser.get(blockerId)?.has(targetId) === true;
 const isBlockedBetween = (firstId, secondId) => (
   Boolean(firstId && secondId) && (hasBlocked(firstId, secondId) || hasBlocked(secondId, firstId))
@@ -1551,6 +1562,10 @@ const isEmailVerificationMissing = (uid, payload) => (
   REQUIRE_VERIFIED_EMAIL && Boolean(firebaseAuth) && (payload.ev !== true || userIndex.get(uid)?.emailVerified === false)
 );
 
+// A JWT from an earlier session generation was logged out by a later verified sign-in (see the sign-in route).
+const getSessionGen = (user) => (Number.isSafeInteger(user?.sessionGen) && user.sessionGen > 0 ? user.sessionGen : 0);
+const isCurrentSessionGen = (uid, payload) => (payload.sg ?? 0) === getSessionGen(userIndex.get(uid));
+
 /**
  * Extrage userId din JWT-ul Bearer. Returnează null dacă tokenul lipsește sau e invalid.
  * Nu mai există fallback la user_demo — fiecare request neautentificat primește null.
@@ -1562,7 +1577,7 @@ const getUserId = (req) => {
   try {
     const payload = verifyApiToken(match[1]);
     // A token can outlive its user (lost database, deleted account). Signing in again recreates the user.
-    return payload.uid && isLiveAccount(payload.uid) && !isEmailVerificationMissing(payload.uid, payload) ? payload.uid : null;
+    return payload.uid && isLiveAccount(payload.uid) && isCurrentSessionGen(payload.uid, payload) && !isEmailVerificationMissing(payload.uid, payload) ? payload.uid : null;
   } catch {
     return null;
   }
@@ -1573,7 +1588,8 @@ const getUserId = (req) => {
  * Stochează userId în req.userId pentru rutele downstream.
  */
 const requireAuth = (req, res, next) => {
-  const userId = getUserId(req);
+  // Already checked by requireSignedInAdult for every /api route, in the same request.
+  const userId = req.userId ?? getUserId(req);
   if (!userId) return res.status(401).json({ error: 'Authentication required' });
   req.userId = userId;
   next();
@@ -1587,6 +1603,8 @@ const isAgeConfirmed = (userId) => {
 };
 
 // A post with no flag counts as alcoholic. Applies to the owner too, and a logged-out viewer is unconfirmed.
+// requireSignedInAdult already refuses unconfirmed and logged-out viewers on every route; this stays as
+// defence in depth, and for blocks, which still matter per post.
 const isAlcoholicDrink = (drink) => drink.isAlcoholic !== false;
 const canViewDrink = (drink, viewerId) => (
   !isBlockedBetween(drink.userId, viewerId) && (!isAlcoholicDrink(drink) || isAgeConfirmed(viewerId))
@@ -1596,6 +1614,56 @@ const respondAgeRequired = (res) => res.status(403).json({
   error: 'Confirm your age to see this post.',
   code: 'age_required',
 });
+
+// ── Sign-in and age gate for every route ─────────────────────────────────────
+// Owner decision: nothing is readable without signing in, and a signed-in user who has not confirmed
+// they are 18+ can only do what the first-run flow needs (AgeGate, privacy notice, name prompt) and
+// leave. Mounted on /api and /media before every route and body parser, as a function declaration so
+// the /media mount near the top can use it. Paths are matched without case and with an optional
+// trailing slash, like Express matches the routes. The rules only ever let a request through, so a
+// path spelled in a way they miss gets the full gate, never less.
+const SIGNED_OUT_ROUTES = [
+  ['POST', /^\/api\/auth\/mobile\/?$/i],
+  // Takes a fresh Firebase ID token instead of a JWT, and exists only with REQUIRE_VERIFIED_EMAIL on.
+  ['POST', /^\/api\/account\/delete-unverified\/?$/i],
+];
+// Each names the caller's own account. The routes check ownership again.
+const UNCONFIRMED_OWN_ACCOUNT_ROUTES = [
+  ['GET', /^\/api\/users\/([^/]+)\/?$/i], // own profile: session start and refresh
+  ['PUT', /^\/api\/users\/([^/]+)\/?$/i], // name prompt (Onboarding)
+  ['POST', /^\/api\/users\/([^/]+)\/acknowledgements\/?$/i], // age confirmation and privacy notice
+  ['POST', /^\/api\/users\/([^/]+)\/delete-account\/?$/i],
+];
+
+const routeMethod = (req) => (req.method === 'HEAD' ? 'GET' : req.method);
+const matchesRoute = (req, [method, pattern]) => routeMethod(req) === method && pattern.exec(req.baseUrl + req.path);
+
+const namesOwnAccount = (match, userId) => {
+  try {
+    // /api/users/search is its own route, registered first, so it never names an account here.
+    const id = decodeURIComponent(match[1]);
+    return id === userId && id.toLowerCase() !== 'search';
+  } catch {
+    return false;
+  }
+};
+
+function requireSignedInAdult(req, res, next) {
+  if (SIGNED_OUT_ROUTES.some((route) => matchesRoute(req, route))) return next();
+  const userId = getUserId(req);
+  // The answer depends on who asks, so no cache may keep a refusal or reuse it for someone else.
+  const refuse = () => res.vary('Authorization').set('Cache-Control', 'no-store');
+  if (!userId) return refuse().status(401).json({ error: 'Authentication required' });
+  if (!isAgeConfirmed(userId)) {
+    const isOwnAccountRoute = UNCONFIRMED_OWN_ACCOUNT_ROUTES.some((route) => {
+      const match = matchesRoute(req, route);
+      return Boolean(match) && namesOwnAccount(match, userId);
+    });
+    if (!isOwnAccountRoute) return respondAgeRequired(refuse());
+  }
+  req.userId = userId;
+  next();
+}
 
 // For a post canViewDrink refused. A block comes first and reads exactly like a post that does not
 // exist, so the answer says nothing about the post's flag or the viewer's age.
@@ -1615,12 +1683,14 @@ const NOTIFICATION_TEXT_WITHOUT_POST_NAME = {
 // The stored text is kept, so it shows in full once the reader confirms. drinkId and actorId stay internal.
 const toVisibleNotification = ({ drinkId, actorId, ...notification }, viewerId) => {
   const textWithoutPostName = NOTIFICATION_TEXT_WITHOUT_POST_NAME[notification.type];
+  // Defence in depth: requireSignedInAdult already refuses unconfirmed readers of /api/notifications.
   if (!textWithoutPostName || isAgeConfirmed(viewerId)) return notification;
   const drink = drinks.find((d) => d.id === drinkId);
   return drink && canViewDrink(drink, viewerId) ? notification : { ...notification, message: textWithoutPostName };
 };
 
 // What other users may see. An allowlist, so a new field on the user record stays private by default.
+// ageConfirmed must stay owner-only (toOwnerUser): the client takes its presence as proof that a JWT is the owner's.
 const toPublicUser = (user) => {
   if (!user) return undefined;
   // Hidden until the owner has read what becomes public, so a user who leaves at the notice was never public.
@@ -1635,7 +1705,8 @@ const toPublicUser = (user) => {
 // and the highest is stored, so older builds still answering their own notice are never stranded.
 // Its partner sentence is untrue with PARTNER_CONSENT_REQUIRED=false, an emergency rollback only: anyone
 // can then add themselves and read the list.
-const PRIVACY_NOTICE_VERSION = 1;
+// Version 2: nothing is visible without signing in (requireSignedInAdult).
+const PRIVACY_NOTICE_VERSION = 2;
 
 const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVersion) ? user.privacyNoticeVersion : null);
 
@@ -2085,16 +2156,47 @@ app.post('/api/auth/mobile', async (req, res) => {
 
   const existingUser = userIndex.get(verifiedUid);
   const isStaleToken = Boolean(existingUser) && isOlderIdToken(existingUser, issuedAtSeconds);
+  const isPasswordToken = signInProvider === 'password';
+  // Strong: a confirmed address, and either a provider that confirmed it (Google, Apple) or a password
+  // typed in the last few minutes. A refreshed password token keeps its old auth_time, so an attacker's
+  // kept session never counts, even after the owner's relink marks the address confirmed.
+  // The federated case is decided from the token's own claims, before the staleness rule below: the
+  // attacker can refresh more often than the owner signs in, which would otherwise make the owner's Google
+  // token count as older and lose. Only the owner can hold a Google token for this uid. A password token
+  // still has to be the newest one, so an older one cannot undo a later loss of verification.
+  const isStrongFederatedSignIn = Boolean(firebaseAuth) && emailVerified === true
+    && typeof signInProvider === 'string' && !isPasswordToken;
+  const isStrongVerifiedSignIn = isStrongFederatedSignIn || (
+    Boolean(firebaseAuth) && !isStaleToken && emailVerified === true && isPasswordToken && isRecentTokenTime(authTimeSeconds)
+  );
   // An older token can only lose: a kept unverified one must not profit from a later verification, and
-  // a kept verified one must not undo a later loss of it.
-  if (isStaleToken) emailVerified = emailVerified === true && existingUser.emailVerified === true;
+  // a kept verified one must not undo a later loss of it. A federated token keeps its verified claim.
+  if (isStaleToken && !isStrongFederatedSignIn) emailVerified = emailVerified === true && existingUser.emailVerified === true;
+
+  // ── Email takeover guard, with or without REQUIRE_VERIFIED_EMAIL ──
+  // Someone can register another person's address with a password before its owner, unconfirmed, and get
+  // a JWT for that uid. When the owner later signs in with Google, Firebase keeps the uid and drops the
+  // password. Accounts are matched by uid only, never by email, so the defence is the session generation:
+  // a strong verified sign-in raises it and logs out every earlier JWT, and the auth floor then refuses
+  // the password session that was kept. Written from the documented Firebase claims (see the flag notes).
+  // The floor comes first, before the flag-on branch below can write anything: a replayed password token
+  // from before the owner's sign-in must not change the stored state or log the owner out.
+  if (
+    firebaseAuth && isPasswordToken && Number.isFinite(existingUser?.verifiedAuthFloor)
+    && !(authTimeSeconds >= existingUser.verifiedAuthFloor)
+  ) {
+    return res.status(403).json({ error: 'Please sign in again.', code: 'sign_in_again' });
+  }
+  // Once the owner has signed in through a provider that confirms the address, an unverified token
+  // (the attacker's kept password session, refreshed) cannot lower the stored verified state.
+  const keepsVerifiedState = Boolean(existingUser?.federatedVerifiedAt) && emailVerified !== true;
 
   let establishesAuthFloor = false;
   // After every deletion check, so a deleted account is told that and is never asked to verify.
   if (REQUIRE_VERIFIED_EMAIL && firebaseAuth) {
     if (!emailVerified) {
       // An unknown uid leaves nothing behind. A known one loses access now, even if this save fails.
-      if (existingUser && !isStaleToken && existingUser.emailVerified !== false) {
+      if (existingUser && !isStaleToken && !keepsVerifiedState && existingUser.emailVerified !== false) {
         existingUser.emailVerified = false;
         if (Number.isFinite(issuedAtSeconds)) existingUser.lastIdTokenIat = issuedAtSeconds;
         saveDb();
@@ -2112,7 +2214,6 @@ app.post('/api/auth/mobile', async (req, res) => {
     // the floor, and a password token from before the floor stays refused. The owner's own tokens keep
     // their auth_time on refresh, so they stay at or above it. Written from the documented claims: real
     // Firebase behaviour for this case could not be tested on this run.
-    const isPasswordToken = signInProvider === 'password';
     const hasAuthFloor = Number.isFinite(existingUser?.verifiedAuthFloor);
     establishesAuthFloor = existingUser?.emailVerified !== true || !hasAuthFloor;
     const isBelowFloor = isPasswordToken && hasAuthFloor && !(authTimeSeconds >= existingUser.verifiedAuthFloor);
@@ -2122,24 +2223,50 @@ app.post('/api/auth/mobile', async (req, res) => {
     }
   }
 
+  // ── Email takeover guard, with or without REQUIRE_VERIFIED_EMAIL (continued) ──
+  // With the flag off, a confirmed but not strong token cannot be told apart from the attacker's refreshed
+  // one, so it gets a JWT without ev and the stored state stays unconfirmed. The flag-on path above
+  // refuses this case with sign_in_again instead.
+  if (!REQUIRE_VERIFIED_EMAIL && firebaseAuth && emailVerified === true && !isStrongVerifiedSignIn && existingUser?.emailVerified !== true) {
+    emailVerified = false;
+  }
+  // The second rule covers the race where the attacker's refreshed token, already confirmed after the
+  // relink, reached the server first and stored emailVerified: the owner's first federated sign-in still
+  // starts a new generation. Costs one extra sign-in on other devices for an existing Google user.
+  const bumpsSessionGen = Boolean(existingUser) && isStrongVerifiedSignIn
+    && (existingUser.emailVerified !== true || (isStrongFederatedSignIn && !existingUser.federatedVerifiedAt));
+  // A new account needs no new generation, but a federated or fresh password one still sets the floor,
+  // so a password session kept from before the owner's relink cannot sign in afterwards.
+  const setsTakeoverFloor = bumpsSessionGen || (!existingUser && isStrongVerifiedSignIn);
+
   registerUserIfNeeded({
     id: verifiedUid,
     email,
     emailFromToken: Boolean(firebaseAuth),
-    emailVerified,
+    emailVerified: keepsVerifiedState ? undefined : emailVerified,
     tokenIat: issuedAtSeconds,
     providerName,
     displayName: typeof displayName === 'string' ? sanitizeOptional(displayName, 120) : undefined,
     photoURL: sanitizePhotoURL(photoURL),
   });
-  if (establishesAuthFloor) {
-    const floor = signInProvider === 'password' ? authTimeSeconds : issuedAtSeconds;
-    const user = userIndex.get(verifiedUid);
+  const user = userIndex.get(verifiedUid);
+  if (establishesAuthFloor || setsTakeoverFloor) {
+    // A federated floor is one second past that token's iat, so a password session whose auth_time falls
+    // in the same second as the owner's sign-in is still refused. The owner's own password sign-ins come later.
+    const floor = isPasswordToken ? authTimeSeconds : issuedAtSeconds + 1;
     if (Number.isFinite(floor)) user.verifiedAuthFloor = Math.max(floor, user.verifiedAuthFloor ?? floor);
   }
+  // A stale strong token does not update the stored state in registerUserIfNeeded, so it is set here.
+  if (bumpsSessionGen) {
+    user.sessionGen = getSessionGen(user) + 1;
+    user.emailVerified = true;
+  }
+  if (isStrongFederatedSignIn && !user.federatedVerifiedAt) user.federatedVerifiedAt = new Date().toISOString();
+  // Not rolled back when the save fails, like the rest of sign-in: earlier JWTs stay logged out in
+  // memory, and a retry finds the work done and issues a JWT at the new generation.
   if (!saveDbOrRespond(res)) return;
 
-  const token = signApiToken(verifiedUid, emailVerified === true);
+  const token = signApiToken(verifiedUid, emailVerified === true, getSessionGen(user));
   res.json({ token });
 });
 
@@ -2181,7 +2308,7 @@ app.get('/api/users/:id', (req, res) => {
   const viewerId = getUserId(req);
   if (!user || !isLiveAccount(req.params.id) || isBlockedBetween(viewerId, req.params.id)) return res.status(404).json({ error: 'User not found' });
   if (viewerId === user.id) return res.json({ ...toOwnerUser(user), partnerCount: getVisiblePartnerIds(user.id, viewerId).length });
-  if (!viewerId) return res.json(toPublicUser(user));
+  // No logged-out branch: requireSignedInAdult answers 401 before this route.
   res.json({
     ...toPublicUser(user),
     partnerStatus: getPartnerStatus(viewerId, user.id),
@@ -2750,6 +2877,7 @@ app.post('/api/drinks', requireAuth, postBodyParser, (req, res) => {
   const currentUserId = req.userId;
   const { name, description, rating, location, isAlcoholic, imageData } = req.body || {};
   // Before any validation, so the image of a post that would be refused is never processed.
+  // Defence in depth: requireSignedInAdult already refuses an unconfirmed user before this route.
   if (isAlcoholic !== false && !isAgeConfirmed(currentUserId)) return respondAgeRequired(res);
   if (!name || !description || !imageData) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -3427,6 +3555,7 @@ app.post('/api/smart-bar/generate-recipes', requireAuth, requireAiEnabled, aiLim
       return res.status(400).json({ error: 'Invalid nonAlcoholicOnly' });
     }
     // An unconfirmed user gets mocktails whatever the client asked for, with no error.
+    // The unconfirmed case is defence in depth: requireSignedInAdult refuses it before this route.
     const mocktailsOnly = nonAlcoholicOnly === true || !isAgeConfirmed(req.userId);
     const instructions = mocktailsOnly ? AI_SMART_BAR_NON_ALCOHOLIC_INSTRUCTIONS : AI_SMART_BAR_INSTRUCTIONS;
     const inputText = `Available ingredients: ${ingredients.join(', ')}. Respond in JSON.`;
@@ -3462,6 +3591,7 @@ app.post('/api/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, asyn
       return res.status(400).json({ error: 'Invalid isAlcoholic' });
     }
     // An unconfirmed user gets mocktails whatever the client asked for, with no error.
+    // The unconfirmed case is defence in depth: requireSignedInAdult refuses it before this route.
     const mocktailsOnly = isAlcoholic === false || !isAgeConfirmed(req.userId);
     const instructions = mocktailsOnly ? AI_PRODUCT_NON_ALCOHOLIC_INSTRUCTIONS : AI_PRODUCT_RECIPE_INSTRUCTIONS;
     const inputText = `Product: "${productName}". Respond in JSON.`;

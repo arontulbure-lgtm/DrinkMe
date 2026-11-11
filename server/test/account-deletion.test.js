@@ -7,12 +7,17 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
+import jwt from 'jsonwebtoken';
+
 import { REAL_DATA_DIR, REAL_DB_FILE, startServer } from './helpers/harness.js';
 
 const STUB_PRELOAD = new URL('./helpers/firebase-auth-stub-preload.js', import.meta.url).href;
 const FAULT_PRELOAD = new URL('./helpers/db-fault-preload.js', import.meta.url).href;
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Nothing is readable logged out, so other users' view is read with a confirmed fixture user's JWT.
+const viewerToken = (uid) => jwt.sign({ uid }, 'test-only-jwt-secret', { algorithm: 'HS256', expiresIn: '1h' });
+const asViewer = (uid) => ({ headers: { Authorization: `Bearer ${viewerToken(uid)}` } });
 
 // Synthetic credentials. The key exists only in memory, for this test run.
 const { privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -193,9 +198,9 @@ const assertNoTrace = (dbFile, traces = VICTIM_TRACES) => {
   for (const trace of traces) assert.ok(!raw.includes(trace), `the saved file still holds ${trace}`);
 };
 
-const assertOthersIntact = (dbFile) => {
+const assertOthersIntact = (dbFile, extraUserIds = []) => {
   const db = readDb(dbFile);
-  assert.deepEqual(db.users.map((u) => u.id).sort(), [BOB, CAROL]);
+  assert.deepEqual(db.users.map((u) => u.id).sort(), [BOB, CAROL, ...extraUserIds].sort());
   assert.deepEqual(db.drinks.map((d) => d.id).sort(), [20, 30]);
   assert.equal(db.drinks.find((d) => d.id === 20).cheersCount, 1, 'only the victim\'s cheer goes');
   assert.deepEqual(db.commentsByDrink['20'].map((c) => c.id), [3]);
@@ -221,14 +226,17 @@ const assertOthersIntact = (dbFile) => {
 
 // ── The cascade ───────────────────────────────────────────────────────────────
 test('dev mode: every trace of the user goes, other users\' data stays correct, and nothing is logged', async (t) => {
-  const server = await startOn(t, {}, { dbFixture: makeFixture() });
+  // A reader with no block on either side, so a 404 below can only come from the deletion.
+  const fixture = makeFixture();
+  fixture.users.push({ id: 'reader-uid', email: 'reader@example.test', firstName: 'Reader', lastName: 'Keeper', city: '', bio: '', avatar: null, nameSetByUser: true, ageConfirmedAt: new Date().toISOString() });
+  const server = await startOn(t, {}, { dbFixture: fixture });
   const { baseUrl, dbFile, getOutput } = server;
   const token = await devSignIn(baseUrl, VICTIM);
 
   // Served once first, so both are in the image cache. The 404s below show no cached copy is served
   // afterwards; they do not show the memory was freed. Their log lines arrive before the marker.
-  assert.equal((await fetch(`${baseUrl}/media/avatars/${VICTIM}`)).status, 200);
-  assert.equal((await fetch(`${baseUrl}/media/drinks/10`)).status, 200);
+  assert.equal((await fetch(`${baseUrl}/media/avatars/${VICTIM}`, asViewer('reader-uid'))).status, 200);
+  assert.equal((await fetch(`${baseUrl}/media/drinks/10`, asViewer('reader-uid'))).status, 200);
   await waitFor(() => getOutput().includes('/media/drinks/10'), 'the media log lines');
   const outputBefore = getOutput().length;
 
@@ -239,15 +247,15 @@ test('dev mode: every trace of the user goes, other users\' data stays correct, 
   const db = readDb(dbFile);
   assert.deepEqual(db.pendingAccountDeletions, []);
   assertNoTrace(dbFile);
-  assertOthersIntact(dbFile);
+  assertOthersIntact(dbFile, ['reader-uid']);
 
   await waitFor(() => getOutput().includes('delete-account'), 'the request log line');
   const output = getOutput().slice(outputBefore);
   for (const trace of [VICTIM, VICTIM_FIRST, VICTIM_LAST, VICTIM_EMAIL]) assert.ok(!output.includes(trace), `the log holds ${trace}`);
 
-  assert.equal((await fetch(`${baseUrl}/media/avatars/${VICTIM}`)).status, 404);
-  assert.equal((await fetch(`${baseUrl}/media/drinks/10`)).status, 404);
-  assert.equal((await get(baseUrl, `/api/users/${VICTIM}`)).status, 404);
+  assert.equal((await fetch(`${baseUrl}/media/avatars/${VICTIM}`, asViewer('reader-uid'))).status, 404);
+  assert.equal((await fetch(`${baseUrl}/media/drinks/10`, asViewer('reader-uid'))).status, 404);
+  assert.equal((await get(baseUrl, `/api/users/${VICTIM}`, viewerToken('reader-uid'))).status, 404);
 
   // The old JWT now counts as logged out, on this route too.
   assert.equal((await get(baseUrl, '/api/smart-bar', token)).status, 401);
@@ -256,7 +264,7 @@ test('dev mode: every trace of the user goes, other users\' data stays correct, 
   // And the file stays clean across a restart.
   await server.restart();
   assertNoTrace(dbFile);
-  assertOthersIntact(dbFile);
+  assertOthersIntact(dbFile, ['reader-uid']);
 });
 
 test('another user with the same name keeps a notification that has their own actorId', async (t) => {
@@ -365,6 +373,8 @@ test('the same uid signing in again starts clean, with no partner link or reques
   assert.ok(!('privacyNoticeVersion' in stored));
   assert.ok(!('privacyNoticeAt' in stored));
 
+  // A new account: the 18+ confirmation comes first, as for anyone.
+  assert.equal((await post(baseUrl, `/api/users/${VICTIM}/acknowledgements`, { type: 'age', confirmed: true }, newToken)).status, 200);
   assert.equal((await get(baseUrl, '/api/friends/count', newToken)).body, 0);
   assert.deepEqual((await get(baseUrl, '/api/drink-partners', newToken)).body, []);
   assert.deepEqual((await get(baseUrl, '/api/drink-partners/requests', newToken)).body, { incoming: [], outgoing: [] });
@@ -479,7 +489,10 @@ test('Firebase mode: success removes the data and the Firebase user, and clears 
   const [tombstone, ...others] = readDb(dbFile).pendingAccountDeletions;
   assert.deepEqual(others, []);
   assert.equal(tombstone.uid, VICTIM);
-  assert.ok(tombstone.until > Date.now() && tombstone.until <= Date.now() + 60 * 60 * 1000);
+  // One second of slack: the server and this process read the clock separately, and on Windows the
+  // server's read, made earlier, has been seen a few milliseconds ahead of this one.
+  const checkedAt = Date.now();
+  assert.ok(tombstone.until > checkedAt && tombstone.until <= checkedAt + 60 * 60 * 1000 + 1000, JSON.stringify({ tombstone, checkedAt }));
   assertNoTrace(dbFile);
   assertOthersIntact(dbFile);
 });
@@ -636,7 +649,7 @@ test('a tombstone loaded with a far-off expiry cannot outlast the retention', as
 test('while a uid is pending it reads as not found to others, as a user and as a target', async (t) => {
   const uid = 'fault-injected-user';
   const fixture = JSON.parse(JSON.stringify(makeFixture()).replaceAll(VICTIM, uid));
-  fixture.users.push({ id: 'dana-uid', email: 'dana@example.test', firstName: 'Dana', lastName: 'Keeper', city: '', bio: '', avatar: null, nameSetByUser: true });
+  fixture.users.push({ id: 'dana-uid', email: 'dana@example.test', firstName: 'Dana', lastName: 'Keeper', city: '', bio: '', avatar: null, nameSetByUser: true, ageConfirmedAt: new Date().toISOString() });
   const env = { ...firebaseEnv, DB_FAULT: 'cascade', NODE_OPTIONS: `--import=${STUB_PRELOAD} --import=${FAULT_PRELOAD}` };
   const { baseUrl, dbFile } = await startOn(t, env, { dbFixture: fixture });
   const { token } = (await firebaseSignIn(baseUrl, uid)).body;
@@ -644,16 +657,15 @@ test('while a uid is pending it reads as not found to others, as a user and as a
   const send = async (method, route) => (await fetch(`${baseUrl}${route}`, {
     method, headers: { Authorization: `Bearer ${dana}`, 'Content-Type': 'application/json' },
   })).status;
-  assert.equal((await get(baseUrl, `/api/users/${uid}`)).status, 200, 'the fixture is visible before');
+  assert.equal((await get(baseUrl, `/api/users/${uid}`, dana)).status, 200, 'the fixture is visible before');
   assert.equal((await get(baseUrl, `/api/users/search?q=${VICTIM_FIRST}`, dana)).body.length, 1, 'and searchable');
 
   fs.writeFileSync(marker(dbFile, '.fail-cascade'), '');
   assert.equal((await deleteAccount(baseUrl, uid, token, stubToken(uid))).status, 500);
   assert.ok(readDb(dbFile).users.some((user) => user.id === uid), 'the record is still there');
 
-  assert.equal((await get(baseUrl, `/api/users/${uid}`)).status, 404);
   assert.equal((await get(baseUrl, `/api/users/${uid}`, dana)).status, 404);
-  assert.equal((await fetch(`${baseUrl}/media/avatars/${uid}`)).status, 404);
+  assert.equal((await fetch(`${baseUrl}/media/avatars/${uid}`, { headers: { Authorization: `Bearer ${dana}` } })).status, 404);
   assert.deepEqual((await get(baseUrl, `/api/users/search?q=${VICTIM_FIRST}`, dana)).body, []);
   assert.equal((await get(baseUrl, `/api/users/${uid}/partners`, dana)).status, 404);
   assert.equal(await send('POST', `/api/drink-partners/${uid}`), 404);
@@ -701,7 +713,7 @@ test('a crash after the entry was saved finishes the cascade at startup, before 
   assertNoTrace(dbFile, VICTIM_TRACES.filter((trace) => trace !== VICTIM));
   assertOthersIntact(dbFile);
   assert.ok(!getOutput().includes(VICTIM));
-  assert.equal((await get(baseUrl, `/api/users/${VICTIM}`)).status, 404);
+  assert.equal((await get(baseUrl, `/api/users/${VICTIM}`, viewerToken(BOB))).status, 404);
 
   // With no Firebase here the sign-in account cannot be removed, so only the route may clear the entry.
   assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid: VICTIM }]);

@@ -77,6 +77,20 @@ const getUser = async (baseUrl, id) => {
 const readStoredUser = (dbFile, id) =>
   JSON.parse(fs.readFileSync(dbFile, 'utf8')).users.find((user) => user.id === id);
 
+// Nothing is readable logged out, or before the 18+ confirmation, so other users' public view is read
+// as a separate, confirmed account.
+const publicViewerToken = async (baseUrl) => {
+  const { status, body } = await postAuth(baseUrl, { idToken: stubToken({ uid: 'public-viewer' }), uid: 'public-viewer' });
+  assert.equal(status, 200);
+  const age = await postJson(
+    `${baseUrl}/api/users/public-viewer/acknowledgements`,
+    { type: 'age', confirmed: true },
+    { Authorization: `Bearer ${body.token}` }
+  );
+  assert.equal(age.status, 200);
+  return body.token;
+};
+
 const devSignIn = async (baseUrl, fields = {}, uid = 'dev-user') => {
   const res = await postAuth(baseUrl, { idToken: 'dev-fallback-token', uid, ...fields });
   assert.equal(res.status, 200);
@@ -210,6 +224,8 @@ describe('/api/auth/mobile in the dev fallback', () => {
   test('an uploaded avatar survives a re-login with a valid photoURL', async (t) => {
     const { baseUrl } = await startOn(t);
     const token = await devSignIn(baseUrl, { photoURL: GOOGLE_PHOTO });
+    const age = await postJson(`${baseUrl}/api/users/dev-user/acknowledgements`, { type: 'age', confirmed: true }, { Authorization: `Bearer ${token}` });
+    assert.equal(age.status, 200);
 
     const upload = await postJson(
       `${baseUrl}/api/users/dev-user/avatar`,
@@ -307,10 +323,11 @@ describe('/api/auth/mobile in Firebase mode (firebase-admin/auth stubbed)', () =
     ['absent', undefined, false],
     ['a non-boolean', 'true', false],
   ]) {
+    // From a provider that confirms the address: a password token must also be fresh (account-takeover.test.js).
     test(`email_verified ${label} stores emailVerified ${expected} and sign-in succeeds`, async (t) => {
       const { baseUrl, dbFile } = await startOn(t, firebaseEnv);
       const { status, body } = await postAuth(baseUrl, {
-        idToken: stubToken({ uid: 'fb-user', email: 'token@example.test', email_verified: claim }),
+        idToken: stubToken({ uid: 'fb-user', email: 'token@example.test', email_verified: claim, firebase: { sign_in_provider: 'google.com' } }),
         uid: 'fb-user',
         emailVerified: !expected, // the body must never decide this
       });
@@ -324,7 +341,7 @@ describe('/api/auth/mobile in Firebase mode (firebase-admin/auth stubbed)', () =
     const { baseUrl, dbFile } = await startOn(t, firebaseEnv, { dbFixture: { users: [forgedUser] } });
     for (const claim of [false, true]) {
       await postAuth(baseUrl, {
-        idToken: stubToken({ uid: 'fb-user', email: 'token@example.test', email_verified: claim }),
+        idToken: stubToken({ uid: 'fb-user', email: 'token@example.test', email_verified: claim, firebase: { sign_in_provider: 'google.com' } }),
         uid: 'fb-user',
       });
       assert.equal(readStoredUser(dbFile, 'fb-user').emailVerified, claim);
@@ -414,7 +431,10 @@ describe('/api/auth/mobile in Firebase mode (firebase-admin/auth stubbed)', () =
       uid: 'fb-user',
     });
     const readPublicText = async (baseUrl) => {
-      const res = await fetch(`${baseUrl}/api/users/fb-user`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      const res = await fetch(`${baseUrl}/api/users/fb-user`, {
+        headers: { Authorization: `Bearer ${await publicViewerToken(baseUrl)}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
       assert.equal(res.status, 200);
       return res.text();
     };
@@ -463,7 +483,10 @@ describe('/api/auth/mobile in Firebase mode (firebase-admin/auth stubbed)', () =
       displayName,
     });
     const readPublic = async (baseUrl) => {
-      const res = await fetch(`${baseUrl}/api/users/fb-user`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      const res = await fetch(`${baseUrl}/api/users/fb-user`, {
+        headers: { Authorization: `Bearer ${await publicViewerToken(baseUrl)}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
       assert.equal(res.status, 200);
       return res.json();
     };
@@ -604,7 +627,7 @@ describe('/api/auth/mobile in Firebase mode (firebase-admin/auth stubbed)', () =
     });
 
     test('every owner response has exactly the allowlisted fields', async (t) => {
-      const user = { ...forgedUser, emailVerified: true, nameSetByUser: true, internalNote: 'private' };
+      const user = { ...forgedUser, emailVerified: true, nameSetByUser: true, internalNote: 'private', ageConfirmedAt: '2026-01-01T00:00:00.000Z' };
       const { baseUrl } = await startOn(t, firebaseEnv, { dbFixture: { users: [user] } });
       const fields = ['ageConfirmed', 'avatar', 'bio', 'city', 'email', 'emailVerified', 'firstName', 'id', 'lastName', 'needsName', 'privacyNoticeVersion'];
 

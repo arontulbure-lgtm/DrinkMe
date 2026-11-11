@@ -79,90 +79,83 @@ const matrixFixture = () => ({
   nextCommentId: 4,
 });
 
+// Owner decision: nothing is readable logged out, and a signed-in user who has not confirmed 18+ gets
+// age_required on every route but the first-run ones. canViewDrink still decides per post for confirmed users.
+const READ_ROUTES = [
+  '/api/drinks', `/api/drinks?q=${encodeURIComponent('hidden')}`, '/api/drinks?city=cluj', '/api/drinks?alcoholic=false',
+  '/api/drinks?sort=trending', '/api/drinks/user/owner', '/api/drinks/partners', '/api/users/minor/saved-drinks',
+  ...[ALCOHOLIC_ID, NON_ALCOHOLIC_ID, NO_FLAG_ID].flatMap((id) => [`/api/drinks/${id}`, `/api/drinks/${id}/comments`, `/media/drinks/${id}`]),
+  '/api/users/owner', '/media/avatars/owner', '/api/notifications', '/api/smart-bar',
+];
+
 describe('visibility matrix', () => {
   let server;
-  const viewers = [
-    { label: 'logged out', token: undefined, allowed: false },
-    { label: 'an invalid token', token: 'not-a-token', allowed: false },
-    { label: 'unconfirmed', token: tokenFor('minor'), allowed: false },
-    { label: 'confirmed', token: tokenFor('adult'), allowed: true },
-  ];
-  const signedInViewers = viewers.filter(({ token }) => token && token !== 'not-a-token');
 
   before(async () => {
     server = await startServer({}, { dbFixture: matrixFixture() });
   });
   after(() => server?.stop());
 
-  const expectedIds = (allowed) => (allowed ? [NO_FLAG_ID, NON_ALCOHOLIC_ID, ALCOHOLIC_ID] : [NON_ALCOHOLIC_ID]);
+  const ALL_IDS = [NO_FLAG_ID, NON_ALCOHOLIC_ID, ALCOHOLIC_ID];
 
-  for (const { label, token, allowed } of viewers) {
-    test(`${label}: GET /api/drinks and /api/drinks/user/:id`, async () => {
-      const drinks = await call(server, '/api/drinks', { token });
-      assert.equal(drinks.status, 200);
-      assert.deepEqual(idsOf(drinks), expectedIds(allowed));
-      assert.equal(drinks.body.nextCursor, null);
-
-      const owned = await call(server, '/api/drinks/user/owner', { token });
-      assert.deepEqual(idsOf(owned), expectedIds(allowed));
-      assert.equal(owned.body.total, expectedIds(allowed).length, 'total counts only visible posts');
-      if (!allowed) {
-        assert.ok(!drinks.text.includes(SECRET_TEXT));
-        assert.ok(!owned.text.includes(SECRET_TEXT));
-      }
-    });
-
-    test(`${label}: q, city, alcoholic=false and sort=trending`, async () => {
-      const search = await call(server, `/api/drinks?q=${encodeURIComponent('hidden')}`, { token });
-      assert.deepEqual(idsOf(search), allowed ? [NO_FLAG_ID, ALCOHOLIC_ID] : []);
-      const city = await call(server, '/api/drinks?city=cluj', { token });
-      assert.deepEqual(idsOf(city), [NON_ALCOHOLIC_ID]);
-      const nonAlcoholic = await call(server, '/api/drinks?alcoholic=false', { token });
-      assert.deepEqual(idsOf(nonAlcoholic), [NON_ALCOHOLIC_ID]);
-      const trending = await call(server, '/api/drinks?sort=trending', { token });
-      assert.deepEqual(idsOf(trending).sort(), [...expectedIds(allowed)].sort());
-    });
-
-    test(`${label}: GET a post, its comments and its image`, async () => {
-      for (const id of HIDDEN_POST_IDS) {
-        const detail = await call(server, `/api/drinks/${id}`, { token });
-        const comments = await call(server, `/api/drinks/${id}/comments`, { token });
-        const image = await call(server, `/media/drinks/${id}`, { token });
-        if (allowed) {
-          assert.equal(detail.status, 200);
-          assert.equal(comments.status, 200);
-          assert.equal(image.status, 200);
-        } else {
-          assertAgeRequired(detail, `detail ${id}`);
-          assertAgeRequired(comments, `comments ${id}`);
-          assertAgeRequired(image, `image ${id}`);
-          assert.ok(!comments.text.includes(`Comment ${id}`));
-        }
-      }
-      assert.equal((await call(server, `/api/drinks/${NON_ALCOHOLIC_ID}`, { token })).status, 200);
-      assert.equal((await call(server, `/api/drinks/${NON_ALCOHOLIC_ID}/comments`, { token })).status, 200);
-      assert.equal((await call(server, `/media/drinks/${NON_ALCOHOLIC_ID}`, { token })).status, 200);
-    });
-  }
-
-  for (const { label, token, allowed } of signedInViewers) {
-    test(`${label}: /api/drinks/partners, discover and the saved list`, async () => {
-      const partners = await call(server, '/api/drinks/partners', { token });
-      assert.deepEqual(idsOf(partners), expectedIds(allowed));
-      const uid = allowed ? 'adult' : 'minor';
-      const saved = await call(server, `/api/users/${uid}/saved-drinks`, { token });
-      assert.deepEqual(idsOf(saved), expectedIds(allowed));
-      if (!allowed) {
-        assert.ok(!partners.text.includes(SECRET_TEXT));
-        assert.ok(!saved.text.includes(SECRET_TEXT));
+  for (const [label, token] of [['logged out', undefined], ['an invalid token', 'not-a-token']]) {
+    test(`${label}: every read gets 401 and no post text`, async () => {
+      for (const route of READ_ROUTES) {
+        const res = await call(server, route, { token });
+        assert.equal(res.status, 401, route);
+        assert.ok(!res.text.includes(SECRET_TEXT) && !res.text.includes('Plain Tea'), route);
       }
     });
   }
 
-  test('a missing post stays 404, whoever asks', async () => {
-    assert.equal((await call(server, '/api/drinks/999')).status, 404);
-    assert.equal((await call(server, '/api/drinks/999/comments')).status, 404);
-    assert.equal((await call(server, '/media/drinks/999')).status, 404);
+  test('unconfirmed: every read gets age_required, alcoholic or not', async () => {
+    const token = tokenFor('minor');
+    for (const route of READ_ROUTES) {
+      const res = await call(server, route, { token });
+      assertAgeRequired(res, route);
+      assert.ok(!res.text.includes('Plain Tea') && !res.text.includes('Comment'), route);
+    }
+  });
+
+  test('confirmed: GET /api/drinks and /api/drinks/user/:id', async () => {
+    const token = tokenFor('adult');
+    const drinks = await call(server, '/api/drinks', { token });
+    assert.equal(drinks.status, 200);
+    assert.deepEqual(idsOf(drinks), ALL_IDS);
+    assert.equal(drinks.body.nextCursor, null);
+    const owned = await call(server, '/api/drinks/user/owner', { token });
+    assert.deepEqual(idsOf(owned), ALL_IDS);
+    assert.equal(owned.body.total, ALL_IDS.length);
+  });
+
+  test('confirmed: q, city, alcoholic=false and sort=trending', async () => {
+    const token = tokenFor('adult');
+    assert.deepEqual(idsOf(await call(server, `/api/drinks?q=${encodeURIComponent('hidden')}`, { token })), [NO_FLAG_ID, ALCOHOLIC_ID]);
+    assert.deepEqual(idsOf(await call(server, '/api/drinks?city=cluj', { token })), [NON_ALCOHOLIC_ID]);
+    assert.deepEqual(idsOf(await call(server, '/api/drinks?alcoholic=false', { token })), [NON_ALCOHOLIC_ID]);
+    assert.deepEqual(idsOf(await call(server, '/api/drinks?sort=trending', { token })).sort(), [...ALL_IDS].sort());
+  });
+
+  test('confirmed: a post, its comments and its image', async () => {
+    const token = tokenFor('adult');
+    for (const id of ALL_IDS) {
+      assert.equal((await call(server, `/api/drinks/${id}`, { token })).status, 200);
+      assert.equal((await call(server, `/api/drinks/${id}/comments`, { token })).status, 200);
+      assert.equal((await call(server, `/media/drinks/${id}`, { token })).status, 200);
+    }
+  });
+
+  test('confirmed: /api/drinks/partners and the saved list', async () => {
+    const token = tokenFor('adult');
+    assert.deepEqual(idsOf(await call(server, '/api/drinks/partners', { token })), ALL_IDS);
+    assert.deepEqual(idsOf(await call(server, '/api/users/adult/saved-drinks', { token })), ALL_IDS);
+  });
+
+  test('a missing post stays 404 for a confirmed user', async () => {
+    const token = tokenFor('adult');
+    assert.equal((await call(server, '/api/drinks/999', { token })).status, 404);
+    assert.equal((await call(server, '/api/drinks/999/comments', { token })).status, 404);
+    assert.equal((await call(server, '/media/drinks/999', { token })).status, 404);
   });
 });
 
@@ -176,8 +169,8 @@ describe('mutations on a post', () => {
   });
   after(() => server?.stop());
 
-  test('an unconfirmed user cannot cheer, save or comment on an alcoholic or no-flag post', async () => {
-    for (const id of HIDDEN_POST_IDS) {
+  test('an unconfirmed user cannot cheer, save or comment on any post', async () => {
+    for (const id of [...HIDDEN_POST_IDS, NON_ALCOHOLIC_ID]) {
       assertAgeRequired(await call(server, `/api/drinks/${id}/like`, { token: minor, method: 'POST' }), `like ${id}`);
       assertAgeRequired(await call(server, `/api/drinks/${id}/save`, { token: minor, method: 'POST' }), `save ${id}`);
       assertAgeRequired(
@@ -186,18 +179,11 @@ describe('mutations on a post', () => {
       );
     }
     const db = readDb(server);
-    assert.equal(db.drinks.find((d) => d.id === ALCOHOLIC_ID).cheersCount, 0);
-    assert.equal(db.commentsByDrink[ALCOHOLIC_ID].length, 1);
+    for (const id of [ALCOHOLIC_ID, NON_ALCOHOLIC_ID]) {
+      assert.equal(db.drinks.find((d) => d.id === id).cheersCount, 0);
+      assert.equal(db.commentsByDrink[id].length, 1);
+    }
     assert.deepEqual(db.notificationsByUser?.owner ?? [], []);
-  });
-
-  test('a non-alcoholic post stays fully usable for an unconfirmed user', async () => {
-    const liked = await call(server, `/api/drinks/${NON_ALCOHOLIC_ID}/like`, { token: minor, method: 'POST' });
-    assert.equal(liked.status, 200);
-    assert.equal(liked.body.cheered, true);
-    assert.equal((await call(server, `/api/drinks/${NON_ALCOHOLIC_ID}/save`, { token: minor, method: 'POST' })).status, 200);
-    const comment = await call(server, `/api/drinks/${NON_ALCOHOLIC_ID}/comments`, { token: minor, method: 'POST', body: { content: 'Nice' } });
-    assert.equal(comment.status, 201);
   });
 
   test('a confirmed user can cheer, save and comment on an alcoholic post', async () => {
@@ -234,10 +220,10 @@ describe('POST /api/drinks', () => {
     assertAgeRequired(res, 'invalid image');
   });
 
-  test('an unconfirmed user can create a non-alcoholic post', async () => {
+  test('an unconfirmed user cannot create a non-alcoholic post either', async () => {
     const res = await call(server, '/api/drinks', { token: tokenFor('minor'), method: 'POST', body: { ...newPost, isAlcoholic: false } });
-    assert.equal(res.status, 201);
-    assert.equal(res.body.isAlcoholic, false);
+    assertAgeRequired(res, 'non-alcoholic');
+    assert.equal(readDb(server).drinks?.length ?? 0, 0);
   });
 
   test('a confirmed user keeps the alcoholic default', async () => {
@@ -265,23 +251,23 @@ describe('an unconfirmed owner and their own older posts', () => {
   });
   after(() => server?.stop());
 
-  test('the rule applies to the owner, on every route', async () => {
-    const owned = await call(server, '/api/drinks/user/legacy', { token });
-    assert.deepEqual(idsOf(owned), [2]);
-    assert.equal(owned.body.total, 1);
-    assert.deepEqual(idsOf(await call(server, '/api/drinks/partners', { token })), [2]);
-    assertAgeRequired(await call(server, '/api/drinks/1', { token }), 'detail');
-    assertAgeRequired(await call(server, '/media/drinks/1', { token }), 'image');
+  test('the gate applies to the owner, on every route, their own posts included', async () => {
+    for (const route of ['/api/drinks/user/legacy', '/api/drinks/partners', '/api/drinks/1', '/api/drinks/2', '/media/drinks/1', '/media/drinks/2']) {
+      assertAgeRequired(await call(server, route, { token }), route);
+    }
+    assert.equal((await call(server, '/api/users/legacy', { token })).status, 200, 'the own profile is allowed');
   });
 
-  test('they can still delete a post they cannot see', async () => {
+  test('deleting a post waits for the confirmation too', async () => {
+    assertAgeRequired(await call(server, '/api/drinks/1', { token, method: 'DELETE' }), 'delete');
+    assert.equal(readDb(server).drinks.some((d) => d.id === 1), true);
+    assert.equal((await call(server, '/api/users/legacy/acknowledgements', { token, method: 'POST', body: { type: 'age', confirmed: true } })).status, 200);
     assert.equal((await call(server, '/api/drinks/1', { token, method: 'DELETE' })).status, 204);
-    assert.equal(readDb(server).drinks.some((d) => d.id === 1), false);
   });
 });
 
 describe('a stored flag that is not exactly false', () => {
-  test('counts as alcoholic for an unconfirmed viewer', async (t) => {
+  test('an unconfirmed viewer never reaches it, and a confirmed one sees every post', async (t) => {
     const server = await startServer({}, {
       dbFixture: {
         users: [confirmed('owner'), person('minor')],
@@ -296,14 +282,10 @@ describe('a stored flag that is not exactly false', () => {
     });
     t.after(() => server.stop());
     const minor = tokenFor('minor');
-    for (const token of [undefined, minor]) {
-      const list = await call(server, '/api/drinks', { token });
-      assert.deepEqual(idsOf(list), [4]);
-      assert.ok(!list.text.includes(SECRET_TEXT));
-      for (const id of [1, 2, 3]) {
-        assertAgeRequired(await call(server, `/api/drinks/${id}`, { token }), `detail ${id}`);
-        assertAgeRequired(await call(server, `/media/drinks/${id}`, { token }), `image ${id}`);
-      }
+    assertAgeRequired(await call(server, '/api/drinks', { token: minor }), 'list');
+    for (const id of [1, 2, 3, 4]) {
+      assertAgeRequired(await call(server, `/api/drinks/${id}`, { token: minor }), `detail ${id}`);
+      assertAgeRequired(await call(server, `/media/drinks/${id}`, { token: minor }), `image ${id}`);
     }
     assert.deepEqual(idsOf(await call(server, '/api/drinks', { token: tokenFor('owner') })), [4, 3, 2, 1]);
   });
@@ -344,38 +326,40 @@ describe('paging with filtering', () => {
     return assert.fail('the walk never ended');
   };
 
-  const routes = ['/api/drinks', '/api/drinks/partners', '/api/drinks/user/poster', '/api/users/minor/saved-drinks'];
+  // Only a confirmed user lists posts now, so the paging is walked with a confirmed user and a filter.
+  const routes = ['/api/drinks?alcoholic=false', '/api/drinks', '/api/drinks/partners', '/api/drinks/user/poster', '/api/users/adult/saved-drinks'];
   for (const route of routes) {
-    test(`${route}: full pages and correct cursors for an unconfirmed user`, async () => {
-      assert.deepEqual(await walk(route, tokenFor('minor'), 7), VISIBLE_IDS);
+    test(`${route}: full pages and correct cursors`, async () => {
+      assert.deepEqual(await walk(route, tokenFor('adult'), 7), route.includes('alcoholic=false') ? VISIBLE_IDS : ALL_IDS);
     });
   }
+
+  test('an unconfirmed user gets age_required on every list', async () => {
+    for (const route of routes) assertAgeRequired(await call(server, route, { token: tokenFor('minor') }), route);
+  });
 
   test('a confirmed user walks every post', async () => {
     assert.deepEqual(await walk('/api/drinks', tokenFor('adult'), 20), ALL_IDS);
     assert.deepEqual(await walk('/api/users/adult/saved-drinks', tokenFor('adult'), 20), ALL_IDS);
   });
 
-  test('total counts only visible posts, whatever the page', async () => {
-    const token = tokenFor('minor');
-    assert.equal((await call(server, '/api/drinks/user/poster?limit=1', { token })).body.total, VISIBLE_IDS.length);
-    assert.equal((await call(server, '/api/drinks/user/poster?before=4', { token })).body.total, VISIBLE_IDS.length);
-    assert.equal((await call(server, '/api/drinks/user/poster?limit=1')).body.total, VISIBLE_IDS.length);
-    assert.equal((await call(server, '/api/drinks/user/poster?limit=1', { token: tokenFor('adult') })).body.total, ALL_IDS.length);
+  test('total counts every post, whatever the page', async () => {
+    const token = tokenFor('adult');
+    assert.equal((await call(server, '/api/drinks/user/poster?limit=1', { token })).body.total, ALL_IDS.length);
+    assert.equal((await call(server, '/api/drinks/user/poster?before=4', { token })).body.total, ALL_IDS.length);
   });
 
-  test('scope=discover and sort=trending stay filtered', async () => {
+  test('scope=discover and sort=trending', async () => {
     const token = tokenFor('adult');
-    const minorToken = tokenFor('minor');
-    const trending = await call(server, '/api/drinks?sort=trending&limit=50', { token: minorToken });
-    assert.equal(trending.body.items.every((item) => item.isAlcoholic === false), true);
+    const trending = await call(server, '/api/drinks?sort=trending&limit=50', { token });
     assert.equal(trending.body.items.length, 20);
+    assertAgeRequired(await call(server, '/api/drinks?sort=trending&limit=50', { token: tokenFor('minor') }), 'trending');
     assert.equal((await call(server, '/api/drinks?scope=discover', { token })).body.items.length, 0, 'the only poster is a partner');
   });
 });
 
 describe('scope=discover', () => {
-  test('hides alcoholic posts from an unconfirmed user', async (t) => {
+  test('refuses an unconfirmed user, and shows a confirmed one every post', async (t) => {
     const server = await startServer({}, {
       dbFixture: {
         users: [person('minor'), confirmed('adult'), confirmed('stranger')],
@@ -384,7 +368,7 @@ describe('scope=discover', () => {
       },
     });
     t.after(() => server.stop());
-    assert.deepEqual(idsOf(await call(server, '/api/drinks?scope=discover', { token: tokenFor('minor') })), [2]);
+    assertAgeRequired(await call(server, '/api/drinks?scope=discover', { token: tokenFor('minor') }), 'discover');
     assert.deepEqual(idsOf(await call(server, '/api/drinks?scope=discover', { token: tokenFor('adult') })), [3, 2, 1]);
   });
 });
@@ -426,15 +410,17 @@ describe('media', () => {
     const cachedAdult = await call(server, '/media/drinks/1', { token: adult });
     assert.equal(cachedAdult.headers.get('x-media-cache'), 'hit');
 
-    for (const headers of [{}, { Authorization: `Bearer ${minor}` }]) {
-      const withEtag = await rawGet('/media/drinks/1', { ...headers, 'If-None-Match': etag });
-      assert.equal(withEtag.status, 403);
-      assert.equal(JSON.parse(withEtag.body).code, 'age_required');
-      assert.notEqual(withEtag.headers.etag, etag, 'the image ETag is not revealed');
-      assert.equal(withEtag.headers['x-media-cache'], undefined, 'nothing was decoded or read from the cache');
-      assert.ok(!withEtag.body.includes(PNG));
-      const head = await rawGet('/media/drinks/1', headers, 'HEAD');
-      assert.equal(head.status, 403);
+    for (const [headers, status] of [[{}, 401], [{ Authorization: `Bearer ${minor}` }, 403]]) {
+      for (const id of [1, 2]) {
+        const withEtag = await rawGet(`/media/drinks/${id}`, { ...headers, 'If-None-Match': etag });
+        assert.equal(withEtag.status, status);
+        if (status === 403) assert.equal(JSON.parse(withEtag.body).code, 'age_required');
+        assert.notEqual(withEtag.headers.etag, etag, 'the image ETag is not revealed');
+        assert.equal(withEtag.headers['x-media-cache'], undefined, 'nothing was decoded or read from the cache');
+        assert.ok(!withEtag.body.includes(PNG));
+        const head = await rawGet(`/media/drinks/${id}`, headers, 'HEAD');
+        assert.equal(head.status, status);
+      }
     }
 
     const allowed = await rawGet('/media/drinks/1', { Authorization: `Bearer ${adult}`, 'If-None-Match': etag });
@@ -454,9 +440,12 @@ describe('media', () => {
     assert.equal(served.headers.get('cache-control'), 'private, max-age=86400');
   });
 
-  test('avatars stay public', async () => {
-    assert.equal((await call(server, '/media/avatars/adult')).status, 200);
-    assert.equal((await call(server, '/media/avatars/minor')).status, 200);
+  test('avatars need a signed-in, confirmed viewer too', async () => {
+    for (const id of ['adult', 'minor']) {
+      assert.equal((await call(server, `/media/avatars/${id}`)).status, 401);
+      assertAgeRequired(await call(server, `/media/avatars/${id}`, { token: minor }), id);
+      assert.equal((await call(server, `/media/avatars/${id}`, { token: adult })).status, 200);
+    }
   });
 });
 
@@ -466,7 +455,7 @@ describe('media decoding', () => {
       dbFixture: { users: [confirmed('adult')], drinks: [post(1, 'adult', { isAlcoholic: true })], nextDrinkId: 2 },
     });
     t.after(() => server.stop());
-    assert.equal((await call(server, '/media/drinks/1')).status, 403);
+    assert.equal((await call(server, '/media/drinks/1')).status, 401);
     const res = await call(server, '/media/drinks/1', { token: tokenFor('adult') });
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('x-media-cache'), 'miss');
@@ -499,34 +488,13 @@ describe('notifications', () => {
 
   const read = (token) => call(server, '/api/notifications', { token });
 
-  test('an unconfirmed reader never sees the name of an alcoholic post', async () => {
+  test('an unconfirmed reader gets age_required, never a post name', async () => {
     const adult = tokenFor('adult');
     assert.equal((await call(server, '/api/drinks/1/like', { token: adult, method: 'POST' })).status, 200);
     assert.equal((await call(server, '/api/drinks/1/comments', { token: adult, method: 'POST', body: { content: 'Hi' } })).status, 201);
-
-    const { status, text, body } = await read(tokenFor('legacy'));
-    assert.equal(status, 200);
-    assert.ok(!text.includes(SECRET_TEXT), text);
-    assert.equal(body.notifications.length, 5);
-    assert.equal(body.unreadCount, 5);
-    const messages = body.notifications.map((n) => n.message);
-    assert.ok(messages.includes('Someone cheered your post.'));
-    assert.ok(messages.includes('Someone commented on your post.'));
-    assert.ok(messages.includes('A added you as a drink partner.'), 'other notifications stay as they are');
-    for (const notification of body.notifications) assert.equal(notification.drinkId, undefined);
-  });
-
-  test('the name of a non-alcoholic post stays', async () => {
-    const adult = tokenFor('adult');
     assert.equal((await call(server, '/api/drinks/2/like', { token: adult, method: 'POST' })).status, 200);
-    const { body } = await read(tokenFor('legacy'));
-    assert.ok(body.notifications.some((n) => n.message.endsWith('cheered your drink Plain Tea.')));
-  });
-
-  test('a deleted post counts as alcoholic', async () => {
-    assert.equal((await call(server, '/api/drinks/1', { token: tokenFor('legacy'), method: 'DELETE' })).status, 204);
-    const { text } = await read(tokenFor('legacy'));
-    assert.ok(!text.includes(SECRET_TEXT));
+    assertAgeRequired(await read(tokenFor('legacy')), 'notifications');
+    assertAgeRequired(await call(server, '/api/notifications/read', { token: tokenFor('legacy'), method: 'POST' }), 'mark read');
   });
 
   test('confirming brings the stored text back, and the file keeps it', async () => {
@@ -535,6 +503,8 @@ describe('notifications', () => {
     assert.equal((await call(server, '/api/users/legacy/acknowledgements', { token, method: 'POST', body: { type: 'age', confirmed: true } })).status, 200);
     const { text, body } = await read(token);
     assert.ok(text.includes(SECRET_TEXT));
+    assert.equal(body.notifications.length, 6);
+    assert.ok(body.notifications.some((n) => n.message.endsWith('cheered your drink Plain Tea.')));
     for (const notification of body.notifications) assert.equal(notification.drinkId, undefined);
   });
 });
@@ -621,10 +591,10 @@ describe('acknowledgement limits and failures', () => {
   const confirmBody = { type: 'age', confirmed: true };
 
   test('it works at the storage limit, where growth is refused', async (t) => {
-    const server = await startServer({ DB_GROWTH_MAX_BYTES: '1' }, { dbFixture: { users: [person('new')] } });
+    const server = await startServer({ DB_GROWTH_MAX_BYTES: '1' }, { dbFixture: { users: [person('new'), confirmed('adult')] } });
     t.after(() => server.stop());
     const token = tokenFor('new');
-    const growth = await call(server, '/api/smart-bar', { token, method: 'POST', body: { name: 'Gin', quantity: '1' } });
+    const growth = await call(server, '/api/smart-bar', { token: tokenFor('adult'), method: 'POST', body: { name: 'Gin', quantity: '1' } });
     assert.equal(growth.status, 507, 'the limit is in force');
     const res = await call(server, route, { token, method: 'POST', body: confirmBody });
     assert.equal(res.status, 200);
@@ -670,7 +640,7 @@ describe('AI recipes', () => {
     fs.writeFileSync(stubFile('behavior.json'), JSON.stringify({ outputText: JSON.stringify({ recipes: [COCKTAIL, MOCKTAIL] }) }));
     server = await startServer(
       { AI_ENABLED: 'true', OPENAI_API_KEY: 'sk-fake', OPENAI_STUB_DIR: stubDir, NODE_OPTIONS: `--import=${STUB_PRELOAD}` },
-      { dbFixture: { users: [person('minor'), confirmed('adult'), ...Array.from({ length: FILTER_USERS }, (_, i) => person(`filter${i}`))] } },
+      { dbFixture: { users: [person('minor'), confirmed('adult'), ...Array.from({ length: FILTER_USERS }, (_, i) => confirmed(`filter${i}`))] } },
     );
   });
   after(async () => {
@@ -687,22 +657,17 @@ describe('AI recipes', () => {
   const smartBar = (token, extra = {}) => call(server, SMART_BAR, { token, method: 'POST', body: { ingredients: ['gin'], ...extra } });
   const product = (token, extra = {}) => call(server, PRODUCT, { token, method: 'POST', body: { productName: 'Gin', ...extra } });
 
-  test('an unconfirmed user always gets mocktails from the Smart Bar route, with no error', async () => {
+  // The routes still force mocktails for an unconfirmed user, but the gate in front of them refuses first.
+  test('an unconfirmed user gets age_required from both routes, and OpenAI is not called', async () => {
+    const callCount = () => (fs.existsSync(stubFile('calls.jsonl')) ? fs.readFileSync(stubFile('calls.jsonl'), 'utf8').split('\n').filter(Boolean).length : 0);
+    const before = callCount();
     for (const extra of [{}, { nonAlcoholicOnly: false }, { nonAlcoholicOnly: true }]) {
-      const res = await smartBar(tokenFor('minor'), extra);
-      assert.equal(res.status, 200, JSON.stringify(extra));
-      assert.deepEqual(titlesOf(res.body), ['Virgin Mule']);
-      assert.match(lastCall().instructions, MOCKTAIL_RULE);
+      assertAgeRequired(await smartBar(tokenFor('minor'), extra), JSON.stringify(extra));
     }
-  });
-
-  test('an unconfirmed user always gets mocktails from the product route, with no error', async () => {
     for (const extra of [{}, { isAlcoholic: true }, { isAlcoholic: false }]) {
-      const res = await product(tokenFor('minor'), extra);
-      assert.equal(res.status, 200, JSON.stringify(extra));
-      assert.deepEqual(titlesOf(res.body.recipes), ['Virgin Mule']);
-      assert.match(lastCall().instructions, MOCKTAIL_RULE);
+      assertAgeRequired(await product(tokenFor('minor'), extra), JSON.stringify(extra));
     }
+    assert.equal(callCount(), before);
   });
 
   test('a confirmed user keeps normal behaviour', async () => {
@@ -729,9 +694,10 @@ describe('AI recipes', () => {
   describe('the alcohol check on a mocktail-only answer', () => {
     const behave = (...recipes) => fs.writeFileSync(stubFile('behavior.json'), JSON.stringify({ outputText: JSON.stringify({ recipes }) }));
     const restore = () => behave(COCKTAIL, MOCKTAIL);
+    // A confirmed user who asks for mocktails gets the same check an unconfirmed one used to.
     const ask = (route = SMART_BAR) => {
       const token = tokenFor(`filter${nextFilterUser++ % FILTER_USERS}`);
-      return route === SMART_BAR ? smartBar(token) : product(token);
+      return route === SMART_BAR ? smartBar(token, { nonAlcoholicOnly: true }) : product(token, { isAlcoholic: false });
     };
     const withField = (field, text) => ({
       ...MOCKTAIL,
@@ -813,7 +779,7 @@ describe('AI recipes', () => {
 
   test('confirming changes the answer at once', async () => {
     const token = tokenFor('minor');
-    assert.deepEqual(titlesOf((await smartBar(token)).body), ['Virgin Mule']);
+    assertAgeRequired(await smartBar(token), 'before');
     assert.equal((await call(server, '/api/users/minor/acknowledgements', { token, method: 'POST', body: { type: 'age', confirmed: true } })).status, 200);
     assert.deepEqual(titlesOf((await smartBar(token)).body), ['Gin Tonic', 'Virgin Mule']);
   });
@@ -825,10 +791,12 @@ describe('AI recipes', () => {
 });
 
 describe('AI off', () => {
-  test('recipe routes still answer 503 for an unconfirmed user', async (t) => {
-    const server = await startServer({}, { dbFixture: { users: [person('minor')] } });
+  test('recipe routes answer age_required to an unconfirmed user and 503 to a confirmed one', async (t) => {
+    const server = await startServer({}, { dbFixture: { users: [person('minor'), confirmed('adult')] } });
     t.after(() => server.stop());
-    const res = await call(server, '/api/generate-recipes', { token: tokenFor('minor'), method: 'POST', body: { productName: 'Gin' } });
+    const body = { productName: 'Gin' };
+    assertAgeRequired(await call(server, '/api/generate-recipes', { token: tokenFor('minor'), method: 'POST', body }), 'minor');
+    const res = await call(server, '/api/generate-recipes', { token: tokenFor('adult'), method: 'POST', body });
     assert.equal(res.status, 503);
     assert.equal(res.body.code, 'ai_disabled');
   });

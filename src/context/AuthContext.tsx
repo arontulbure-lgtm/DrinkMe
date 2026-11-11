@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 import { useQueryClient } from '@tanstack/react-query';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInWithCredential, AuthCredential, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from 'firebase/auth';
 import { auth } from '../config/firebase';
-import { ApiError, DeletionOutcomeUnknownError, apiFetch, getApiToken, getSessionErrorKey, setApiToken } from '../lib/api';
+import { ApiError, DeletionOutcomeUnknownError, apiFetch, getApiToken, getSessionErrorKey, setApiToken, setStaleTokenHandler } from '../lib/api';
 import * as SecureStore from 'expo-secure-store';
 import { BaseUser, DeleteAccountResponse } from '../types/api';
 
@@ -53,6 +53,7 @@ export function isCurrentAuthUser(uid: string | null): boolean {
 // apiFetch has no timeout. Without this a hung server would hold the spinner, where there is no Log out.
 const SESSION_STEP_TIMEOUT_MS = 15000;
 const DELETE_ACCOUNT_TIMEOUT_MS = 30000;
+const STALE_TOKEN_REBUILD_INTERVAL_MS = 30000;
 
 function withSessionTimeout<T>(promise: Promise<T>, timeoutMs = SESSION_STEP_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -209,15 +210,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           if (!storedToken) throw exchangeError;
           console.warn('Failed to exchange Firebase token for JWT, trying the stored one:', exchangeError);
-          // Not the profile route: GET /api/users/:id is public and returns 200 for an expired JWT.
-          // This one requires auth and ownership, so 200 means the JWT is valid and is this user's.
-          // The header is explicit so the token becomes global only after it has passed.
+          // The profile route, which the server allows before the 18+ confirmation for the account's own
+          // id only. It requires a valid JWT, and only the owner's answer holds ageConfirmed, so that field
+          // shows the JWT is this user's. The header is explicit so the token becomes global only after it has passed.
           try {
-            await withSessionTimeout(
-              apiFetch<unknown>(`/api/users/${serverUid}/saved-drinks?limit=1`, {
+            const ownProfile = await withSessionTimeout(
+              apiFetch<BaseUser>(`/api/users/${serverUid}`, {
                 headers: { Authorization: `Bearer ${storedToken}` },
               })
             );
+            if (typeof ownProfile?.ageConfirmed !== 'boolean') throw new ApiError('Stored JWT belongs to another user', 401);
           } catch (storedTokenError) {
             if (!isAuthRefusal(storedTokenError)) throw storedTokenError;
             if (!isStale()) await deleteStoredToken();
@@ -283,6 +285,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSessionStatus('loading');
     void startSession(auth.currentUser, generationRef.current);
   }, [startSession]);
+
+  // A 401 on the JWT in use while the app is open: its session generation was logged out by a verified
+  // sign-in elsewhere, the account is gone, or it expired. The new exchange gives a fresh JWT to the owner
+  // and ends on the sign-in screen (sign_in_again) or the session error screen otherwise. Only a ready
+  // session is rebuilt: a failure while one starts already ends on the error screen. At most one rebuild
+  // per STALE_TOKEN_REBUILD_INTERVAL_MS, so a server that keeps answering 401 cannot start a loop.
+  const sessionStatusRef = useRef<SessionStatus>(sessionStatus);
+  const lastStaleRebuildAtRef = useRef(0);
+  useEffect(() => {
+    sessionStatusRef.current = sessionStatus;
+  }, [sessionStatus]);
+  useEffect(() => {
+    setStaleTokenHandler(() => {
+      if (sessionStatusRef.current !== 'ready' || !auth.currentUser) return false;
+      const now = Date.now();
+      if (now - lastStaleRebuildAtRef.current < STALE_TOKEN_REBUILD_INTERVAL_MS) return false;
+      lastStaleRebuildAtRef.current = now;
+      // Also blocks a second call in the same tick, before the status effect has run.
+      sessionStatusRef.current = 'loading';
+      retrySession();
+      return true;
+    });
+    return () => setStaleTokenHandler(null);
+  }, [retrySession]);
 
   const sendVerificationEmail = useCallback(async (): Promise<void> => {
     if (!auth.currentUser) throw new Error('No active session');

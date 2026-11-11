@@ -15,8 +15,9 @@ const NOTICE_BODY = { type: 'privacy', version: 1 };
 
 const tokenFor = (uid) => jwt.sign({ uid }, HARNESS_JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
 
+// Confirmed 18+ by default: every route but the first-run ones needs it. Pass ageConfirmedAt: undefined for one who has not.
 const person = (id, extra = {}) => ({
-  id, email: `${id}@example.test`, firstName: 'Named', lastName: 'Test', city: 'Cluj', bio: 'Hello', nameSetByUser: true, avatar: null, ...extra,
+  id, email: `${id}@example.test`, firstName: 'Named', lastName: 'Test', city: 'Cluj', bio: 'Hello', nameSetByUser: true, avatar: null, ageConfirmedAt: CONFIRMED_AT, ...extra,
 });
 const unnamed = (id, extra = {}) => person(id, { firstName: '', lastName: '', nameSetByUser: undefined, ...extra });
 // A legacy account whose firstName was built from the email prefix.
@@ -49,6 +50,8 @@ const putName = (server, id, body) => call(server, `/api/users/${id}`, { token: 
 const acknowledge = (server, id, body = NOTICE_BODY, token = tokenFor(id)) => (
   call(server, `/api/users/${id}/acknowledgements`, { token, method: 'POST', body })
 );
+// Nothing is readable logged out, so another user's public view is read as a confirmed viewer.
+const asViewer = (viewerId = 'viewer') => ({ token: tokenFor(viewerId) });
 
 describe('needsName', () => {
   let server;
@@ -106,6 +109,7 @@ describe('saving the name', () => {
       dbFixture: {
         users: [
           unnamed('fresh'), unnamed('blank'), unnamed('control'), masked('legacy'), masked('resend'), masked('same'), masked('flagtext'), person('clearing'),
+          person('viewer'),
         ],
         drinks: [post(1, 'legacy'), post(2, 'fresh')],
         nextDrinkId: 3,
@@ -119,16 +123,16 @@ describe('saving the name', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.needsName, false);
     assert.equal(res.body.firstName, 'Ana Pop');
-    assert.equal((await call(server, '/api/users/fresh')).body.firstName, 'Ana Pop');
-    assert.equal((await call(server, '/api/drinks/2')).body.user.firstName, 'Ana Pop');
+    assert.equal((await call(server, '/api/users/fresh', asViewer())).body.firstName, 'Ana Pop');
+    assert.equal((await call(server, '/api/drinks/2', asViewer())).body.user.firstName, 'Ana Pop');
   });
 
   test('a masked user who enters a real name becomes public under it', async () => {
-    assert.equal((await call(server, '/api/users/legacy')).body.firstName, undefined);
+    assert.equal((await call(server, '/api/users/legacy', asViewer())).body.firstName, undefined);
     const res = await putName(server, 'legacy', { firstName: 'Ion', nameChosen: true });
     assert.equal(res.body.needsName, false);
-    assert.equal((await call(server, '/api/users/legacy')).body.firstName, 'Ion');
-    assert.equal((await call(server, '/api/drinks/1')).body.user.firstName, 'Ion');
+    assert.equal((await call(server, '/api/users/legacy', asViewer())).body.firstName, 'Ion');
+    assert.equal((await call(server, '/api/drinks/1', asViewer())).body.user.firstName, 'Ion');
     assert.equal(storedUser(server, 'legacy').nameSetByUser, true);
   });
 
@@ -138,13 +142,13 @@ describe('saving the name', () => {
       assert.equal(res.status, 200);
       assert.equal(res.body.needsName, true, JSON.stringify(body));
     }
-    assert.equal((await call(server, '/api/users/resend')).body.firstName, undefined);
+    assert.equal((await call(server, '/api/users/resend', asViewer())).body.firstName, undefined);
   });
 
   test('typing exactly the masked name is a choice, so the prompt does not stay open', async () => {
     const res = await putName(server, 'same', { firstName: 'same', nameChosen: true });
     assert.equal(res.body.needsName, false);
-    assert.equal((await call(server, '/api/users/same')).body.firstName, 'same');
+    assert.equal((await call(server, '/api/users/same', asViewer())).body.firstName, 'same');
   });
 
   test('nothing usable leaves the user unnamed and unflagged', async () => {
@@ -177,18 +181,20 @@ describe('POST /api/users/:id/acknowledgements with type privacy', () => {
   let server;
 
   before(async () => {
-    server = await startServer({}, { dbFixture: { users: [person('new'), person('other'), person('forger'), person('garbage', { privacyNoticeVersion: '1' })] } });
+    server = await startServer({}, {
+      dbFixture: { users: [person('new'), person('other', { ageConfirmedAt: undefined }), person('forger'), person('garbage', { privacyNoticeVersion: '1' })] },
+    });
   });
   after(() => server?.stop());
 
   test('logged out gets 401 and a non-owner gets 403', async () => {
     assert.equal((await call(server, '/api/users/new/acknowledgements', { method: 'POST', body: NOTICE_BODY })).status, 401);
-    assert.equal((await acknowledge(server, 'new', NOTICE_BODY, tokenFor('other'))).status, 403);
+    assert.equal((await acknowledge(server, 'new', NOTICE_BODY, tokenFor('garbage'))).status, 403);
     assert.equal(storedUser(server, 'new').privacyNoticeVersion, undefined);
   });
 
   test('a bad version gets 400 and stores nothing', async () => {
-    for (const version of [undefined, null, 0, -1, 2, 1.5, '1', [1], true]) {
+    for (const version of [undefined, null, 0, -1, 3, 1.5, '1', [1], true]) {
       const res = await acknowledge(server, 'new', { type: 'privacy', version });
       assert.equal(res.status, 400, JSON.stringify(version));
     }
@@ -259,6 +265,7 @@ describe('a stale form holding the email prefix', () => {
           person('quoted', { email: "o'brien@example.test", firstName: 'Ion' }),
           masked('blanked'),
           person('tidy', { firstName: 'Ion', bio: 'Old' }),
+          person('viewer'),
         ],
       },
     });
@@ -271,7 +278,7 @@ describe('a stale form holding the email prefix', () => {
       assert.equal(res.status, 200);
       assert.equal(res.body.firstName, 'Ion', firstName);
     }
-    assert.equal((await call(server, '/api/users/aron')).body.firstName, 'Ion');
+    assert.equal((await call(server, '/api/users/aron', asViewer())).body.firstName, 'Ion');
   });
 
   test('a cleared name stays cleared, unflagged and not public', async () => {
@@ -284,7 +291,7 @@ describe('a stale form holding the email prefix', () => {
   test('so does an escaped form opened earlier', async () => {
     const res = await putName(server, 'quoted', { firstName: 'o&#x27;brien' });
     assert.equal(res.body.firstName, 'Ion');
-    assert.ok(!(await call(server, '/api/users/quoted')).text.includes('brien'));
+    assert.ok(!(await call(server, '/api/users/quoted', asViewer())).text.includes('brien'));
   });
 
   test('the rest of the form is still saved, and other names still are', async () => {
@@ -320,7 +327,7 @@ describe('a new account before the notice', () => {
 
   test('is hidden, and the owner still gets their own name, with no name prompt for a provider name', async () => {
     const token = await signIn('newbie', { displayName: 'Ana Pop' });
-    const publicView = await call(server, '/api/users/newbie');
+    const publicView = await call(server, '/api/users/newbie', asViewer('older'));
     assert.equal(publicView.status, 200);
     assert.ok(!publicView.text.includes('Ana'));
     assert.ok(!publicView.text.includes('Pop'));
@@ -338,16 +345,18 @@ describe('a new account before the notice', () => {
 
   test('a stored avatar is not served', async () => {
     const token = await signIn('photo', { displayName: 'Photo Person' });
+    await acknowledge(server, 'photo', { type: 'age', confirmed: true }, token);
     const upload = await call(server, '/api/users/photo/avatar', { token, method: 'POST', body: { imageData: PNG.toString('base64') } });
     assert.equal(upload.status, 200);
-    assert.equal((await call(server, '/media/avatars/photo')).status, 404);
-    assert.equal((await call(server, '/api/users/photo')).body.avatar, null);
+    assert.equal((await call(server, '/media/avatars/photo', asViewer('older'))).status, 404);
+    assert.equal((await call(server, '/api/users/photo', asViewer('older'))).body.avatar, null);
     await acknowledge(server, 'photo');
-    assert.equal((await call(server, '/media/avatars/photo')).status, 200);
+    assert.equal((await call(server, '/media/avatars/photo', asViewer('older'))).status, 200);
   });
 
   test('a custom client\'s post and comment show a masked author', async () => {
     const token = await signIn('custom', { displayName: 'Custom Client' });
+    await acknowledge(server, 'custom', { type: 'age', confirmed: true }, token);
     const created = await call(server, '/api/drinks', {
       token,
       method: 'POST',
@@ -356,21 +365,21 @@ describe('a new account before the notice', () => {
     assert.equal(created.status, 201);
     const id = created.body.id;
     assert.equal((await call(server, `/api/drinks/${id}/comments`, { token, method: 'POST', body: { content: 'Hi' } })).status, 201);
-    const detail = await call(server, `/api/drinks/${id}`);
+    const detail = await call(server, `/api/drinks/${id}`, asViewer('older'));
     assert.ok(!detail.text.includes('Custom'));
     assert.equal(detail.body.user.firstName, undefined);
-    assert.ok(!(await call(server, `/api/drinks/${id}/comments`)).text.includes('Custom'));
+    assert.ok(!(await call(server, `/api/drinks/${id}/comments`, asViewer('older'))).text.includes('Custom'));
   });
 
   test('the acknowledgement makes it public, also after a restart', async () => {
     const token = await signIn('accepts', { displayName: 'Lia Accept' });
-    assert.equal((await call(server, '/api/users/accepts')).body.firstName, undefined);
+    assert.equal((await call(server, '/api/users/accepts', asViewer('older'))).body.firstName, undefined);
     const res = await acknowledge(server, 'accepts', NOTICE_BODY, token);
     assert.equal(res.status, 200);
     assert.ok(!res.text.includes('noticePending'));
     assert.ok(!('noticePending' in storedUser(server, 'accepts')));
     await server.restart();
-    assert.equal((await call(server, '/api/users/accepts')).body.firstName, 'Lia');
+    assert.equal((await call(server, '/api/users/accepts', asViewer('older'))).body.firstName, 'Lia');
     const search = await call(server, '/api/users/search?q=lia', { token: tokenFor('older') });
     assert.deepEqual(search.body.map((u) => u.id), ['accepts']);
   });
@@ -380,13 +389,13 @@ describe('a new account before the notice', () => {
     await server.restart();
     await signIn('waiting', { displayName: 'Wait Ing' });
     assert.equal(storedUser(server, 'waiting').noticePending, true);
-    assert.equal((await call(server, '/api/users/waiting')).body.firstName, undefined);
+    assert.equal((await call(server, '/api/users/waiting', asViewer('older'))).body.firstName, undefined);
   });
 
   test('an existing user is never hidden, and signing in does not hide them', async () => {
     await signIn('older', { displayName: 'Other' });
     assert.ok(!('noticePending' in storedUser(server, 'older')));
-    assert.equal((await call(server, '/api/users/older')).body.firstName, 'Named');
+    assert.equal((await call(server, '/api/users/older', asViewer('older'))).body.firstName, 'Named');
   });
 });
 
@@ -431,23 +440,23 @@ describe('notice limits and failures', () => {
     assert.equal(own.city, 'Iasi');
     assert.equal(own.bio, 'Old');
     assert.equal(own.needsName, true, 'still masked');
-    assert.equal((await call(server, '/api/users/legacy')).body.firstName, undefined);
+    assert.equal((await call(server, '/api/users/legacy', asViewer('named'))).body.firstName, undefined);
     assert.equal((await owner(server, 'named')).body.firstName, 'Named');
     assert.equal((await owner(server, 'named')).body.needsName, false, 'the flag came back too');
   });
 
   test('a failed acknowledgement leaves a new account hidden', async (t) => {
     const server = await startServer({ DB_FAULT: 'save', NODE_OPTIONS: `--import=${FAULT_PRELOAD}` }, {
-      dbFixture: { users: [person('new', { noticePending: true })] },
+      dbFixture: { users: [person('new', { noticePending: true }), person('viewer')] },
     });
     t.after(() => server.stop());
     const marker = `${server.dbFile}.fail-saves`;
     fs.writeFileSync(marker, '');
     assert.equal((await acknowledge(server, 'new')).status, 503);
     fs.rmSync(marker);
-    assert.equal((await call(server, '/api/users/new')).body.firstName, undefined);
+    assert.equal((await call(server, '/api/users/new', asViewer())).body.firstName, undefined);
     assert.equal((await acknowledge(server, 'new')).status, 200);
-    assert.equal((await call(server, '/api/users/new')).body.firstName, 'Named');
+    assert.equal((await call(server, '/api/users/new', asViewer())).body.firstName, 'Named');
   });
 
   test('a failed name save answers 503, and the same name saved again is kept', async (t) => {
@@ -483,7 +492,7 @@ describe('what the notice says', () => {
           person('partner', { ageConfirmedAt: CONFIRMED_AT }),
           person('partner2', { ageConfirmedAt: CONFIRMED_AT }),
           person('stranger', { ageConfirmedAt: CONFIRMED_AT }),
-          person('minor'),
+          person('minor', { ageConfirmedAt: undefined }),
         ],
         drinks: [
           post(1, 'author', { name: 'Plain Tea', location: 'Teahouse' }),
@@ -503,38 +512,48 @@ describe('what the notice says', () => {
   });
   after(() => server?.stop());
 
-  test('name, photo, city and bio are public, with no account', async () => {
-    const { status, body } = await call(server, '/api/users/author');
+  const READ_ROUTES = [
+    '/api/users/author', '/media/avatars/author', '/api/drinks', '/api/drinks/user/author', '/api/drinks/1', '/api/drinks/2',
+    '/media/drinks/1', '/media/drinks/2', '/api/drinks/1/comments', '/api/drinks/2/comments', '/api/stories',
+  ];
+
+  test('nothing is visible to people without an account', async () => {
+    for (const route of READ_ROUTES) {
+      const res = await call(server, route);
+      assert.equal(res.status, 401, route);
+      for (const text of ['Named', 'Cluj', 'Hello', 'Plain Tea', 'Teahouse', 'Public comment', ALCOHOLIC_POST, 'Secret Bar', ALCOHOLIC_COMMENT]) {
+        assert.ok(!res.text.includes(text), `${route} ${text}`);
+      }
+    }
+  });
+
+  test('signed-in, confirmed people see name, photo, city, bio, posts with their locations, and comments', async () => {
+    const token = tokenFor('stranger');
+    const { status, body } = await call(server, '/api/users/author', { token });
     assert.equal(status, 200);
     assert.equal(body.firstName, 'Named');
     assert.equal(body.city, 'Cluj');
     assert.equal(body.bio, 'Hello');
     assert.ok(body.avatar);
-    assert.equal((await call(server, '/media/avatars/author')).status, 200);
-  });
-
-  test('non-alcoholic posts, their locations and comments are public, with no account', async () => {
-    const list = await call(server, '/api/drinks/user/author');
-    assert.deepEqual(list.body.items.map((d) => d.location), ['Teahouse']);
-    assert.equal((await call(server, '/media/drinks/1')).status, 200);
-    const comments = await call(server, '/api/drinks/1/comments');
-    assert.ok(comments.text.includes('Public comment'));
-  });
-
-  test('alcoholic posts, their locations and comments need a signed-in, confirmed viewer', async () => {
-    for (const token of [undefined, tokenFor('minor')]) {
-      const list = await call(server, '/api/drinks/user/author', { token });
-      assert.ok(!list.text.includes(ALCOHOLIC_POST));
-      assert.ok(!list.text.includes('Secret Bar'));
-      assert.equal((await call(server, '/api/drinks/2', { token })).status, 403);
-      assert.equal((await call(server, '/media/drinks/2', { token })).status, 403);
-      const comments = await call(server, '/api/drinks/2/comments', { token });
-      assert.equal(comments.status, 403);
-      assert.ok(!comments.text.includes(ALCOHOLIC_COMMENT));
-    }
-    const token = tokenFor('stranger');
-    assert.ok((await call(server, '/api/drinks/2', { token })).text.includes('Secret Bar'));
+    assert.equal((await call(server, '/media/avatars/author', { token })).status, 200);
+    const list = await call(server, '/api/drinks/user/author', { token });
+    assert.deepEqual(list.body.items.map((d) => d.location).sort(), ['Secret Bar', 'Teahouse']);
+    assert.equal((await call(server, '/media/drinks/1', { token })).status, 200);
+    assert.equal((await call(server, '/media/drinks/2', { token })).status, 200);
+    assert.ok((await call(server, '/api/drinks/1/comments', { token })).text.includes('Public comment'));
     assert.ok((await call(server, '/api/drinks/2/comments', { token })).text.includes(ALCOHOLIC_COMMENT));
+  });
+
+  test('until someone confirms 18+, they see no profile, post or comment of others, alcoholic or not', async () => {
+    const token = tokenFor('minor');
+    for (const route of READ_ROUTES) {
+      const res = await call(server, route, { token });
+      assert.equal(res.status, 403, route);
+      assert.equal(res.body?.code, 'age_required', route);
+      for (const text of ['Named', 'Plain Tea', 'Teahouse', 'Public comment', ALCOHOLIC_POST, 'Secret Bar', ALCOHOLIC_COMMENT]) {
+        assert.ok(!res.text.includes(text), `${route} ${text}`);
+      }
+    }
   });
 
   test('the partner list is for the owner and their partners only', async () => {
@@ -546,14 +565,14 @@ describe('what the notice says', () => {
     assert.equal((await call(server, '/api/users/author', { token: tokenFor('stranger') })).body.partnerCount, undefined);
   });
 
-  test('post owners see who cheered or commented, and cheer counts are public', async () => {
+  test('post owners see who cheered or commented, and cheer counts are visible to whoever can see the post', async () => {
     const token = tokenFor('stranger');
     assert.equal((await call(server, '/api/drinks/1/like', { token, method: 'POST' })).status, 200);
     assert.equal((await call(server, '/api/drinks/1/comments', { token, method: 'POST', body: { content: 'Nice' } })).status, 201);
     const { body } = await call(server, '/api/notifications', { token: tokenFor('author') });
     assert.ok(body.notifications.some((n) => n.type === 'cheer' && n.message.startsWith('Named Test')));
     assert.ok(body.notifications.some((n) => n.type === 'comment' && n.message.startsWith('Named Test')));
-    assert.equal((await call(server, '/api/drinks/1')).body.cheersCount, 1);
+    assert.equal((await call(server, '/api/drinks/1', asViewer('partner'))).body.cheersCount, 1);
   });
 
   test('a partner\'s other partners can see that you are partnered with them', async () => {

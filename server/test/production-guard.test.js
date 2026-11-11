@@ -74,8 +74,9 @@ const postAuth = async (baseUrl, body) => {
   return { status: res.status, body: await res.json() };
 };
 
-const notificationsStatus = async (baseUrl, token) => {
-  const res = await fetch(`${baseUrl}/api/notifications`, {
+// The caller's own profile: it needs a valid JWT but, unlike other routes, no 18+ confirmation.
+const ownProfileStatus = async (baseUrl, token) => {
+  const res = await fetch(`${baseUrl}/api/users/${encodeURIComponent(jwt.decode(token)?.uid ?? 'none')}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -128,7 +129,7 @@ test('non-production with JWT_SECRET unset starts and rejects the old literal', 
   const { baseUrl } = await startOn(t, { JWT_SECRET: undefined });
   const forged = jwt.sign({ uid: 'forged-user' }, OLD_LITERAL_SECRET, { expiresIn: '1h' });
 
-  assert.equal(await notificationsStatus(baseUrl, forged), 401);
+  assert.equal(await ownProfileStatus(baseUrl, forged), 401);
 });
 
 test('a refused start prints no secret or key material on stdout or stderr', async (t) => {
@@ -242,22 +243,22 @@ test('non-production with no secret starts, warns, rejects the old literal and r
   assert.match(server.getOutput(), /JWT_SECRET not set/);
 
   const forged = jwt.sign({ uid: 'forged-user' }, OLD_LITERAL_SECRET, { expiresIn: '1h' });
-  assert.equal(await notificationsStatus(baseUrl, forged), 401);
+  assert.equal(await ownProfileStatus(baseUrl, forged), 401);
 
   // The development sign-in branch still works, and its token is accepted.
   const signedIn = await postAuth(baseUrl, { idToken: 'dev-fallback-token', uid: 'dev-user' });
   assert.equal(signedIn.status, 200);
-  assert.equal(await notificationsStatus(baseUrl, signedIn.body.token), 200);
+  assert.equal(await ownProfileStatus(baseUrl, signedIn.body.token), 200);
 
   await server.restart();
-  assert.equal(await notificationsStatus(baseUrl, signedIn.body.token), 401);
+  assert.equal(await ownProfileStatus(baseUrl, signedIn.body.token), 401);
 });
 
 test('non-production keeps using a configured secret, however short', async (t) => {
   const { baseUrl } = await startOn(t, { JWT_SECRET: 'short-dev-secret' });
   await postAuth(baseUrl, { idToken: 'dev-fallback-token', uid: 'dev-user' }); // tokens need an existing user
   const token = jwt.sign({ uid: 'dev-user' }, 'short-dev-secret', { expiresIn: '1h' });
-  assert.equal(await notificationsStatus(baseUrl, token), 200);
+  assert.equal(await ownProfileStatus(baseUrl, token), 200);
 });
 
 test('server.js no longer contains the old literal secret', () => {
@@ -340,7 +341,7 @@ test('NODE_ENV=development with no key and the flag signs in', async (t) => {
   const { status, body } = await postAuth(baseUrl, { idToken: 'dev-fallback-token', uid: 'dev-user' });
 
   assert.equal(status, 200);
-  assert.equal(await notificationsStatus(baseUrl, body.token), 200);
+  assert.equal(await ownProfileStatus(baseUrl, body.token), 200);
 });
 
 test('NODE_ENV=development with a valid key needs no flag: a garbage idToken reaches verification', async (t) => {
@@ -407,9 +408,9 @@ test('only HS256 tokens are accepted, and sign-in issues HS256', async (t) => {
   const hs256 = jwt.sign({ uid: 'dev-user' }, secret, { algorithm: 'HS256', expiresIn: '1h' });
   const hs512 = jwt.sign({ uid: 'dev-user' }, secret, { algorithm: 'HS512', expiresIn: '1h' });
   const unsigned = jwt.sign({ uid: 'dev-user' }, '', { algorithm: 'none' });
-  assert.equal(await notificationsStatus(baseUrl, hs256), 200);
-  assert.equal(await notificationsStatus(baseUrl, hs512), 401);
-  assert.equal(await notificationsStatus(baseUrl, unsigned), 401);
+  assert.equal(await ownProfileStatus(baseUrl, hs256), 200);
+  assert.equal(await ownProfileStatus(baseUrl, hs512), 401);
+  assert.equal(await ownProfileStatus(baseUrl, unsigned), 401);
 
   const { body } = await postAuth(baseUrl, { idToken: 'dev-fallback-token', uid: 'dev-user' });
   const { header, payload } = jwt.decode(body.token, { complete: true });
@@ -459,8 +460,9 @@ for (const [label, content] of [
 
     assert.deepEqual(readBackups(dbFile), [content]);
     assert.match(server.getOutput(), /ALLOW_EMPTY_DB=true but the database file exists/);
+    // Nothing is readable logged out; the backup and the warning above show the empty start.
     const res = await fetch(`${server.baseUrl}/api/drinks`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    assert.deepEqual(await res.json(), { items: [], nextCursor: null });
+    assert.equal(res.status, 401);
   });
 }
 
@@ -483,16 +485,24 @@ test('non-production still accepts an empty object with no backup', async (t) =>
   const dbFile = makeDbWith(t, '{}');
   const { baseUrl } = await startOn(t, { DB_FILE: dbFile });
 
-  const res = await fetch(`${baseUrl}/api/drinks`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const { body } = await postAuth(baseUrl, { idToken: 'dev-fallback-token', uid: 'reader' });
+  const auth = { Authorization: `Bearer ${body.token}`, 'Content-Type': 'application/json' };
+  await fetch(`${baseUrl}/api/users/reader/acknowledgements`, { method: 'POST', headers: auth, body: JSON.stringify({ type: 'age', confirmed: true }) });
+  const res = await fetch(`${baseUrl}/api/drinks`, { headers: auth, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   assert.deepEqual(await res.json(), { items: [], nextCursor: null });
   assert.deepEqual(readBackups(dbFile), []);
 });
 
 test('production with an existing DB file starts without the flag and loads it', async (t) => {
-  const fixture = { drinks: [{ id: 3, userId: 'nobody', name: 'Guard Fixture', isAlcoholic: false }], nextDrinkId: 4 };
+  const fixture = {
+    drinks: [{ id: 3, userId: 'nobody', name: 'Guard Fixture', isAlcoholic: false }],
+    nextDrinkId: 4,
+    users: [{ id: 'reader', email: 'reader@example.test', firstName: 'R', lastName: '', city: '', bio: '', avatar: null, ageConfirmedAt: '2026-01-01T00:00:00.000Z' }],
+  };
   const { baseUrl } = await startOn(t, productionEnv({ ALLOW_EMPTY_DB: undefined }), { dbFixture: fixture });
 
-  const res = await fetch(`${baseUrl}/api/drinks`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const reader = jwt.sign({ uid: 'reader' }, VALID_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+  const res = await fetch(`${baseUrl}/api/drinks`, { headers: { Authorization: `Bearer ${reader}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   assert.equal(res.status, 200);
   assert.deepEqual((await res.json()).items.map((drink) => drink.name), ['Guard Fixture']);
 });

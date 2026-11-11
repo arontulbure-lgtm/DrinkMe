@@ -430,13 +430,13 @@ describe('GET /api/users/:id/partners', () => {
 });
 
 describe('partnerStatus and partnerCount', () => {
-  test('never for a logged-out viewer', async (t) => {
+  test('never for a logged-out viewer, who gets nothing at all', async (t) => {
     const server = await start(t, {}, fixture({ partnersByUser: partnered(), partnerRequestsByUser: { alice: [request('carol')] } }));
     const res = await call(server, 'GET', '/api/users/alice');
-    assert.equal(res.status, 200);
-    assert.equal('partnerStatus' in res.body, false);
-    assert.equal('partnerCount' in res.body, false);
+    assert.equal(res.status, 401);
+    assert.ok(!res.text.includes('partnerStatus') && !res.text.includes('partnerCount'));
     const list = await call(server, 'GET', '/api/drinks');
+    assert.equal(list.status, 401);
     assert.ok(!list.text.includes('partnerStatus') && !list.text.includes('partnerCount'));
   });
 
@@ -527,7 +527,8 @@ describe('persistence', () => {
   for (const value of ['x', [], { alice: 'x' }]) {
     test(`a partnerRequestsByUser of ${JSON.stringify(value)} counts as a corrupt database`, async (t) => {
       const server = await start(t, {}, { users: [person('alice')], partnerRequestsByUser: value });
-      assert.equal((await call(server, 'GET', '/api/users/alice')).status, 404, 'started empty');
+      // alice's own JWT finds no account: the database started empty.
+      assert.equal((await call(server, 'GET', '/api/users/alice', 'alice')).status, 401, 'started empty');
     });
   }
 });

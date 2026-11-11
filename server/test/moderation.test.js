@@ -201,13 +201,13 @@ for (const blocksByUser of [{ alice: ['bob'] }, { bob: ['alice'] }]) {
       });
     }
 
-    test('a logged-out reader and a third user still see both', async (t) => {
+    test('a third user still sees both, and a logged-out reader sees nothing', async (t) => {
       const server = await startServer({}, { dbFixture: socialFixture(blocksByUser) });
       t.after(() => server.stop());
-      for (const uid of [undefined, 'carol']) {
-        assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks', uid)), [3, 2, 1]);
-        assert.equal((await call(server, 'GET', '/api/users/alice', uid)).status, 200);
-      }
+      assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks', 'carol')), [3, 2, 1]);
+      assert.equal((await call(server, 'GET', '/api/users/alice', 'carol')).status, 200);
+      assert.equal((await call(server, 'GET', '/api/drinks')).status, 401);
+      assert.equal((await call(server, 'GET', '/api/users/alice')).status, 401);
     });
   });
 }
@@ -220,23 +220,26 @@ describe('a block and the age gate', () => {
     blocksByUser: { owner: ['blocked-minor', 'blocked-adult'] },
   });
 
-  test('a block answers 404 whatever the flag and the age, and only the age gate answers 403', async (t) => {
+  // An unconfirmed user gets age_required on every route, before any block is looked at, so the answer
+  // says nothing about a block either.
+  test('a block answers 404 whatever the flag, and an unconfirmed user gets age_required everywhere', async (t) => {
     const server = await startServer({}, { dbFixture: fixture() });
     t.after(() => server.stop());
-    for (const uid of ['blocked-minor', 'blocked-adult']) {
-      for (const id of [1, 2]) {
-        for (const route of [`/api/drinks/${id}`, `/api/drinks/${id}/comments`, `/media/drinks/${id}`]) {
-          const res = await call(server, 'GET', route, uid);
-          assert.equal(res.status, 404, `${uid} ${route}`);
-          assert.equal(res.body.code, undefined);
+    for (const id of [1, 2]) {
+      for (const route of [`/api/drinks/${id}`, `/api/drinks/${id}/comments`, `/media/drinks/${id}`]) {
+        const res = await call(server, 'GET', route, 'blocked-adult');
+        assert.equal(res.status, 404, `blocked-adult ${route}`);
+        assert.equal(res.body.code, undefined);
+        for (const uid of ['blocked-minor', 'other-minor']) {
+          const minorRes = await call(server, 'GET', route, uid);
+          assert.equal(minorRes.status, 403, `${uid} ${route}`);
+          assert.equal(minorRes.body.code, 'age_required', `${uid} ${route}`);
         }
-        assert.equal((await call(server, 'POST', `/api/drinks/${id}/like`, uid)).status, 404);
       }
+      assert.equal((await call(server, 'POST', `/api/drinks/${id}/like`, 'blocked-adult')).status, 404);
+      assert.equal((await call(server, 'POST', `/api/drinks/${id}/like`, 'blocked-minor')).body.code, 'age_required');
     }
-    assert.equal((await call(server, 'GET', '/api/drinks/1', 'other-minor')).body.code, 'age_required');
-    assert.equal((await call(server, 'GET', '/media/drinks/1', 'other-minor')).body.code, 'age_required');
-    assert.equal((await call(server, 'GET', '/api/drinks/1')).body.code, 'age_required', 'logged out');
-    assert.equal((await call(server, 'GET', '/api/drinks/2', 'other-minor')).status, 200);
+    assert.equal((await call(server, 'GET', '/api/drinks/1')).status, 401, 'logged out');
   });
 });
 
@@ -406,9 +409,10 @@ describe('POST /api/reports', () => {
     assert.equal((await report(server, 'reporter', 'drink', 999)).status, 404);
     assert.equal((await report(server, 'reporter', 'comment', 999)).status, 404);
     assert.equal((await report(server, 'reporter', 'user', 'nobody')).status, 404);
-    // Hidden by age: the post, and a comment on it.
-    assert.equal((await report(server, 'young', 'drink', 3)).status, 404);
-    assert.equal((await report(server, 'young', 'comment', 3)).status, 404);
+    // An unconfirmed user cannot report at all, so nothing tells them what exists.
+    for (const [type, id] of [['drink', 3], ['comment', 3], ['drink', 1], ['user', 'owner']]) {
+      assert.equal((await report(server, 'young', type, id)).body.code, 'age_required', `${type} ${id}`);
+    }
     // Blocked: the author only, while the post's owner is not.
     assert.equal((await report(server, 'blocked-viewer', 'comment', 1)).status, 404);
     assert.equal((await report(server, 'blocked-viewer', 'drink', 1)).status, 201);
@@ -521,7 +525,8 @@ describe('POST /api/reports', () => {
     test(`a ${key} of the wrong shape counts as a corrupt database`, async (t) => {
       const server = await startServer({}, { dbFixture: { users: [person('alice')], [key]: value } });
       t.after(() => server.stop());
-      assert.equal((await call(server, 'GET', '/api/users/alice')).status, 404, 'started empty');
+      // alice's own JWT finds no account: the database started empty.
+      assert.equal((await call(server, 'GET', '/api/users/alice', 'alice')).status, 401, 'started empty');
     });
   }
 });
@@ -562,17 +567,20 @@ describe('DELETE /api/drinks/:id/comments/:commentId', () => {
     assert.equal((await call(server, 'DELETE', route(1, 2), 'owner')).status, 204);
     assert.equal((await call(server, 'DELETE', route(1, 1), 'author')).status, 404, 'already gone');
 
-    assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks/1/comments')), [3]);
+    assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks/1/comments', 'owner')), [3]);
     await server.restart();
-    assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks/1/comments')), [3]);
+    assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks/1/comments', 'owner')), [3]);
   });
 
-  test('the age gate: a stranger gets 403, and an author can still remove a comment they cannot see', async (t) => {
+  // Owner decision: before the 18+ confirmation nothing but the first-run steps works, so removing
+  // their own comment waits for it too.
+  test('the age gate: an unconfirmed user gets 403 age_required, even for their own comment', async (t) => {
     const server = await startServer({}, { dbFixture: fixture({ commentsByDrink: { 3: [commentOf(5, 3, 'young'), commentOf(6, 3, 'author')] } }) });
     t.after(() => server.stop());
     assert.equal((await call(server, 'DELETE', route(3, 6), 'young')).body.code, 'age_required');
     assert.equal((await call(server, 'DELETE', route(3, 999), 'young')).body.code, 'age_required', 'no way to test for a comment');
-    assert.equal((await call(server, 'DELETE', route(3, 5), 'young')).status, 204);
+    assert.equal((await call(server, 'DELETE', route(3, 5), 'young')).body.code, 'age_required');
+    assert.equal(readDb(server).commentsByDrink[3].length, 2);
   });
 
   test('a blocked author and a post owner can still remove what they wrote or hold', async (t) => {
@@ -627,7 +635,7 @@ describe('DELETE /api/drinks/:id/comments/:commentId', () => {
     failSaves(server);
     assert.equal((await call(server, 'DELETE', route(1, 2), 'author')).status, 503);
     allowSaves(server);
-    assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks/1/comments')), [3, 2, 1]);
+    assert.deepEqual(idsOf(await call(server, 'GET', '/api/drinks/1/comments', 'owner')), [3, 2, 1]);
     assert.equal((await call(server, 'POST', '/api/notifications/read', 'owner')).status, 200);
     assert.deepEqual(readDb(server).commentsByDrink, before.commentsByDrink, 'the same order in the file');
   });
@@ -850,7 +858,7 @@ describe('T2-3 fix pass', () => {
 
   describe('an admin reviewing an image', () => {
     const mediaFixture = () => ({
-      users: [minor('admin'), person('poster'), person('blocked-user')],
+      users: [person('admin'), person('poster'), person('blocked-user')],
       drinks: [post(1, 'poster'), post(2, 'poster', { isAlcoholic: true })],
       nextDrinkId: 3,
       blocksByUser: { poster: ['admin', 'blocked-user'] },
@@ -867,15 +875,26 @@ describe('T2-3 fix pass', () => {
       assert.equal((await call(server, 'GET', '/api/drinks/1', 'admin')).status, 404, 'media only');
     });
 
-    test('an admin who has not confirmed their age can see an alcoholic post\'s image', async (t) => {
+    // The sign-in and age gate in front of every route applies to admins too.
+    test('an admin who has not confirmed their age gets age_required, like everyone', async (t) => {
+      const fixture = { ...mediaFixture(), users: [minor('admin'), person('poster')], blocksByUser: {} };
+      const server = await startServer(ADMIN_ENV, { dbFixture: fixture });
+      t.after(() => server.stop());
+      for (const id of [1, 2]) {
+        const image = await media(server, id, 'admin');
+        assert.equal(image.status, 403);
+        assert.equal(image.headers.get('cache-control'), 'no-store');
+      }
+      assert.equal((await call(server, 'GET', '/api/admin/reports', 'admin')).body.code, 'age_required');
+    });
+
+    test('a confirmed admin sees an alcoholic post\'s image with no exemption used', async (t) => {
       const fixture = { ...mediaFixture(), blocksByUser: {} };
       const server = await startServer(ADMIN_ENV, { dbFixture: fixture });
       t.after(() => server.stop());
       const image = await media(server, 2, 'admin');
       assert.equal(image.status, 200);
-      assert.equal(image.headers.get('cache-control'), 'no-store');
-      assert.equal((await call(server, 'GET', '/api/drinks/2', 'admin')).body.code, 'age_required', 'media only');
-      assert.equal((await media(server, 1, 'admin')).headers.get('cache-control'), 'private, max-age=86400', 'no exemption used');
+      assert.equal(image.headers.get('cache-control'), 'private, max-age=86400');
     });
 
     test('without the env list the same user is refused', async (t) => {
@@ -889,7 +908,7 @@ describe('T2-3 fix pass', () => {
     test('blanks name, bio and avatar, keeps the rest, resolves sibling reports only', async (t) => {
       const server = await startServer(ADMIN_ENV, { dbFixture: profileFixture() });
       t.after(() => server.stop());
-      assert.equal((await fetch(`${server.baseUrl}/media/avatars/target`)).status, 200);
+      assert.equal((await fetch(`${server.baseUrl}/media/avatars/target`, { headers: { Authorization: `Bearer ${tokenFor('r1')}` } })).status, 200);
 
       const res = await resolve(server, 1, 'clear_profile');
       assert.equal(res.status, 200);
@@ -910,7 +929,7 @@ describe('T2-3 fix pass', () => {
         assert.equal(publicView.status, 200, 'not suspended');
         assert.equal(publicView.body.avatar, null);
         assert.ok(!publicView.text.includes('avatarClearedByAdmin'));
-        assert.equal((await fetch(`${server.baseUrl}/media/avatars/target`)).status, 404);
+        assert.equal((await fetch(`${server.baseUrl}/media/avatars/target`, { headers: { Authorization: `Bearer ${tokenFor('r1')}` } })).status, 404);
       };
       await check();
       await server.restart();
@@ -976,7 +995,7 @@ describe('T2-3 fix pass', () => {
       assert.equal(publicView.body.firstName, 'target');
       assert.equal(publicView.body.bio, 'Bad bio');
       assert.ok(publicView.body.avatar);
-      assert.equal((await fetch(`${server.baseUrl}/media/avatars/target`)).status, 200);
+      assert.equal((await fetch(`${server.baseUrl}/media/avatars/target`, { headers: { Authorization: `Bearer ${tokenFor('r1')}` } })).status, 200);
       assert.equal((await call(server, 'POST', '/api/notifications/read', 'r1')).status, 200);
       const after = readDb(server);
       assert.deepEqual(after.users, before.users);

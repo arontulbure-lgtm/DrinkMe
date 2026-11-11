@@ -217,6 +217,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                 <Text style={styles.loadingText}>{t('post.notFound')}</Text>
               </View>
             ) : isAgeRequired ? (
+              // Defence in depth: the hard age gate means an unconfirmed user never reaches this screen.
               <View style={styles.loadingState}>
                 <Ionicons name="lock-closed-outline" size={32} color="#6B7280" />
                 <Text style={styles.loadingText}>{t('ageGate.required')}</Text>

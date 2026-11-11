@@ -71,6 +71,8 @@ const legacyDb = () => ({
       id: 'author', email: 'author@example.test', firstName: 'o&#x27;brien', lastName: 'a&amp;b',
       city: 'abc&#x2', bio: '&lt;b&gt; &quot;x&quot; &#x2F; &#x5C; &#96;', avatar: 'https://lh3.googleusercontent.com/a&amp;b',
       nameSetByUser: true,
+      // Every route but the first-run ones needs the 18+ confirmation.
+      ageConfirmedAt: '2026-01-01T00:00:00.000Z',
     },
   ],
   drinks: [{
@@ -109,6 +111,7 @@ describe('new text is stored plain', () => {
     assert.equal((await call(server, 'POST', '/api/auth/mobile', undefined, {
       idToken: 'dev-fallback-token', uid: 'writer', displayName: TEXT,
     })).status, 200);
+    assert.equal((await call(server, 'POST', '/api/users/writer/acknowledgements', token, { type: 'age', confirmed: true })).status, 200);
   });
 
   after(() => server?.stop());
@@ -191,7 +194,7 @@ describe('migrating a legacy file', () => {
     assert.equal(db.commentsByDrink[1][0].content, 'a&lt;b'); // one level only
     assert.deepEqual(db.smartBarByUser.author[0], { id: 1, name: "o'brien", quantity: 'a&b', unit: 'u'.repeat(56) });
     assert.equal(db.notificationsByUser.author[0].message, "o'brien cheered a&b.");
-    assert.equal((await call(server, 'GET', '/api/drinks/1')).status, 200);
+    assert.equal((await call(server, 'GET', '/api/drinks/1', tokenFor('author'))).status, 200);
   });
 
   test('no route returns an entity afterwards', async (t) => {
@@ -209,7 +212,7 @@ describe('migrating a legacy file', () => {
       assert.equal(status, 200, route);
       assert.ok(!/&(amp|#x27|#x2F|#x5C|#96|quot|lt|gt);|&#x2\b/.test(text), `${route} holds an entity`);
     }
-    const [comment] = (await call(server, 'GET', '/api/drinks/1/comments')).body.items;
+    const [comment] = (await call(server, 'GET', '/api/drinks/1/comments', token)).body.items;
     assert.equal(comment.content, "o'brien & <b> abc");
   });
 
@@ -260,9 +263,10 @@ describe('migrating a legacy file', () => {
       try {
         assert.equal(backupsOf(dbFile).length, outcome === 'migrates' ? 1 : 0, `${version}: migration backups`);
         assert.equal(backupsOf(dbFile, '.corrupt-').length, outcome === 'corrupt' ? 1 : 0, `${version}: corrupt backups`);
-        const { status, body: user } = await call(server, 'GET', '/api/users/v');
+        // Read as the owner, the one view allowed before the 18+ confirmation. A corrupt start has no such user.
+        const { status, body: user } = await call(server, 'GET', '/api/users/v', tokenFor('v'));
         if (outcome === 'corrupt') {
-          assert.equal(status, 404, version);
+          assert.equal(status, 401, version);
         } else {
           assert.equal(user.firstName, name, version);
         }
@@ -307,7 +311,7 @@ describe('migrating a legacy file', () => {
       const { body } = await call(server, 'GET', '/api/users/author', token);
       assert.equal(body.bio, 'a&amp;b');
       assert.equal(body.city, typed);
-      const comments = (await call(server, 'GET', '/api/drinks/1/comments')).body.items;
+      const comments = (await call(server, 'GET', '/api/drinks/1/comments', token)).body.items;
       assert.equal(comments[0].content, typed);
       assert.equal(comments.at(-1).content, 'a&lt;b');
     }
@@ -407,7 +411,7 @@ describe('migrating a legacy file', () => {
     assert.match(server.getOutput(), /Could not save the schema migration/);
     assert.doesNotMatch(server.getOutput(), /Migrated/);
     assert.equal(fs.readFileSync(dbFile, 'utf8'), content);
-    assert.equal((await call(server, 'GET', '/api/users/author')).body.firstName, "o'brien");
+    assert.equal((await call(server, 'GET', '/api/users/author', tokenFor('author'))).body.firstName, "o'brien");
 
     await server.restart();
     assert.equal(fs.readFileSync(dbFile, 'utf8'), content);
@@ -512,13 +516,13 @@ describe('which files count as legacy', () => {
 });
 
 describe('email-derived names after the migration', () => {
-  const VIEWER = { id: 'viewer', email: 'viewer@example.test', firstName: 'Vera', lastName: '', nameSetByUser: true };
+  const VIEWER = { id: 'viewer', email: 'viewer@example.test', firstName: 'Vera', lastName: '', nameSetByUser: true, ageConfirmedAt: '2026-01-01T00:00:00.000Z' };
   // firstName is the old escape, then the old 120-character cut.
   const LONG_PREFIX = `a${"'".repeat(25)}`;
   const CUT_NAME = `a${'&#x27;'.repeat(19)}&#x27`;
   const users = [
     { id: 'escaped', email: "o'brien@example.test", firstName: 'o&#x27;brien', lastName: '' },
-    { id: 'cut', email: `${LONG_PREFIX}@example.test`, firstName: CUT_NAME, lastName: '' },
+    { id: 'cut', email: `${LONG_PREFIX}@example.test`, firstName: CUT_NAME, lastName: '', ageConfirmedAt: '2026-01-01T00:00:00.000Z' },
     { id: 'raw-amp', email: 'a&@example.test', firstName: 'a&', lastName: '' },
     { id: 'raw-rd', email: 'r&d@example.test', firstName: 'r&d', lastName: '' },
     { id: 'chosen', email: "o'neil@example.test", firstName: 'o&#x27;neil', lastName: '', nameSetByUser: true },
@@ -531,12 +535,12 @@ describe('email-derived names after the migration', () => {
 
     const assertMasked = async () => {
       for (const id of ['escaped', 'cut', 'raw-amp', 'raw-rd']) {
-        const { body } = await call(server, 'GET', `/api/users/${id}`);
+        const { body } = await call(server, 'GET', `/api/users/${id}`, tokenFor('viewer'));
         assert.equal('firstName' in body, false, id);
       }
     };
     await assertMasked();
-    assert.equal((await call(server, 'GET', '/api/users/chosen')).body.firstName, "o'neil");
+    assert.equal((await call(server, 'GET', '/api/users/chosen', tokenFor('viewer'))).body.firstName, "o'neil");
     assert.deepEqual((await call(server, 'GET', '/api/users/search?q=brien', tokenFor('viewer'))).body, []);
 
     // The owner still has a readable name, with no entity left.
@@ -582,7 +586,7 @@ describe('email-derived names after the migration', () => {
     const { status } = await call(server, 'PUT', '/api/users/escaped', tokenFor('escaped'), { firstName: "O'Hara" });
     assert.equal(status, 200);
     assert.equal(storedUser(dbFile, 'escaped').nameSetByUser, true);
-    assert.equal((await call(server, 'GET', '/api/users/escaped')).body.firstName, "O'Hara");
+    assert.equal((await call(server, 'GET', '/api/users/escaped', tokenFor('viewer'))).body.firstName, "O'Hara");
   });
 
   test('a notification built after the migration holds plain text, and stays so', async (t) => {

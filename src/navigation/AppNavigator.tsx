@@ -101,16 +101,12 @@ function TabNavigator() {
 export function AppNavigator() {
   const { isAuthenticated, isLoading, sessionStatus, profile, serverUserId, accountDeletedNotice, clearAccountDeletedNotice, signInAgainNotice, clearSignInAgainNotice } = useAuth();
   const { t } = useLocalization();
-  // Only for this session: declining is not stored, so the gate returns on the next launch or sign-in.
-  const [declinedAgeGateUid, setDeclinedAgeGateUid] = useState<string | null>(null);
-  // The same for "Later" on the name prompt. The notice has no such way out.
+  // Only for this session: "Later" on the name prompt is not stored. The age gate and the notice have no
+  // such way out.
   const [skippedNameUid, setSkippedNameUid] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setDeclinedAgeGateUid(null);
-      setSkippedNameUid(null);
-    }
+    if (!isAuthenticated) setSkippedNameUid(null);
   }, [isAuthenticated]);
 
   // Without this, signing in to a deleted account would just return to the sign-in screen with no reason.
@@ -135,17 +131,13 @@ export function AppNavigator() {
   }
 
   // profile is set only once the session is ready, so an unknown answer never shows the gate.
-  if (
-    isAuthenticated &&
-    sessionStatus === 'ready' &&
-    profile &&
-    profile.ageConfirmed !== true &&
-    declinedAgeGateUid !== serverUserId
-  ) {
-    return <AgeGateScreen onDecline={() => setDeclinedAgeGateUid(serverUserId)} />;
+  // A hard gate: the server refuses everything but the first-run routes before the 18+ confirmation, so
+  // neither the tabs nor the stack are mounted until then. Leaving means logging out or deleting the account.
+  if (isAuthenticated && sessionStatus === 'ready' && profile && profile.ageConfirmed !== true) {
+    return <AgeGateScreen />;
   }
 
-  // After the age gate, whatever the answer to it was.
+  // After the age gate.
   if (
     isAuthenticated &&
     sessionStatus === 'ready' &&

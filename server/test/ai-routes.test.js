@@ -741,7 +741,11 @@ describe('AI routes with the stub', () => {
     before(() => server.restart());
 
     test('a library error below 500 gets a generic message, not its own', async () => {
-      const res = await fetch(`${server.baseUrl}/api/users/%E0%A4%A`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      // Signed in: a logged-out request is refused before the route decodes its parameter.
+      const res = await fetch(`${server.baseUrl}/api/users/%E0%A4%A`, {
+        headers: { Authorization: `Bearer ${freshToken()}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
       assert.equal(res.status, 400);
       assert.deepEqual(await res.json(), { error: 'Request could not be processed' });
 

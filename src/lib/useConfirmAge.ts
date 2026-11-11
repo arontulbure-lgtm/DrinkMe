@@ -4,7 +4,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 import { apiFetch } from './api';
-import { invalidateDrinkQueries } from './drinkCache';
 import { BaseUser } from '../types/api';
 
 // The answer is stored on the server. A logout during the request leaves the next user's data alone.
@@ -27,8 +26,8 @@ export function useConfirmAge() {
       // A fetch already on its way would otherwise put the unconfirmed answer back.
       void queryClient.cancelQueries({ queryKey: ['users.detail', serverUserId] });
       queryClient.setQueryData<BaseUser>(['users.detail', serverUserId], updated);
-      invalidateDrinkQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      // Everything fetched before the confirmation was refused by the server, so all of it is fetched again.
+      void queryClient.invalidateQueries();
     },
     onError: () => {
       Alert.alert(t('ageGate.title'), t('ageGate.confirmFailed'));
@@ -40,7 +39,7 @@ export function useConfirmAge() {
   // For a late confirmation: the user sees the same question as on the gate before answering.
   const promptConfirmAge = useCallback(() => {
     Alert.alert(t('ageGate.title'), t('ageGate.body'), [
-      { text: t('ageGate.decline'), style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       { text: t('ageGate.confirm'), onPress: () => mutate() },
     ]);
   }, [mutate, t]);

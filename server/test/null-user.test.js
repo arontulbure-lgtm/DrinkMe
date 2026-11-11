@@ -17,6 +17,8 @@ const fixtureUser = (id, firstName, lastName = 'Fixture') => ({
   city: 'Cluj',
   bio: '',
   avatar: null,
+  // Every route but the first-run ones needs the 18+ confirmation.
+  ageConfirmedAt: '2026-01-01T00:00:00.000Z',
 });
 
 const fixtureDrink = (id, userId) => ({ id, userId, name: `Drink ${id}`, location: 'Cluj', isAlcoholic: false, cheersCount: 0 });
@@ -221,11 +223,11 @@ describe('the "null" key in partnersByUser', () => {
     assert.deepEqual(body.map((user) => [user.id, user.isPartner]), [['friend', true]]);
   });
 
-  test('a logged-out read of the other public drink routes does not create it', async (t) => {
+  test('a logged-out read of the drink routes gets 401 and does not create it', async (t) => {
     const { baseUrl, dbFile } = await startOn(t, { dbFixture: socialFixture() });
     for (const path of ['/api/drinks', '/api/drinks/1', '/api/drinks/user/viewer']) {
       const { status } = await getJson(baseUrl, path);
-      assert.equal(status, 200, path);
+      assert.equal(status, 401, path);
     }
     await signIn(baseUrl, 'viewer');
     assert.deepEqual(readPartnerKeys(dbFile).sort(), ['friend', 'viewer']);
@@ -246,16 +248,17 @@ describe('the "null" key in partnersByUser', () => {
 });
 
 describe('GET /api/drinks/:id/comments', () => {
-  test('logged-out reads of unknown drinks return 404 and save nothing', async (t) => {
+  test('reads of unknown drinks return 404 and save nothing', async (t) => {
     const { baseUrl, dbFile } = await startOn(t, { dbFixture: socialFixture() });
+    const token = await signIn(baseUrl, 'viewer');
     for (const id of ['abc', '999999']) {
-      const { status, body } = await getJson(baseUrl, `/api/drinks/${id}/comments`);
+      const { status, body } = await getJson(baseUrl, `/api/drinks/${id}/comments`, token);
       assert.equal(status, 404, id);
       assert.deepEqual(body, { error: 'Drink not found' });
     }
-    assert.deepEqual((await getJson(baseUrl, '/api/drinks/1/comments')).body.items, []);
+    assert.deepEqual((await getJson(baseUrl, '/api/drinks/1/comments', token)).body.items, []);
 
-    await signIn(baseUrl, 'viewer');
+    await updateBio(baseUrl, 'viewer', token);
 
     assert.deepEqual(JSON.parse(fs.readFileSync(dbFile, 'utf8')).commentsByDrink, {});
   });
@@ -276,9 +279,10 @@ describe('GET /api/drinks/:id/comments', () => {
       },
     };
     const { baseUrl, dbFile } = await startOn(t, { dbFixture: fixture });
-    assert.deepEqual((await getJson(baseUrl, '/api/drinks/1/comments')).body.items.map((c) => c.id), [2]);
+    const token = await signIn(baseUrl, 'viewer');
+    assert.deepEqual((await getJson(baseUrl, '/api/drinks/1/comments', token)).body.items.map((c) => c.id), [2]);
 
-    await signIn(baseUrl, 'viewer');
+    await updateBio(baseUrl, 'viewer', token);
 
     assert.deepEqual(JSON.parse(fs.readFileSync(dbFile, 'utf8')).commentsByDrink, {
       1: [realComment],
@@ -295,9 +299,10 @@ describe('TRUST_PROXY_HOPS', () => {
 
   test('by default, a varying X-Forwarded-For does not avoid the limiter', async (t) => {
     const { baseUrl } = await startWithEnv(t, {});
+    // Logged out, so each request gets 401, after the limiter has counted it.
     for (let i = 0; i < API_LIMIT; i++) {
       const { status } = await getStatus(baseUrl, '/api/stories', spoofedIp(i));
-      assert.equal(status, 200, `request ${i + 1}`);
+      assert.equal(status, 401, `request ${i + 1}`);
     }
     assert.equal((await getStatus(baseUrl, '/api/stories', spoofedIp(API_LIMIT))).status, 429);
   });
@@ -306,7 +311,7 @@ describe('TRUST_PROXY_HOPS', () => {
     const { baseUrl } = await startWithEnv(t, { TRUST_PROXY_HOPS: '1' });
     for (let i = 0; i < 3; i++) {
       const { status, remaining } = await getStatus(baseUrl, '/api/stories', spoofedIp(i));
-      assert.equal(status, 200);
+      assert.equal(status, 401);
       assert.equal(remaining, String(API_LIMIT - 1), 'each forwarded IP has its own bucket');
     }
   });
@@ -331,16 +336,14 @@ describe('a validly signed token for an unknown user', () => {
   const secret = 'test-only-unknown-user-secret';
   const liveToken = (uid) => signToken({ uid, exp: Math.floor(Date.now() / 1000) + 3600 }, secret);
 
-  test('gets 401 on a mutation and counts as logged out on public routes', async (t) => {
+  test('gets 401 on a mutation and on reads', async (t) => {
     const { baseUrl, dbFile } = await startWithEnv(t, { JWT_SECRET: secret }, { dbFixture: socialFixture() });
     const ghost = liveToken('ghost');
 
     assert.equal(await putBio(baseUrl, 'ghost', ghost), 401);
     assert.equal((await getJson(baseUrl, '/api/drinks/partners', ghost)).status, 401);
 
-    const drink = await getJson(baseUrl, '/api/drinks/1', ghost);
-    assert.equal(drink.status, 200);
-    assert.equal(drink.body.isPartner, false);
+    assert.equal((await getJson(baseUrl, '/api/drinks/1', ghost)).status, 401);
     assert.equal((await getJson(baseUrl, '/api/users/friend/partners', ghost)).status, 401);
 
     assert.equal(await putBio(baseUrl, 'viewer', liveToken('viewer')), 200);

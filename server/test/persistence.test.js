@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 
+import jwt from 'jsonwebtoken';
+
 import { REAL_DB_FILE, assertRefusesToStart, startServer } from './helpers/harness.js';
 
 const DB_NAME = 'db.json';
@@ -20,7 +22,7 @@ const FULL_DB = {
   nextReportId: 2,
   dbSchemaVersion: 2,
   users: [
-    { id: 'round-trip-1', email: 'one@example.test', firstName: 'Round', lastName: 'One', city: 'Testville', bio: 'Synthetic', avatar: null },
+    { id: 'round-trip-1', email: 'one@example.test', firstName: 'Round', lastName: 'One', city: 'Testville', bio: 'Synthetic', avatar: null, ageConfirmedAt: '2026-01-01T00:00:00.000Z' },
     { id: 'round-trip-2', email: 'two@example.test', firstName: 'Round', lastName: 'Two', city: 'Testville', bio: 'Synthetic', avatar: null },
   ],
   cheersByUser: { 'round-trip-1': [7] },
@@ -65,7 +67,8 @@ const postJson = async (url, body, token) => {
   return { status: res.status, body: await res.json() };
 };
 
-const signIn = async (baseUrl, uid) => {
+// Every route but the first-run ones needs the 18+ confirmation. confirmAge: false saves nothing new.
+const signIn = async (baseUrl, uid, { confirmAge = true } = {}) => {
   const { status, body } = await postJson(`${baseUrl}/api/auth/mobile`, {
     idToken: 'dev-fallback-token',
     uid,
@@ -73,8 +76,15 @@ const signIn = async (baseUrl, uid) => {
     displayName: 'Persistence Tester',
   });
   assert.equal(status, 200);
+  if (confirmAge) {
+    const age = await postJson(`${baseUrl}/api/users/${uid}/acknowledgements`, { type: 'age', confirmed: true }, body.token);
+    assert.equal(age.status, 200);
+  }
   return body.token;
 };
+
+// A confirmed user of FULL_DB. Signed here, so reading writes nothing.
+const fullDbReader = () => jwt.sign({ uid: 'round-trip-1' }, 'test-only-jwt-secret', { algorithm: 'HS256', expiresIn: '1h' });
 
 const createDrink = async (baseUrl, token, name) => {
   const created = await postJson(
@@ -86,8 +96,8 @@ const createDrink = async (baseUrl, token, name) => {
   return created.body;
 };
 
-const getDrinks = async (baseUrl) => {
-  const res = await fetch(`${baseUrl}/api/drinks`);
+const getDrinks = async (baseUrl, token = fullDbReader()) => {
+  const res = await fetch(`${baseUrl}/api/drinks`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(res.status, 200);
   return (await res.json()).items;
 };
@@ -151,7 +161,6 @@ test('a corrupt file is copied byte for byte and the server still starts', async
   const dbFile = makeDbDir(t, (file) => fs.writeFileSync(file, corruptBytes));
   const { baseUrl } = await startOn(t, dbFile);
 
-  assert.deepEqual(await getDrinks(baseUrl), []);
   const backups = filesMatching(dbFile, '.corrupt-');
   assert.equal(backups.length, 1);
   const backupFile = path.join(path.dirname(dbFile), backups[0]);
@@ -159,6 +168,7 @@ test('a corrupt file is copied byte for byte and the server still starts', async
 
   // The next mutation replaces the DB and must leave the backup alone.
   const token = await signIn(baseUrl, 'corrupt-user');
+  assert.deepEqual(await getDrinks(baseUrl, token), []);
   await createDrink(baseUrl, token, 'After Corruption');
   assert.equal(JSON.parse(fs.readFileSync(dbFile, 'utf8')).drinks[0].name, 'After Corruption');
   assert.deepEqual(fs.readFileSync(backupFile), corruptBytes);
@@ -181,12 +191,12 @@ for (const [label, content] of [
     const dbFile = makeDbDir(t, (file) => fs.writeFileSync(file, content, 'utf8'));
     const { baseUrl } = await startOn(t, dbFile);
 
-    assert.deepEqual(await getDrinks(baseUrl), []);
     const backups = filesMatching(dbFile, '.corrupt-');
     assert.equal(backups.length, 1);
     assert.equal(fs.readFileSync(path.join(path.dirname(dbFile), backups[0]), 'utf8'), content);
 
     const token = await signIn(baseUrl, 'shape-user');
+    assert.deepEqual(await getDrinks(baseUrl, token), []);
     assert.equal((await createDrink(baseUrl, token, 'Fresh Start')).id, 1);
   });
 }
@@ -208,7 +218,7 @@ test('20 sequential mutations leave a parseable DB with the last write', async (
   assert.deepEqual(filesMatching(dbFile, '.tmp-'), []);
 
   await server.restart();
-  const names = (await getDrinks(server.baseUrl)).map((drink) => drink.name);
+  const names = (await getDrinks(server.baseUrl, token)).map((drink) => drink.name);
   assert.ok(names.includes(`Sequence ${MUTATIONS}`));
 });
 
@@ -343,11 +353,11 @@ test('every saveDb key round-trips through load and save, across a restart', asy
   assert.deepEqual(filesMatching(dbFile, '.corrupt-'), []);
 
   // Signing in as an existing user saves without changing any data.
-  await signIn(server.baseUrl, FULL_DB.users[0].id);
+  await signIn(server.baseUrl, FULL_DB.users[0].id, { confirmAge: false });
   assert.deepEqual(readDb(dbFile), FULL_DB);
 
   await server.restart();
-  await signIn(server.baseUrl, FULL_DB.users[0].id);
+  await signIn(server.baseUrl, FULL_DB.users[0].id, { confirmAge: false });
   assert.deepEqual(readDb(dbFile), FULL_DB);
   assert.deepEqual(filesMatching(dbFile, '.corrupt-'), []);
 });

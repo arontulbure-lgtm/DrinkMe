@@ -28,6 +28,9 @@ const signIn = async (baseUrl, uid) => {
     uid,
   });
   assert.equal(status, 200);
+  // Every route but the first-run ones needs the 18+ confirmation.
+  const age = await request(baseUrl, 'POST', `/api/users/${uid}/acknowledgements`, body.token, { type: 'age', confirmed: true });
+  assert.equal(age.status, 200);
   return body.token;
 };
 

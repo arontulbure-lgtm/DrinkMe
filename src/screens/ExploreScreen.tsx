@@ -13,7 +13,6 @@ import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
-import AgeGateBanner from '../components/AgeGateBanner';
 import { useLocalization } from '../context/LocalizationContext';
 
 const TRENDING_LIMIT = 6;
@@ -205,8 +204,6 @@ export default function ExploreScreen({ navigation }: any) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('explore.title')}</Text>
       </View>
-
-      <AgeGateBanner />
 
       <View style={styles.searchContainer}>
         <View style={styles.searchBox}>
