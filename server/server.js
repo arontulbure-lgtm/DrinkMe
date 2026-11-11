@@ -556,10 +556,10 @@ function saveDb() {
   }
 }
 
-// For routes that mutate: false means the 503 was already sent. Creates roll back at their call
-// sites. Toggles and profile edits are deliberately not rolled back. Neither is a new user at
-// sign-in: no token was issued and a retry reuses the record, but until then it is visible to other
-// users, and the next successful save writes it to disk.
+// For routes that mutate: false means the 503 was already sent. Most changes roll back at their
+// call sites, cheer and save included. These do not: marking notifications read, deleting a Smart
+// Bar item, and a new user at sign-in (no token was issued and a retry reuses the record, but until
+// then it is visible to other users, and the next successful save writes it to disk).
 const saveDbOrRespond = (res) => {
   if (saveDb()) return true;
   res.status(503).json({ error: 'Could not save your changes. Please try again.' });
@@ -3186,47 +3186,99 @@ app.delete('/api/drinks/:id', requireAuth, (req, res) => {
   res.status(204).end();
 });
 
+// Optional body { cheered: boolean } or { saved: boolean } sets the state, so a repeated request leaves it
+// as asked (the app sends one per tap, optimistically). Without that field the route toggles, as older
+// apps expect. undefined means toggle, null an invalid body.
+const readToggleTarget = (body, field) => {
+  if (body === undefined || (isPlainObject(body) && !Object.hasOwn(body, field))) return undefined;
+  return isPlainObject(body) && typeof body[field] === 'boolean' ? body[field] : null;
+};
+
+// Cheers and saves stay open to suspended users. Turning one on is growth, so it checks the size guard;
+// asking for the state already held changes and saves nothing. A failed save puts back the set, the count
+// and the post owner's notifications, so the server matches the app's rollback.
+// One cheer notification per cheerer and post while it is kept (read or not), so cycling a cheer off
+// and on cannot flood the owner's list, which keeps only the newest entries.
+const hasCheerNotification = (ownerId, actorId, drinkId) => {
+  const now = Date.now();
+  return (notificationsByUser.get(ownerId) ?? []).some((item) => (
+    item.type === 'cheer' && item.actorId === actorId && item.drinkId === drinkId
+    && now - new Date(item.createdAt).getTime() <= NOTIFICATION_MAX_AGE_MS
+  ));
+};
+
 app.post('/api/drinks/:id/like', requireAuth, (req, res) => {
   const currentUserId = req.userId;
+  const target = readToggleTarget(req.body, 'cheered');
+  if (target === null) return res.status(400).json({ error: 'cheered must be true or false' });
   const drinkId = parsePositiveInteger(req.params.id);
   const drink = drinks.find((d) => d.id === drinkId);
   if (!drink) return res.status(404).json({ error: 'Drink not found' });
   if (!canViewDrink(drink, currentUserId)) return respondDrinkHidden(res, drink, currentUserId);
 
+  const hadSet = cheersByUser.has(currentUserId);
   const likedSet = cheersByUser.get(currentUserId) || new Set();
-  if (likedSet.has(drink.id)) {
-    likedSet.delete(drink.id);
-    drink.cheersCount = Math.max(0, (drink.cheersCount || 0) - 1);
-  } else {
-    if (isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
+  const wasCheered = likedSet.has(drink.id);
+  const cheered = target ?? !wasCheered;
+  if (cheered === wasCheered) return res.json({ cheered, cheersCount: drink.cheersCount || 0 });
+  if (cheered && isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
+
+  const previousCount = drink.cheersCount;
+  const firstNewNotificationId = nextNotificationId;
+  // A copy, because the per-user cap can drop the oldest notification from the live list.
+  const previousNotifications = notificationsByUser.get(drink.userId)?.slice();
+  if (cheered) {
     likedSet.add(drink.id);
     drink.cheersCount = (drink.cheersCount || 0) + 1;
-    if (drink.userId !== currentUserId) {
+    if (drink.userId !== currentUserId && !hasCheerNotification(drink.userId, currentUserId, drink.id)) {
       pushNotification(drink.userId, currentUserId, 'cheer', `${getDisplayName(currentUserId)} cheered your drink ${drink.name}.`, drink.id);
     }
+  } else {
+    likedSet.delete(drink.id);
+    drink.cheersCount = Math.max(0, (drink.cheersCount || 0) - 1);
   }
   cheersByUser.set(currentUserId, likedSet);
-  if (!saveDbOrRespond(res)) return;
-  res.json({ cheered: likedSet.has(drink.id), cheersCount: drink.cheersCount });
+  if (!saveDbOrRespond(res)) {
+    if (cheered) likedSet.delete(drink.id);
+    else likedSet.add(drink.id);
+    if (!hadSet) cheersByUser.delete(currentUserId);
+    drink.cheersCount = previousCount;
+    if (nextNotificationId !== firstNewNotificationId) {
+      if (previousNotifications) notificationsByUser.set(drink.userId, previousNotifications);
+      else notificationsByUser.delete(drink.userId);
+      nextNotificationId = firstNewNotificationId;
+    }
+    return;
+  }
+  res.json({ cheered, cheersCount: drink.cheersCount });
 });
 
 app.post('/api/drinks/:id/save', requireAuth, (req, res) => {
   const currentUserId = req.userId;
+  const target = readToggleTarget(req.body, 'saved');
+  if (target === null) return res.status(400).json({ error: 'saved must be true or false' });
   const drinkId = parsePositiveInteger(req.params.id);
   const drink = drinks.find((d) => d.id === drinkId);
   if (!drink) return res.status(404).json({ error: 'Drink not found' });
   if (!canViewDrink(drink, currentUserId)) return respondDrinkHidden(res, drink, currentUserId);
 
+  const hadSet = savedByUser.has(currentUserId);
   const savedSet = savedByUser.get(currentUserId) || new Set();
-  if (savedSet.has(drink.id)) {
-    savedSet.delete(drink.id);
-  } else {
-    if (isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
-    savedSet.add(drink.id);
-  }
+  const wasSaved = savedSet.has(drink.id);
+  const saved = target ?? !wasSaved;
+  if (saved === wasSaved) return res.json({ saved });
+  if (saved && isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
+
+  if (saved) savedSet.add(drink.id);
+  else savedSet.delete(drink.id);
   savedByUser.set(currentUserId, savedSet);
-  if (!saveDbOrRespond(res)) return;
-  res.json({ saved: savedSet.has(drink.id) });
+  if (!saveDbOrRespond(res)) {
+    if (saved) savedSet.delete(drink.id);
+    else savedSet.add(drink.id);
+    if (!hadSet) savedByUser.delete(currentUserId);
+    return;
+  }
+  res.json({ saved });
 });
 
 app.get('/api/users/:userId/saved-drinks', requireAuth, (req, res) => {

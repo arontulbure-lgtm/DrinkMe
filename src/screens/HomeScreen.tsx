@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   RefreshControl,
-  Alert,
   Modal,
   ActivityIndicator,
 } from 'react-native';
@@ -20,8 +19,9 @@ import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
 import LoadMoreButton from '../components/LoadMoreButton';
 import { SuspensionBanner } from '../components/ModerationNotice';
-import { apiFetch, isAgeRequiredError } from '../lib/api';
-import { flattenPages, getNextCursor, invalidateAfterPartnerChange, invalidateAfterPartnerRequest, removeDrinkIfNotFound, syncSavedList, trimToFirstPage, updateDrinkInCaches } from '../lib/drinkCache';
+import { apiFetch } from '../lib/api';
+import { flattenPages, getNextCursor, invalidateAfterPartnerChange, invalidateAfterPartnerRequest, trimToFirstPage } from '../lib/drinkCache';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
 import { Drink, Page, Story, NotificationItem } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import { TabScreenProps } from '../navigation/types';
@@ -34,7 +34,7 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const [isNotificationsVisible, setNotificationsVisible] = useState(false);
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
   const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
-  const { serverUserId, getJwtToken, profile } = useAuth();
+  const { serverUserId, profile } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
 
@@ -100,56 +100,7 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
     [profile, serverUserId]
   );
 
-  const cheerMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      return apiFetch<{ cheered: boolean; cheersCount: number }>(`/api/drinks/${drinkId}/like`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result, drinkId) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
-        ...drink,
-        isLiked: result.cheered,
-        cheersCount: result.cheersCount,
-      }));
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-    onError: (error, drinkId) => {
-      Alert.alert(t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.cheerFailed'));
-    },
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result, drinkId) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
-        ...drink,
-        isSaved: result.saved,
-      }));
-      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
-    },
-    onError: (error, drinkId) => {
-      Alert.alert(t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.saveFailed'));
-    },
-  });
+  const { toggleCheer, toggleSave } = useDrinkToggles();
 
   const markNotificationsRead = useMutation({
     mutationFn: () => apiFetch('/api/notifications/read', { method: 'POST' }),
@@ -250,9 +201,9 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
               <DrinkPostCard
                 key={drink.id}
                 drink={drink}
-                onCheer={() => cheerMutation.mutate(drink.id)}
+                onCheer={() => toggleCheer(drink)}
                 onComment={() => setCommentDrinkId(drink.id)}
-                onSave={() => saveMutation.mutate(drink.id)}
+                onSave={() => toggleSave(drink)}
                 onMore={() => setActionsDrink(drink)}
                 isLiked={drink.isLiked}
                 isSaved={drink.isSaved}

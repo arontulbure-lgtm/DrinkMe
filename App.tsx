@@ -8,6 +8,7 @@ import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { LocalizationProvider } from './src/context/LocalizationContext';
 import ErrorBoundary from './src/components/ErrorBoundary';
+import { resetDrinkToggles } from './src/lib/drinkToggleChains';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,7 +39,12 @@ export default function App() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <LocalizationProvider>
-            <ErrorBoundary onReset={() => queryClient.clear()}>
+            <ErrorBoundary
+              onReset={() => {
+                resetDrinkToggles();
+                queryClient.clear();
+              }}
+            >
               <AuthProvider>
                 <NavigationContainer theme={DrinkMeTheme}>
                   <AppNavigator />

@@ -1,12 +1,13 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
-import { apiFetch, isAgeRequiredError } from '../lib/api';
-import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useAuth } from '../context/AuthContext';
+import { apiFetch } from '../lib/api';
+import { flattenPages, getNextCursor } from '../lib/drinkCache';
 import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
 import { Drink, BaseUser, Page } from '../types/api';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
@@ -23,8 +24,7 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
   const [searchQuery, setSearchQuery] = useState('');
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
   const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
-  const { serverUserId, getJwtToken, profile } = useAuth();
-  const queryClient = useQueryClient();
+  const { serverUserId, profile } = useAuth();
   const { t } = useLocalization();
   const isAgeConfirmed = profile?.ageConfirmed === true;
 
@@ -152,51 +152,7 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
   const shouldShowUserMinChars = hasSearchTerm && (isUserQuery ? userQuery.length < 2 : !isDrinkSearch);
   const shouldShowDrinkResults = isDrinkSearch;
 
-  const cheerMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ cheered: boolean; cheersCount: number }>(`/api/drinks/${drinkId}/like`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result, drinkId) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
-        ...drink,
-        isLiked: result.cheered,
-        cheersCount: result.cheersCount,
-      }));
-    },
-    onError: (error, drinkId) => Alert.alert(
-      t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.cheerFailed')
-    ),
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result, drinkId) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
-        ...drink,
-        isSaved: result.saved,
-      }));
-      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
-    },
-    onError: (error, drinkId) => Alert.alert(
-      t(removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId) ? 'post.notFound' : isAgeRequiredError(error) ? 'ageGate.required' : 'errors.saveFailed')
-    ),
-  });
+  const { toggleCheer, toggleSave } = useDrinkToggles();
 
   const { pressPartner, pendingTargetId } = usePartnerAction();
 
@@ -350,9 +306,9 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                 <DrinkPostCard
                   key={drink.id}
                   drink={drink}
-                  onCheer={() => cheerMutation.mutate(drink.id)}
+                  onCheer={() => toggleCheer(drink)}
                   onComment={() => setCommentDrinkId(drink.id)}
-                  onSave={() => saveMutation.mutate(drink.id)}
+                  onSave={() => toggleSave(drink)}
                   onMore={() => setActionsDrink(drink)}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
@@ -439,9 +395,9 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                 <DrinkPostCard
                   key={drink.id}
                   drink={drink}
-                  onCheer={() => cheerMutation.mutate(drink.id)}
+                  onCheer={() => toggleCheer(drink)}
                   onComment={() => setCommentDrinkId(drink.id)}
-                  onSave={() => saveMutation.mutate(drink.id)}
+                  onSave={() => toggleSave(drink)}
                   onMore={() => setActionsDrink(drink)}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}

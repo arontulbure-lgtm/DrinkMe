@@ -198,6 +198,29 @@ export function findCachedDrink(queryClient: QueryClient, drinkId: number): Drin
   return undefined;
 }
 
+// Before an optimistic cheer or save: a fetch already on its way (a refresh, or a refetch after an
+// invalidate) could write the old state over it. Cancelled: queries that hold the post, already have
+// data and are not loading a further page, so the cancel goes back to the data on screen; a first load
+// or Load more is left alone. Returns the cancelled keys: the caller fetches them again with
+// trimAndInvalidate once its requests have settled, so they do not stay on the old data.
+export async function cancelDrinkFetches(queryClient: QueryClient, drinkId: number): Promise<(readonly unknown[])[]> {
+  const holdsDrink = (queryKey: readonly unknown[], data: unknown) => {
+    if (queryKey[0] === 'drinks.detail') return queryKey[1] === drinkId;
+    if (!DRINK_LIST_QUERY_KEYS.has(queryKey[0])) return false;
+    const list = data as DrinkListData;
+    const pages: DrinkPage[] = 'pages' in list ? list.pages : [list];
+    return pages.some((page) => page.items?.some((item) => item.id === drinkId));
+  };
+  const fetching = queryClient.getQueryCache().findAll({
+    predicate: ({ queryKey, state }) => state.fetchStatus !== 'idle'
+      && state.data !== undefined
+      && !state.fetchMeta?.fetchMore
+      && holdsDrink(queryKey, state.data),
+  });
+  await Promise.all(fetching.map(({ queryKey }) => queryClient.cancelQueries({ queryKey, exact: true })));
+  return fetching.map(({ queryKey }) => queryKey);
+}
+
 // The cursors stay valid, as they do for a post. A list emptied with older pages behind it is fetched again.
 export function removeCommentFromCache(queryClient: QueryClient, drinkId: number, commentId: number): void {
   const queryKey = ['drinks.comments', drinkId];

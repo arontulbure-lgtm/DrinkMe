@@ -21,12 +21,12 @@ import {
   getImageSource,
   isAccountSuspendedError,
   isNotFoundError,
-  isStorageFullError,
   retryUnlessNotFound,
 } from '../lib/api';
-import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, trimAndInvalidate, updateDrinkInCaches } from '../lib/drinkCache';
+import { flattenPages, getNextCursor, trimAndInvalidate } from '../lib/drinkCache';
 import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
 import { BaseUser, Drink, Page } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DrinkPostCard from '../components/DrinkPostCard';
@@ -226,32 +226,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
     },
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result, drinkId) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (d) => ({ ...d, isSaved: result.saved }));
-      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
-    },
-    onError: (error, drinkId) => {
-      if (removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) {
-        Alert.alert(t('profile.title'), t('post.notFound'));
-        return;
-      }
-      Alert.alert(
-        t('profile.title'),
-        t(isStorageFullError(error) ? 'common.serviceUnavailable' : 'errors.saveFailed')
-      );
-    },
-  });
+  const { toggleCheer, toggleSave } = useDrinkToggles({ alertTitleKey: 'profile.title' });
 
   const handlePickAvatar = async () => {
     if (!isSelf || !viewedUserId) return;
@@ -480,9 +455,9 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
                   <DrinkPostCard
                     key={drink.id}
                     drink={drink}
-                    onCheer={() => {}}
+                    onCheer={() => toggleCheer(drink)}
                     onComment={() => setCommentDrinkId(drink.id)}
-                    onSave={() => saveMutation.mutate(drink.id)}
+                    onSave={() => toggleSave(drink)}
                     onMore={() => setActionsDrink(drink)}
                     isLiked={drink.isLiked}
                     isSaved={drink.isSaved}
@@ -522,9 +497,9 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
                   <DrinkPostCard
                     key={drink.id}
                     drink={drink}
-                    onCheer={() => {}}
+                    onCheer={() => toggleCheer(drink)}
                     onComment={() => setCommentDrinkId(drink.id)}
-                    onSave={() => saveMutation.mutate(drink.id)}
+                    onSave={() => toggleSave(drink)}
                     onMore={() => setActionsDrink(drink)}
                     isLiked={drink.isLiked}
                     isSaved={drink.isSaved}

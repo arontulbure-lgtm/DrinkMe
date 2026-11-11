@@ -11,7 +11,8 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
+import { flattenPages, getNextCursor } from '../lib/drinkCache';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
 import LoadMoreButton from '../components/LoadMoreButton';
 import PostActionsSheet from '../components/PostActionsSheet';
 import { TabScreenProps } from '../navigation/types';
@@ -21,7 +22,7 @@ const AI_RECIPES_ENABLED = false;
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { apiFetch, ApiError } from '../lib/api';
 import { Drink, Page, SmartBarItem, Recipe } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
@@ -219,34 +220,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
     generateRecipesMutation.mutate(ingredientNames);
   };
 
-  const unsaveMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result, drinkId) => {
-      if (!serverUserId || !isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (drink) => ({
-        ...drink,
-        isSaved: result.saved,
-      }));
-      syncSavedList(queryClient, serverUserId, drinkId, result.saved);
-    },
-    onError: (error, drinkId) => {
-      if (removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) {
-        Alert.alert(t('post.notFound'));
-        return;
-      }
-      Alert.alert('Error', 'Failed to update saved state');
-    },
-  });
+  const { toggleCheer, toggleSave } = useDrinkToggles();
 
   // ── Inventory tab ──────────────────────────────────────────────
   const inventoryContent = useMemo(() => {
@@ -482,9 +456,9 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
           <DrinkPostCard
             key={drink.id}
             drink={applyLocalUser(drink)}
-            onCheer={() => {}}
+            onCheer={() => toggleCheer(drink)}
             onComment={() => setCommentDrinkId(drink.id)}
-            onSave={() => unsaveMutation.mutate(drink.id)}
+            onSave={() => toggleSave(drink)}
             onMore={() => setActionsDrink(drink)}
             isLiked={drink.isLiked}
             isSaved={drink.isSaved}
@@ -499,7 +473,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
         {hasMoreSaved && <LoadMoreButton onPress={() => fetchMoreSaved()} isLoading={isFetchingMoreSaved} />}
       </View>
     );
-  }, [applyLocalUser, fetchMoreSaved, hasMoreSaved, isFetchingMoreSaved, isSavedLoading, navigation, savedDrinks, serverUserId, t, unsaveMutation]);
+  }, [applyLocalUser, fetchMoreSaved, hasMoreSaved, isFetchingMoreSaved, isSavedLoading, navigation, savedDrinks, serverUserId, t, toggleCheer, toggleSave]);
 
   return (
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>

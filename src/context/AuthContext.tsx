@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInWithCredential, AuthCredential, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { ApiError, DeletionOutcomeUnknownError, apiFetch, getApiToken, getSessionErrorKey, setApiToken, setStaleTokenHandler } from '../lib/api';
+import { resetDrinkToggles } from '../lib/drinkToggleChains';
 import * as SecureStore from 'expo-secure-store';
 import { BaseUser, DeleteAccountResponse } from '../types/api';
 
@@ -256,6 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // dropped, and an await here would let a later auth event overtake this one.
         setApiToken(null);
         void (async () => queryClient.cancelQueries())().catch(() => undefined);
+        resetDrinkToggles();
         queryClient.clear();
       }
       lastUidRef.current = nextUid;

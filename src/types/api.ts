@@ -69,6 +69,25 @@ export interface Drink {
   hiddenPendingReview?: boolean;
 }
 
+// POST /api/drinks/:id/like and /save. The body sets the state, so a repeat changes nothing; without
+// it the server toggles (older apps). A value that is not a boolean gives 400.
+export interface CheerRequest {
+  cheered: boolean;
+}
+
+export interface CheerResult {
+  cheered: boolean;
+  cheersCount: number;
+}
+
+export interface SaveRequest {
+  saved: boolean;
+}
+
+export interface SaveResult {
+  saved: boolean;
+}
+
 export interface Story {
   id: number;
   userId: string;

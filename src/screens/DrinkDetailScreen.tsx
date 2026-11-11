@@ -16,13 +16,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getCommentErrorKey, getImageSource, isAgeRequiredError, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
-import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
+import { flattenPages, getNextCursor, removeDrinkIfNotFound } from '../lib/drinkCache';
 import { Drink, Comment, Page } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
 import ModerationNotice from '../components/ModerationNotice';
 import PostActionsSheet from '../components/PostActionsSheet';
 import { useConfirmAge } from '../lib/useConfirmAge';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
@@ -93,46 +94,8 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
     return true;
   };
 
-  const cheerMutation = useMutation({
-    mutationFn: async () => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ cheered: boolean; cheersCount: number }>(`/api/drinks/${drinkId}/like`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (item) => ({
-        ...item,
-        isLiked: result.cheered,
-        cheersCount: result.cheersCount,
-      }));
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-    onError: (error) => {
-      if (leaveIfDrinkGone(error)) return;
-      Alert.alert(t('drinkDetail.title'), t(getDrinkActionErrorKey(error)));
-    },
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: (result) => {
-      if (!isCurrentAuthUser(serverUserId)) return;
-      updateDrinkInCaches(queryClient, drinkId, (item) => ({ ...item, isSaved: result.saved }));
-      if (serverUserId) syncSavedList(queryClient, serverUserId, drinkId, result.saved);
-    },
+  // Same alerts as before: this screen leaves when the post is gone.
+  const { toggleCheer, toggleSave } = useDrinkToggles({
     onError: (error) => {
       if (leaveIfDrinkGone(error)) return;
       Alert.alert(t('drinkDetail.title'), t(getDrinkActionErrorKey(error)));
@@ -286,16 +249,14 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                 <View style={styles.actionsRow}>
                   <TouchableOpacity
                     style={styles.primaryAction}
-                    onPress={() => cheerMutation.mutate()}
-                    disabled={cheerMutation.isPending}
+                    onPress={() => toggleCheer(drink)}
                   >
                     <FontAwesome5 name="glass-cheers" size={18} color="#FFFFFF" />
                     <Text style={styles.primaryActionText}>{t('drinkDetail.like')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.secondaryAction}
-                    onPress={() => saveMutation.mutate()}
-                    disabled={saveMutation.isPending}
+                    onPress={() => toggleSave(drink)}
                   >
                     <Ionicons name="bookmark" size={20} color="#8B5FBF" />
                     <Text style={styles.secondaryActionText}>{t('drinkDetail.save')}</Text>
