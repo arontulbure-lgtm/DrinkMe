@@ -2157,6 +2157,8 @@ const deleteUserDataCascade = (uid) => {
     }
     if (isOwnReport) {
       Object.assign(report, { reporterId: anonymousReporterId, details: null, reporterDeleted: true, countsForAutoHide: countedForAutoHide });
+      // Lead decision: an anonymised report keeps no copy of the content either.
+      delete report.targetSnapshot;
     }
     if (report.resolvedBy === uid) delete report.resolvedBy;
   }
@@ -3236,6 +3238,174 @@ app.delete('/api/drinks/:id', requireAuth, (req, res) => {
   res.status(204).end();
 });
 
+// ── Edit a post (Task F, T4-6) ────────────────────────────────────────────────
+// The owner may change the text fields, the rating, the alcoholic flag and the category; never the image.
+// A field left out stays as stored (a missing isAlcoholic never falls back to the create default). No edit
+// history is kept (GDPR-minimal): the old values are overwritten and only `editedAt` records that an edit
+// happened. No daily cap and no limit event: the mutation limiter (30/min) applies. The body is parsed by
+// the global 100 KB JSON parser, like every small JSON route.
+//
+// Category and flag: the category is checked against the flag the post will have after the edit. When the
+// flag changes, no category is sent and the stored one belongs to the other side, the edit is refused with
+// 400 `category_required` rather than silently dropping or keeping a mismatched category; the app then
+// sends a new category or null.
+const EDITABLE_DRINK_FIELDS = ['name', 'description', 'rating', 'location', 'isAlcoholic', 'category'];
+
+// Returns { changes } (the stored fields to set; never empty, but possibly all equal to the stored values),
+// { status: 400, error, code? } for invalid input, or { status: 403, ageRequired: true } when an
+// unconfirmed user asks for an alcoholic post.
+const parseDrinkEdit = (body, drink, userId) => {
+  if (!isPlainObject(body)) return { status: 400, error: 'Invalid body' };
+  if (Object.hasOwn(body, 'imageData')) return { status: 400, error: 'Image cannot be changed' };
+  const has = (field) => Object.hasOwn(body, field) && body[field] !== undefined;
+  if (!EDITABLE_DRINK_FIELDS.some(has)) return { status: 400, error: 'Nothing to change' };
+
+  const changes = {};
+  if (has('name')) {
+    const safeName = sanitizeText(body.name, 120);
+    if (!safeName) return { status: 400, error: 'Name cannot be empty' };
+    changes.name = safeName;
+  }
+  if (has('description')) {
+    const safeDescription = sanitizeText(body.description, 1000);
+    if (!safeDescription) return { status: 400, error: 'Description cannot be empty' };
+    changes.description = safeDescription;
+  }
+  if (has('location')) {
+    // null or '' clears it. A non-empty value that sanitizes to nothing (spaces, controls) is refused.
+    if (body.location !== null && typeof body.location !== 'string') return { status: 400, error: 'Invalid location' };
+    const safeLocation = sanitizeOptional(body.location, 180);
+    if (safeLocation === '') return { status: 400, error: 'Location cannot be empty' };
+    changes.location = safeLocation;
+  }
+  if (has('rating')) {
+    if (typeof body.rating !== 'number' || !Number.isFinite(body.rating) || body.rating < 0 || body.rating > 5) {
+      return { status: 400, error: 'Rating must be between 0 and 5' };
+    }
+    changes.rating = body.rating;
+  }
+  if (has('isAlcoholic')) {
+    if (typeof body.isAlcoholic !== 'boolean') return { status: 400, error: 'Invalid isAlcoholic' };
+    // Defence in depth: requireSignedInAdult already refuses an unconfirmed user before this route.
+    if (body.isAlcoholic && !isAgeConfirmed(userId)) return { status: 403, ageRequired: true };
+    changes.isAlcoholic = body.isAlcoholic;
+  }
+  const resultingAlcoholic = has('isAlcoholic') ? body.isAlcoholic : isAlcoholicDrink(drink);
+  if (has('category')) {
+    // A stored category that does not match the stored flag (an inconsistent older record) is replaced by
+    // whatever is sent here, null included: clearing it is intended.
+    const parsedCategory = parseDrinkCategory(body.category, resultingAlcoholic);
+    if (parsedCategory.error) return { status: 400, error: parsedCategory.error };
+    changes.tags = parsedCategory.tags;
+  } else if (resultingAlcoholic !== isAlcoholicDrink(drink)) {
+    const storedCategory = Array.isArray(drink.tags) ? drink.tags.find(isDrinkCategory) : undefined;
+    if (storedCategory && ALCOHOLIC_DRINK_CATEGORIES.has(storedCategory) !== resultingAlcoholic) {
+      return {
+        status: 400,
+        error: 'The category does not match the new isAlcoholic. Send a new category or null.',
+        code: 'category_required',
+      };
+    }
+  }
+  return { changes };
+};
+
+// True when applying the change would leave the stored post as it is.
+const isSameDrinkValue = (field, stored, next) => {
+  if (field === 'tags') return JSON.stringify(Array.isArray(stored) ? stored : []) === JSON.stringify(next);
+  if (field === 'location') return (stored || null) === (next || null);
+  if (field === 'isAlcoholic') return (stored !== false) === next;
+  return stored === next;
+};
+
+const DRINK_EDIT_SNAPSHOT_FIELDS = ['name', 'description', 'rating', 'location', 'isAlcoholic', 'tags', 'editedAt'];
+
+// Moderation evidence (lead decision, Task F fix loop 1). An edit must not let an owner wipe what was
+// reported, so the first edit after a report stores, on each open report about the post that has none yet,
+// the content as it was reported: targetSnapshot { name, description, location, isAlcoholic, category,
+// capturedAt }. GDPR basis: it is kept only for moderation (legitimate interest in reviewing the report),
+// it holds the minimum the admin needs, and it is deleted when the report is resolved and by account
+// deletion (deleteUserDataCascade). A second edit never overwrites it. Returns the reports that got one,
+// so a failed save can take them off again.
+const captureReportSnapshots = (drink) => {
+  const openReports = reports.filter((report) => (
+    report.status === 'open' && report.targetType === 'drink' && report.targetId === drink.id && !report.targetSnapshot
+  ));
+  if (!openReports.length) return [];
+  const targetSnapshot = {
+    name: drink.name,
+    description: drink.description,
+    location: drink.location ?? null,
+    isAlcoholic: isAlcoholicDrink(drink),
+    category: Array.isArray(drink.tags) ? drink.tags.find(isDrinkCategory) ?? null : null,
+    capturedAt: new Date().toISOString(),
+  };
+  for (const report of openReports) report.targetSnapshot = { ...targetSnapshot };
+  return openReports;
+};
+
+// The bytes captureReportSnapshots would add, for the growth guard.
+const reportSnapshotBytes = (drink) => {
+  const count = reports.filter((report) => (
+    report.status === 'open' && report.targetType === 'drink' && report.targetId === drink.id && !report.targetSnapshot
+  )).length;
+  if (!count) return 0;
+  const sample = {
+    name: drink.name, description: drink.description, location: drink.location ?? null,
+    isAlcoholic: true, category: null, capturedAt: new Date().toISOString(),
+  };
+  return count * Buffer.byteLength(JSON.stringify({ targetSnapshot: sample }));
+};
+
+app.put('/api/drinks/:id', requireAuth, refuseIfSuspended, (req, res) => {
+  const currentUserId = req.userId;
+  const drinkId = parsePositiveInteger(req.params.id);
+  const drink = drinks.find((d) => d.id === drinkId);
+  if (!drink) return res.status(404).json({ error: 'Drink not found' });
+  if (drink.userId !== currentUserId) {
+    return isBlockedBetween(drink.userId, currentUserId) || isDrinkHiddenFrom(drink, currentUserId)
+      ? res.status(404).json({ error: 'Drink not found' })
+      : res.status(403).json({ error: 'Forbidden' });
+  }
+  if (isTargetAutoHidden({ targetType: 'drink', targetId: drink.id })) {
+    return res.status(409).json({ error: 'This post is hidden pending review and cannot be edited.', code: 'hidden_pending_review' });
+  }
+
+  const parsed = parseDrinkEdit(req.body, drink, currentUserId);
+  if (parsed.ageRequired) return respondAgeRequired(res);
+  if (parsed.error) return res.status(parsed.status).json({ error: parsed.error, ...(parsed.code && { code: parsed.code }) });
+
+  const changedFields = Object.keys(parsed.changes)
+    .filter((field) => !isSameDrinkValue(field, drink[field], parsed.changes[field]));
+  // Nothing changed: no save and no new editedAt.
+  if (!changedFields.length) return res.json(decorateDrink(drink, currentUserId));
+  const editedAt = new Date().toISOString();
+  if (isDbGrowthBlocked()) {
+    // The whole stored record, editedAt included, plus any report snapshots, because that is what the file holds.
+    const candidate = { ...drink, ...parsed.changes, editedAt };
+    const addedBytes = Buffer.byteLength(JSON.stringify(candidate)) - Buffer.byteLength(JSON.stringify(drink))
+      + reportSnapshotBytes(drink);
+    if (addedBytes > 0) return respondDbGrowthBlocked(res);
+  }
+
+  const snapshot = Object.fromEntries(
+    DRINK_EDIT_SNAPSHOT_FIELDS.filter((field) => Object.hasOwn(drink, field)).map((field) => [field, drink[field]]),
+  );
+  // Before the change, so it holds the content as reported.
+  const snapshotReports = captureReportSnapshots(drink);
+  for (const field of changedFields) drink[field] = parsed.changes[field];
+  drink.editedAt = editedAt;
+  if (!saveDbOrRespond(res)) {
+    for (const field of DRINK_EDIT_SNAPSHOT_FIELDS) {
+      if (Object.hasOwn(snapshot, field)) drink[field] = snapshot[field];
+      else delete drink[field];
+    }
+    for (const report of snapshotReports) delete report.targetSnapshot;
+    return;
+  }
+  res.json(decorateDrink(drink, currentUserId));
+});
+
 // Optional body { cheered: boolean } or { saved: boolean } sets the state, so a repeated request leaves it
 // as asked (the app sends one per tap, optimistically). Without that field the route toggles, as older
 // apps expect. undefined means toggle, null an invalid body.
@@ -3594,15 +3764,32 @@ const toAdminReportTarget = ({ targetType, targetId, drinkId }, viewerId) => {
   if (targetType === 'drink') {
     const drink = drinks.find((d) => d.id === targetId);
     if (!drink) return null;
-    const { id, userId, name, description, location, isAlcoholic, createdAt } = drink;
-    return { id, userId, name, description, location, isAlcoholic, createdAt, imageUrl: toDrinkImageUrl(drink), user: toPublicUser(userIndex.get(userId), viewerId) };
+    const { id, userId, name, description, location, isAlcoholic, rating, createdAt, editedAt } = drink;
+    const category = Array.isArray(drink.tags) ? drink.tags.find(isDrinkCategory) ?? null : null;
+    // The current content: an edit overwrites it, and editedAt tells the admin it changed. The content as
+    // reported is on the report itself (targetSnapshot), from the first edit after the report.
+    return {
+      id, userId, name, description, location, isAlcoholic, category, rating, createdAt, ...(editedAt && { editedAt }),
+      imageUrl: toDrinkImageUrl(drink), user: toPublicUser(userIndex.get(userId), viewerId),
+    };
   }
   const comment = (commentsByDrink.get(drinkId) ?? []).find((item) => item?.id === targetId);
   if (!comment) return null;
   const { id, userId, content, createdAt } = comment;
   return { id, drinkId, userId, content, createdAt, user: toPublicUser(userIndex.get(userId), viewerId) };
 };
-const toAdminReport = (report, viewerId) => ({ ...report, target: toAdminReportTarget(report, viewerId) });
+// editedAfterReport: the reported post was edited after this report was filed, so target is no longer the
+// content as reported; targetSnapshot (when present) is.
+const isEditedAfterReport = (report) => {
+  if (report.targetType !== 'drink') return false;
+  const editedAt = drinks.find((d) => d.id === report.targetId)?.editedAt;
+  return Boolean(editedAt) && new Date(editedAt).getTime() > new Date(report.createdAt).getTime();
+};
+const toAdminReport = (report, viewerId) => ({
+  ...report,
+  target: toAdminReportTarget(report, viewerId),
+  editedAfterReport: isEditedAfterReport(report),
+});
 
 // Owner decision (2026-11-10): an open report should be reviewed within this time.
 const REPORT_REVIEW_TARGET_MS = 24 * 60 * 60 * 1000;
@@ -3726,7 +3913,12 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
     r.status === 'open' && r.targetType === report.targetType && r.targetId === report.targetId && r.drinkId === report.drinkId
   ));
   const previousDetails = resolved.map((item) => item.details);
-  for (const item of resolved) Object.assign(item, { status: 'resolved', action, removed, details: null, resolvedAt, resolvedBy: req.userId });
+  // The snapshot of an edited post is moderation evidence only, so it goes with the resolve.
+  const previousSnapshots = resolved.map((item) => item.targetSnapshot);
+  for (const item of resolved) {
+    Object.assign(item, { status: 'resolved', action, removed, details: null, resolvedAt, resolvedBy: req.userId });
+    delete item.targetSnapshot;
+  }
   markReportsChanged();
   pruneResolvedReporters();
   // The reason names the report and its fixed reason code, never the reporter's text.
@@ -3739,6 +3931,7 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
     resolved.forEach((item, index) => {
       item.status = 'open';
       item.details = previousDetails[index];
+      if (previousSnapshots[index] !== undefined) item.targetSnapshot = previousSnapshots[index];
       delete item.action;
       delete item.removed;
       delete item.resolvedAt;

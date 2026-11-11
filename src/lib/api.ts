@@ -184,6 +184,23 @@ export function getReportErrorKey(error: unknown): string {
   return 'report.failed';
 }
 
+// Translation key for a failed post edit (PUT /api/drinks/:id). A 404 is handled by the caller, which
+// removes the post from the caches and leaves the screen. No ApiError means the request never got an
+// answer (offline): the form keeps what the user typed.
+export function getEditPostErrorKey(error: unknown): string {
+  if (!(error instanceof ApiError) || error.status === undefined) return 'editPost.offline';
+  if (isAccountSuspendedError(error)) return ACCOUNT_SUSPENDED_ERROR_KEY;
+  if (error.code === 'age_required') return 'ageGate.required';
+  if (error.code === 'hidden_pending_review') return 'editPost.hiddenPendingReview';
+  if (error.code === 'category_required') return 'editPost.categoryRequired';
+  if (error.status === 400) return 'editPost.invalid';
+  if (error.status === 403) return 'editPost.notOwner';
+  if (error.status === 429) return 'common.tooManyRequests';
+  if (error.status === 503) return 'editPost.saveFailed';
+  if (error.status === 507) return 'editPost.storageFull';
+  return 'editPost.error';
+}
+
 export function getBlockErrorKey(error: unknown): string {
   if (!(error instanceof ApiError)) return 'block.failed';
   if (error.code === 'block_limit') return 'block.limitReached';

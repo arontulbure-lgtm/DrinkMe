@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
@@ -50,6 +51,7 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
   const queryClient = useQueryClient();
   const { t } = useLocalization();
   const refreshIfSuspended = useRefreshIfSuspended();
+  const navigation = useNavigation();
   const [step, setStep] = useState<ActionsStep>('menu');
   // Closing does not cancel a request, so its callbacks must not close whatever opened since.
   const isClosedRef = useRef(false);
@@ -64,6 +66,8 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
     && findCachedDrink(queryClient, target.comment.drinkId)?.userId === serverUserId;
   const canDelete = target.type !== 'user' && (isOwnContent || isOwnersComment);
   const deleteLabel = t(target.type === 'comment' ? 'comment.delete' : 'post.delete');
+  // A post hidden pending review cannot be edited (the server answers 409), so the option is left out.
+  const canEdit = target.type === 'drink' && isOwnContent && !target.drink.hiddenPendingReview;
 
   const closeOnce = () => {
     if (isClosedRef.current) return;
@@ -146,6 +150,13 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
     if (closeRef) closeRef.current = handleClose;
   });
 
+  const handleEdit = () => {
+    if (target.type !== 'drink') return;
+    const drinkId = target.drink.id;
+    closeOnce();
+    navigation.navigate('CreatePost', { drinkId });
+  };
+
   return (
     <>
       <TouchableWithoutFeedback onPress={handleClose}>
@@ -203,6 +214,17 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
           </>
         ) : (
           <>
+            {canEdit && (
+              <TouchableOpacity
+                style={styles.actionRow}
+                onPress={handleEdit}
+                accessibilityRole="button"
+                accessibilityLabel={t('post.edit')}
+              >
+                <Ionicons name="create-outline" size={22} color="#FFFFFF" />
+                <Text style={styles.actionText}>{t('post.edit')}</Text>
+              </TouchableOpacity>
+            )}
             {canDelete && (
               <TouchableOpacity
                 style={styles.actionRow}

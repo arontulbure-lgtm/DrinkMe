@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,25 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
-import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, ApiError, isAccountSuspendedError } from '../lib/api';
-import { prependDrink } from '../lib/drinkCache';
+import {
+  ACCOUNT_SUSPENDED_ERROR_KEY,
+  apiFetch,
+  ApiError,
+  getEditPostErrorKey,
+  getImageSource,
+  isAccountSuspendedError,
+  isNotFoundError,
+  retryUnlessNotFound,
+} from '../lib/api';
+import {
+  findCachedDrink,
+  prependDrink,
+  removeDrinkFromCaches,
+  trimAndInvalidate,
+  updateDrinkInCaches,
+} from '../lib/drinkCache';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { useLocalization } from '../context/LocalizationContext';
 import {
@@ -25,9 +40,12 @@ import {
   CreateDrinkRequest,
   Drink,
   DrinkCategory,
+  isDrinkCategory,
   NON_ALCOHOLIC_DRINK_CATEGORIES,
+  UpdateDrinkRequest,
 } from '../types/api';
 import LocationPickerModal from '../components/LocationPickerModal';
+import ListLoadState from '../components/ListLoadState';
 import { RootStackScreenProps } from '../navigation/types';
 
 interface SelectedImage {
@@ -35,20 +53,75 @@ interface SelectedImage {
   base64: string;
 }
 
+interface EditPostVariables {
+  drinkId: number;
+  payload: UpdateDrinkRequest;
+}
 
-export default function CreatePostScreen({ navigation }: RootStackScreenProps<'CreatePost'>) {
-  const [drinkName, setDrinkName] = useState('');
-  const [description, setDescription] = useState('');
-  const [rating, setRating] = useState(5);
-  const [location, setLocation] = useState('');
+// The post's stored category, or null. A post stores it as tags: [category]; older posts have none.
+const getStoredCategory = (drink: Drink): DrinkCategory | null => drink.tags?.find(isDrinkCategory) ?? null;
+
+// The category the form starts with: only one that matches the post's flag can be shown as selected.
+// A stored category that does not match (an inconsistent older record) starts as none, so saving any
+// change also sends category null and clears it: that is intended.
+const getInitialCategory = (drink: Drink): DrinkCategory | null => {
+  const stored = getStoredCategory(drink);
+  if (!stored) return null;
+  const isAlcoholicCategory = (ALCOHOLIC_DRINK_CATEGORIES as readonly string[]).includes(stored);
+  return isAlcoholicCategory === (drink.isAlcoholic !== false) ? stored : null;
+};
+
+interface EditFormValues {
+  drinkName: string;
+  description: string;
+  rating: number;
+  location: string;
+  isAlcoholic: boolean;
+  category: DrinkCategory | null;
+}
+
+// Only the fields that differ from the post as loaded, so a missing field means unchanged on the server.
+const buildEditPayload = (original: Drink, form: EditFormValues): UpdateDrinkRequest => {
+  const payload: UpdateDrinkRequest = {};
+  const nextName = form.drinkName.trim();
+  const nextDescription = form.description.trim();
+  const nextLocation = form.location.trim() || null;
+  if (nextName !== original.name) payload.name = nextName;
+  if (nextDescription !== original.description) payload.description = nextDescription;
+  if (form.rating !== original.rating) payload.rating = form.rating;
+  if (nextLocation !== (original.location || null)) payload.location = nextLocation;
+  if (form.isAlcoholic !== (original.isAlcoholic !== false)) payload.isAlcoholic = form.isAlcoholic;
+  // A flip of the toggle clears the category, so a stored category of the other side is sent as null.
+  if (form.category !== getStoredCategory(original)) payload.category = form.category;
+  return payload;
+};
+
+export default function CreatePostScreen({ navigation, route }: RootStackScreenProps<'CreatePost'>) {
+  const queryClient = useQueryClient();
+  // Edit mode (Task F): the owner changes an existing post. The image cannot be changed.
+  const editDrinkId = route.params?.drinkId;
+  const isEditMode = editDrinkId !== undefined;
+  // A cached copy fills the form at once; the post is still fetched below, so a stale copy is refreshed.
+  const [cachedEditDrink] = useState(() => (
+    editDrinkId !== undefined ? findCachedDrink(queryClient, editDrinkId) : undefined
+  ));
+  // The post as it was when the form was filled: the edit sends only the fields that differ from it.
+  const [originalDrink, setOriginalDrink] = useState<Drink | null>(cachedEditDrink ?? null);
+  const [drinkName, setDrinkName] = useState(cachedEditDrink?.name ?? '');
+  const [description, setDescription] = useState(cachedEditDrink?.description ?? '');
+  const [rating, setRating] = useState(cachedEditDrink?.rating ?? 5);
+  const [location, setLocation] = useState(cachedEditDrink?.location ?? '');
   const [photo, setPhoto] = useState<SelectedImage | null>(null);
   const [isLocationPickerVisible, setLocationPickerVisible] = useState(false);
   const { getJwtToken, profile, serverUserId, user: firebaseUser, refreshProfile } = useAuth();
   const isAgeConfirmed = profile?.ageConfirmed === true;
-  const [isAlcoholic, setIsAlcoholic] = useState(isAgeConfirmed);
+  const [isAlcoholic, setIsAlcoholic] = useState(
+    cachedEditDrink ? cachedEditDrink.isAlcoholic !== false : isAgeConfirmed
+  );
   // Optional, single choice, and always one of the categories that match the Alcoholic toggle.
-  const [category, setCategory] = useState<DrinkCategory | null>(null);
-  const queryClient = useQueryClient();
+  const [category, setCategory] = useState<DrinkCategory | null>(
+    cachedEditDrink ? getInitialCategory(cachedEditDrink) : null
+  );
   const { t } = useLocalization();
   const refreshIfSuspended = useRefreshIfSuspended();
   const insets = useSafeAreaInsets();
@@ -69,6 +142,66 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
     }
     return null;
   }, [firebaseUser, profile, serverUserId]);
+
+  const editDrinkQuery = useQuery<Drink>({
+    queryKey: ['drinks.detail', editDrinkId],
+    queryFn: () => apiFetch<Drink>(`/api/drinks/${editDrinkId}`),
+    enabled: isEditMode,
+    retry: retryUnlessNotFound,
+  });
+  const fetchedEditDrink = editDrinkQuery.data;
+  const formValues: EditFormValues = { drinkName, description, rating, location, isAlcoholic, category };
+  const isFormUnchanged = !originalDrink || Object.keys(buildEditPayload(originalDrink, formValues)).length === 0;
+
+  // Fills the form from the fetched post: the first time, and again when a fresher copy arrives while the
+  // user has not changed anything yet. Once they have, the form and the post it is compared with stay.
+  useEffect(() => {
+    if (!fetchedEditDrink || fetchedEditDrink === originalDrink) return;
+    if (originalDrink && !isFormUnchanged) return;
+    setOriginalDrink(fetchedEditDrink);
+    setDrinkName(fetchedEditDrink.name);
+    setDescription(fetchedEditDrink.description);
+    setRating(fetchedEditDrink.rating);
+    setLocation(fetchedEditDrink.location ?? '');
+    setIsAlcoholic(fetchedEditDrink.isAlcoholic !== false);
+    setCategory(getInitialCategory(fetchedEditDrink));
+  }, [fetchedEditDrink, originalDrink, isFormUnchanged]);
+
+  const isOwnPost = !!originalDrink && originalDrink.userId === serverUserId;
+  const isEditFormReady = isEditMode && isOwnPost;
+
+  const editPostMutation = useMutation<Drink, unknown, EditPostVariables>({
+    mutationFn: ({ drinkId, payload }) => apiFetch<Drink>(`/api/drinks/${drinkId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+    onSuccess: (updatedDrink, { drinkId }) => {
+      if (!isCurrentAuthUser(serverUserId)) return;
+      updateDrinkInCaches(queryClient, drinkId, (existing) => ({ ...existing, ...updatedDrink }));
+      // Search results may no longer match the new text. Explore's category lists (drinks.all, discover
+      // scope) never hold the user's own posts, so they need nothing.
+      trimAndInvalidate(queryClient, { queryKey: ['drinks.search'] });
+      setOriginalDrink(updatedDrink);
+      Alert.alert(t('editPost.title'), t('editPost.success'), [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
+    },
+    // The form keeps what the user typed on every error, so a retry (after going back online) resends it.
+    onError: (error, { drinkId }) => {
+      refreshIfSuspended(error);
+      if (isNotFoundError(error)) {
+        if (isCurrentAuthUser(serverUserId)) removeDrinkFromCaches(queryClient, drinkId);
+        Alert.alert(t('editPost.title'), t('post.notFound'), [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+        return;
+      }
+      if (error instanceof ApiError && error.code === 'hidden_pending_review' && isCurrentAuthUser(serverUserId)) {
+        updateDrinkInCaches(queryClient, drinkId, (existing) => ({ ...existing, hiddenPendingReview: true }));
+      }
+      Alert.alert(t('editPost.title'), t(getEditPostErrorKey(error)));
+    },
+  });
 
   const createPostMutation = useMutation<Drink, unknown, CreateDrinkRequest>({
     mutationFn: async (payload) => {
@@ -179,7 +312,18 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
 
   const handleCreatePost = () => {
     if (!drinkName.trim() || !description.trim()) {
-      Alert.alert(t('createPost.title'), t('createPost.fieldsError'));
+      Alert.alert(isEditMode ? t('editPost.title') : t('createPost.title'), t('createPost.fieldsError'));
+      return;
+    }
+
+    if (isEditMode) {
+      if (!originalDrink || !isOwnPost || editDrinkId === undefined) return;
+      const payload = buildEditPayload(originalDrink, formValues);
+      if (Object.keys(payload).length === 0) {
+        navigation.goBack();
+        return;
+      }
+      editPostMutation.mutate({ drinkId: editDrinkId, payload });
       return;
     }
 
@@ -198,6 +342,9 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
       ...(category && { category }),
     });
   };
+
+  const isSubmitPending = createPostMutation.isPending || editPostMutation.isPending;
+  const isSubmitDisabled = isSubmitPending || (isEditMode && !isEditFormReady);
 
   const renderStarRating = () => (
     <View style={styles.ratingContainer}>
@@ -229,15 +376,43 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
             <TouchableOpacity onPress={() => navigation.goBack()}>
               <Text style={styles.cancelButton}>{t('createPost.cancel')}</Text>
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>{t('createPost.title')}</Text>
-            <TouchableOpacity onPress={handleCreatePost} disabled={createPostMutation.isPending}>
+            <Text style={styles.headerTitle}>{isEditMode ? t('editPost.title') : t('createPost.title')}</Text>
+            <TouchableOpacity
+              onPress={handleCreatePost}
+              disabled={isSubmitDisabled}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isSubmitDisabled }}
+            >
               <Text
-                style={[styles.postButton, createPostMutation.isPending && styles.postButtonDisabled]}
+                style={[styles.postButton, isSubmitDisabled && styles.postButtonDisabled]}
               >
-                {createPostMutation.isPending ? t('createPost.submitting') : t('createPost.submit')}
+                {isEditMode
+                  ? (editPostMutation.isPending ? t('editPost.submitting') : t('editPost.submit'))
+                  : (createPostMutation.isPending ? t('createPost.submitting') : t('createPost.submit'))}
               </Text>
             </TouchableOpacity>
           </View>
+
+          {isEditMode && !isEditFormReady ? (
+            originalDrink ? (
+              <View style={styles.editStateContainer}>
+                <Ionicons name="lock-closed-outline" size={32} color="#6B7280" />
+                <Text style={styles.editStateText}>{t('editPost.notOwner')}</Text>
+              </View>
+            ) : isNotFoundError(editDrinkQuery.error) ? (
+              <View style={styles.editStateContainer}>
+                <Ionicons name="alert-circle-outline" size={32} color="#6B7280" />
+                <Text style={styles.editStateText}>{t('post.notFound')}</Text>
+              </View>
+            ) : (
+              <ListLoadState
+                isError={editDrinkQuery.isError}
+                isFetching={editDrinkQuery.isFetching}
+                message={t('post.loadError')}
+                onRetry={() => editDrinkQuery.refetch()}
+              />
+            )
+          ) : (
 
           <ScrollView
             style={styles.content}
@@ -328,6 +503,18 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
               <Text style={styles.toggleHint}>{t('createPost.categoryHint')}</Text>
             </View>
 
+            {isEditMode ? (
+              <View style={styles.photoSection}>
+                {originalDrink?.imageUrl ? (
+                  <Image
+                    source={getImageSource(originalDrink.imageUrl)}
+                    style={styles.preview}
+                    accessibilityLabel={t('editPost.photoLocked')}
+                  />
+                ) : null}
+                <Text style={styles.toggleHint}>{t('editPost.photoLocked')}</Text>
+              </View>
+            ) : (
             <View style={styles.photoSection}>
               <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto}>
                 <Ionicons name="image-outline" size={20} color="#8B5FBF" />
@@ -341,6 +528,7 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
               </TouchableOpacity>
               {photo && <Image source={{ uri: photo.uri }} style={styles.preview} />}
             </View>
+            )}
 
             <View style={styles.section}>
               <Text style={styles.label}>{t('createPost.location')}</Text>
@@ -356,13 +544,16 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
               </TouchableOpacity>
             </View>
 
-            <View style={styles.bottomActions}>
-              <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Main', { screen: 'Scanner' })}>
-                <Ionicons name="scan-outline" size={22} color="#8B5FBF" />
-                <Text style={styles.actionText}>{t('scanner.title')}</Text>
-              </TouchableOpacity>
-            </View>
+            {!isEditMode && (
+              <View style={styles.bottomActions}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Main', { screen: 'Scanner' })}>
+                  <Ionicons name="scan-outline" size={22} color="#8B5FBF" />
+                  <Text style={styles.actionText}>{t('scanner.title')}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </ScrollView>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -582,5 +773,17 @@ const styles = StyleSheet.create({
   },
   categoryChipTextActive: {
     color: '#FFFFFF',
+  },
+  editStateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+  },
+  editStateText: {
+    color: '#9CA3AF',
+    fontSize: 16,
+    textAlign: 'center',
   },
 });

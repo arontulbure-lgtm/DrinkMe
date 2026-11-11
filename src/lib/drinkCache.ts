@@ -135,7 +135,7 @@ export function prependDrink(queryClient: QueryClient, drink: Drink, userId: str
   queryClient.setQueryData<InfiniteData<DrinkPage, unknown>>(['drinks.partners'], prepend);
   queryClient.setQueryData<InfiniteData<DrinkPage, unknown>>(['drinks.byUser', userId], prepend);
   queryClient.setQueryData<Drink>(['drinks.detail', drink.id], drink);
-  queryClient.invalidateQueries({ queryKey: ['drinks.search'] });
+  trimAndInvalidate(queryClient, { queryKey: ['drinks.search'] });
 }
 
 // Removing an item keeps the cursors valid, because `before` works for an id that no longer exists,

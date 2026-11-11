@@ -232,6 +232,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     </View>
                   )}
                   <Text style={styles.heroDescription}>{drink.description}</Text>
+                  {drink.editedAt ? <Text style={styles.editedLabel}>{t('post.editedLabel')}</Text> : null}
                   {drink.hiddenPendingReview && (
                     <ModerationNotice messageKey="moderation.hiddenPost" style={styles.hiddenPostNotice} />
                   )}
@@ -657,5 +658,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  editedLabel: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontStyle: 'italic',
   },
 });

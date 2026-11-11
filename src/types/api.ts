@@ -76,6 +76,21 @@ export interface CreateDrinkRequest {
   category?: DrinkCategory;
 }
 
+// PUT /api/drinks/:id (owner only). Every field is optional and a missing one stays as stored; at least
+// one is required. category null clears it; location null clears it. The image cannot be changed
+// (imageData gives 400). The category is checked against the post's alcoholic flag after the edit: when
+// the flag changes and the stored category no longer fits, send a new category or null, otherwise 400
+// `category_required`. Errors: 403 account_suspended, 403 age_required, 404 (gone, blocked or hidden),
+// 409 hidden_pending_review, 503 (save failed), 507 storage_full. Answers the updated Drink.
+export interface UpdateDrinkRequest {
+  name?: string;
+  description?: string;
+  rating?: number;
+  location?: string | null;
+  isAlcoholic?: boolean;
+  category?: DrinkCategory | null;
+}
+
 export interface Drink {
   id: number;
   userId: string;
@@ -94,6 +109,8 @@ export interface Drink {
   user?: BaseUser;
   // Only the owner and admins ever receive a hidden post: hidden from others after reports, pending review.
   hiddenPendingReview?: boolean;
+  // Set by the last edit (ISO time); absent on a post never edited. No edit history is kept.
+  editedAt?: string;
 }
 
 // POST /api/drinks/:id/like and /save. The body sets the state, so a repeat changes nothing; without

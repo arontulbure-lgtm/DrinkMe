@@ -76,7 +76,10 @@ export default function DrinkPostCard({
           </View>
           <View style={styles.userDetails}>
             <Text style={styles.username}>{displayName}</Text>
-            <Text style={styles.timestamp}>{formatTimeAgo(drink.createdAt)}</Text>
+            <Text style={styles.timestamp}>
+              {formatTimeAgo(drink.createdAt)}
+              {drink.editedAt ? ` · ${t('post.edited')}` : ''}
+            </Text>
           </View>
         </TouchableOpacity>
         {drink.location && (
