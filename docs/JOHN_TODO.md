@@ -13,7 +13,7 @@ Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_
 |---|---|---|
 | 1 | Fresh install, open the app | Sign-in screen. No feed is visible before signing in. |
 | 2 | Email sign-up with a new address and a valid password | Age gate (18+), then the privacy notice, then the name prompt. After these, Home loads with no error. |
-| 3 | Answer "no" at the age gate | No feed, no alcoholic content anywhere. The app explains why. |
+| 3 | At the age gate, look for a way past it without confirming | There is none: the only alternatives to "I am 18 or older" are Log out and Delete account, with a hint explaining them. Log out returns to sign-in; signing in again shows the gate again. Delete account opens the same delete confirmation as Edit Profile and removes the account. No tab, feed or image loads before confirming. |
 | 4 | Sign out, sign in again with the same email and password | Goes straight to Home: age gate, notice and name are not asked again. |
 | 5 | Sign in with a wrong password | A clear ro/en error. The app stays on the sign-in screen. |
 | 6 | Sign up with an invalid email or a too-short password | A validation message before any network call. |
@@ -38,9 +38,24 @@ Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_
 | 7 | Open a post, add a comment, delete it | Comment appears and disappears; the count updates. |
 | 8 | Like and save a post, check Profile, Saved | Saved list shows it; unsaving removes it. |
 | 9 | Partner request from A to B, accept on B | B gets a request, accepting adds both sides; A's partner feed shows B's posts. |
-| 10 | Report a post from three different accounts | After the third report the post disappears for everyone except its author and you (admin). |
+| 10 | Report a post from three different accounts that are at least 48 hours old and have accepted the privacy notice | After the third report the post disappears for everyone except its author and you (admin). The author sees a "hidden pending review" notice on it. Reports from newer accounts reach the queue but do not hide anything. |
 | 11 | Block a user | Their posts, comments and profile disappear for you, and yours for them. Blocked Users lists them; unblocking restores. |
-| 12 | Switch language ro/en (Settings) | Every new screen (age gate, notice, verify email, report sheet, suspension message) is translated. |
+| 12 | Switch language ro/en (Settings) | Every new screen (age gate, notice, verify email, report sheet, suspension banner, hidden-content notice) is translated. |
+
+### 1c. Moderation as admin
+
+There is no admin screen yet. Put your uid in `ADMIN_USER_IDS` in `server/.env`, restart the server, and confirm 18+ in the app with that account. Get an API token and run the calls in `server/README.md`, section "Moderation" (it shows how to get `$TOKEN` from your email and password; use shell variables, never paste the token anywhere). Use a second test account as the offender.
+
+| # | Steps | Expected result |
+|---|---|---|
+| 1 | `curl -s "$API/api/admin/reports?status=open" -H "Authorization: Bearer $TOKEN"` | Oldest report first, with `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount`, `autoHidden`, and `overdueCount` at the top. |
+| 2 | The same call with the test account's token | 403. |
+| 3 | `curl -s -X POST "$API/api/admin/reports/<id>/resolve" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"action":"dismiss"}'` | The report is resolved; a post hidden by it reappears for everyone. A second call answers 409. |
+| 4 | Resolve another report with `{"action":"remove_content","suspend":true}` | The post or comment is gone; the answer has `suspension` with `applied: true` and a `suspendedUntil` 7 days ahead. |
+| 5 | On the offender's phone: try to post, comment, send a partner request, edit the profile and report | Each action is refused with the suspension message, and after the first refusal Home and Profile show a red suspension banner with the end date (or reopen the app). Reading, cheers, saves and blocks still work. |
+| 6 | `curl -s -X POST "$API/api/admin/users/<uid>/suspend" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'` | 409 `already_suspended` (a double tap changes nothing). With `{"permanent":true}` it becomes permanent. |
+| 7 | `curl -s -X POST "$API/api/admin/users/<uid>/unsuspend" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"void":true}'` | `suspended: false`; the banner goes once the app reloads the profile (reopen the app). A voided suspension does not count, so the next one is 7 days again. |
+| 8 | Suspend your own uid | 403 `cannot_suspend_admin`. |
 
 ## 2. Turn on email verification (`REQUIRE_VERIFIED_EMAIL`) for the closed beta
 
@@ -91,7 +106,7 @@ This key is inside the app bundle, so anyone can extract it. Restriction limits 
 3. Set the variables: `NODE_ENV=production`, `JWT_SECRET`, `FIREBASE_SERVICE_ACCOUNT_KEY` (the whole JSON as one value), `CORS_ALLOWED_ORIGINS`, `ADMIN_USER_IDS=<your uid>`, `TRUST_PROXY_HOPS` (1 on most hosts: check with the host's docs), and `ALLOW_EMPTY_DB=true` for the very first start only. Leave `AI_ENABLED` and `REQUIRE_VERIFIED_EMAIL` unset until decided.
 4. Deploy, then open `https://<host>/healthz`. Expected: `{"status":"ok"}`.
 5. Remove `ALLOW_EMPTY_DB` and redeploy.
-6. Backups: schedule `npm run backup` once a day on the host (cron job or scheduled service) with `BACKUP_DIR` on a second volume or storage bucket. Check the next day that a file appeared under `daily/`. See `server/README.md`, "Backups".
+6. Backups: schedule `npm run backup` once a day on the host (cron job or scheduled service) with `BACKUP_DIR` on a second volume or storage bucket. Check the next day that a file appeared under `daily/`. Set the host's own snapshot retention to 30 days or less. See `server/README.md`, "Backups"; after any restore, rotate `JWT_SECRET` as the runbook says.
 7. Set `EXPO_PUBLIC_API_URL=https://<host>` for the build profile in `eas.json`.
 8. Real database (DATA-1): before passing about 1,000 users, ask the next run to move from the JSON file to Postgres (Railway, Render or Supabase). Choose the provider and create the database; the code change is the run's job.
 

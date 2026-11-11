@@ -52,17 +52,21 @@ DrinkMeFinal/
 │   │               SessionErrorScreen, VerifyEmailScreen, AgeGateScreen, OnboardingScreen,
 │   │               BlockedUsersScreen
 │   ├── components/ CommentDrawer, DrinkPostCard, LocationPickerModal, StoriesSection,
-│   │               AgeGateBanner, ListLoadState, LoadMoreButton, PostActionsSheet, ReportSheet
+│   │               ListLoadState, LoadMoreButton, PostActionsSheet, ReportSheet,
+│   │               DeleteAccountModal (shared by AgeGate and EditProfile),
+│   │               ModerationNotice (hidden-content notice + SuspensionBanner),
+│   │               AgeGateBanner (unused since the hard age gate; delete only with the user's OK)
 │   ├── context/    AuthContext.tsx, LocalizationContext.tsx
 │   ├── config/     firebase.ts
 │   ├── lib/        api.ts  ← apiFetch wrapper, injects the JWT automatically; getImageSource
 │   │               drinkCache.ts  ← React Query cache helpers for posts, comments, users
-│   │               useConfirmAge.ts, usePartnerAction.ts
+│   │               useConfirmAge.ts, usePartnerAction.ts, useRefreshIfSuspended.ts
 │   ├── types/      api.ts  ← all shared types
 │   └── navigation/ AppNavigator.tsx
 ├── server/
 │   ├── server.js            ← Express backend (all routes)
-│   ├── README.md            ← setup, env vars, Docker
+│   ├── README.md            ← setup, routes, env vars, backups, moderation, Docker
+│   ├── scripts/backup.js    ← scheduled backup (`npm run backup`), shipped in the Docker image
 │   ├── test/                ← node:test suites and helpers
 │   ├── data/db.json         ← JSON persistence (gitignored)
 │   ├── serviceAccount.json  ← Firebase Admin key (gitignored) - never read or print
@@ -73,7 +77,7 @@ DrinkMeFinal/
 ## Navigation
 `AppNavigator.tsx` checks these in order:
 1. `sessionStatus === 'loading'`: spinner.
-2. Age gate: `AgeGateScreen` while `profile.ageConfirmed !== true`. Declining is kept for this session only, so it asks again on the next launch or sign-in.
+2. Age gate (hard): `AgeGateScreen` while `profile.ageConfirmed !== true`. There is no "decline": the only actions are Confirm, Log out and Delete account (`DeleteAccountModal`). Nothing else mounts before the confirmation, because the server refuses every other route with 403 `age_required` (see `requireSignedInAdult` in the backend skill).
 3. Onboarding: `OnboardingScreen` while `profile.privacyNoticeVersion` is below `PRIVACY_NOTICE_VERSION` (cannot be skipped), then the name prompt while `profile.needsName` ("Later" lasts for this session).
 4. The stack:
 ```
@@ -93,10 +97,13 @@ Steps 2 and 3 render outside the stack and only once the session is `ready` with
 ## Session and cache (src/context/AuthContext.tsx)
 - `SessionStatus` is `'loading' | 'ready' | 'error' | 'verification_required'`. `'ready'` also covers signed out. `isAuthenticated` only means a Firebase user exists; the API works only when the status is `'ready'`.
 - Main opens only with a JWT the server accepted and a loaded profile. Each session step times out after 15 seconds. A 401 or 403 from the server deletes the stored JWT. `'verification_required'` only comes from the server's `email_not_verified`, so it never appears while `REQUIRE_VERIFIED_EMAIL` is off.
+- Stale JWT: a 401 on the JWT in use while the session is `ready` (for example after a verified sign-in elsewhere raised the session generation) calls the handler set with `setStaleTokenHandler` (src/lib/api.ts), and AuthContext re-runs the exchange, at most once per 30 seconds. The stored-token check at session start uses `GET /api/users/:id` (own id) and accepts the JWT only if the answer holds `ageConfirmed` (owner-only field).
+- Suspension: the owner's profile carries `suspendedUntil` (null when permanent) and `suspendedPermanently` while suspended, and `hiddenPendingReview` while the profile is hidden after reports. `SuspensionBanner` shows on Home and own Profile. A 403 `account_suspended` maps to `moderation.actionBlocked`; `useRefreshIfSuspended` refreshes the profile so the banner appears.
 - When the user changes, queries are cancelled and the React Query cache is cleared in the same tick.
 - `isCurrentAuthUser(uid)`: cancelling queries does not stop mutations, so every mutation callback that writes to the cache first checks `isCurrentAuthUser(serverUserId)` with the id it was created for. The `drinkCache.ts` helpers assume the caller did this, except `removeDrinkIfNotFound`, which checks itself.
 - Lists are paged (`useInfiniteQuery` with `{ items, nextCursor }`). `drinkCache.ts` holds `getNextCursor`, `flattenPages`, `trimToFirstPage` and `trimAndInvalidate` (trim before refetching, because a refetch costs one request per loaded page against 100 requests / 15 min), `syncSavedList`, `prependDrink`, `updateDrinkInCaches`, `removeDrinkFromCaches`, `findCachedDrink`, `removeCommentFromCache`, `removeUserFromCaches` (after a block), `invalidateDrinkQueries`, `invalidateAuthorQueries`, `invalidateAfterPartnerRequest`, `invalidateAfterPartnerChange`, `setPartnerStatusInCaches`, `invalidateAfterUnblock` and `removeDrinkIfNotFound`. Use them instead of writing cache keys by hand.
-- Images: always render API image paths through `getImageSource()` (src/lib/api.ts). It sends the JWT only to this server's `/media` routes and gives other URLs empty headers, so Android cannot resend the token to Google.
+- Images: always render API image paths through `getImageSource()` (src/lib/api.ts). It sends the JWT only to this server's `/media` routes (which need a signed-in, 18+ confirmed user) and gives other URLs empty headers, so Android cannot resend the token to Google.
+- Hidden after reports: posts and comments with `hiddenPendingReview: true` reach only their owner and admins; show `ModerationNotice` (`moderation.hiddenPost`, `moderation.hiddenComment`, `moderation.hiddenProfile`).
 - Failed lists show `ListLoadState` with Retry, never an empty state.
 
 ## Feature flags
@@ -107,8 +114,8 @@ Steps 2 and 3 render outside the stack and only once the session is `ready` with
 | AI Recipes | AI_RECIPES_ENABLED | false | SmartBarScreen.tsx |
 | AI routes (server) | AI_ENABLED env var | off; on only for exactly `true` | server/server.js |
 | Partner consent (server) | PARTNER_CONSENT_REQUIRED env var | on; `false` is an emergency rollback that makes partner lists effectively public | server/server.js |
-| Email verification (server) | REQUIRE_VERIFIED_EMAIL env var | off; do not turn on before a real Firebase test | server/server.js |
-| Privacy notice | PRIVACY_NOTICE_VERSION = 1 | must match the server | OnboardingScreen.tsx and server/server.js |
+| Email verification (server) | REQUIRE_VERIFIED_EMAIL env var | off; do not turn on before a real Firebase test. The takeover guard (session generation + auth floor) works with it off | server/server.js |
+| Privacy notice | PRIVACY_NOTICE_VERSION = 2 | must match the server | OnboardingScreen.tsx and server/server.js |
 Details and warnings for the server switches: drinkme-backend-api skill.
 Never delete AI features - disable them with a flag and show a "Coming soon" preview.
 
@@ -117,8 +124,9 @@ Background #000000 · Primary #8B5FBF · Cards #1F2937 · Cards dark #0F172A · 
 
 ## Localization
 Custom LocalizationContext. Romanian (ro) and English (en) are complete; other languages exist but are empty. Every new UI string needs both ro and en.
-- The privacy notice text is under `onboarding.privacy*`. It describes the server's read rules (who sees what), so it must change whenever those rules or `PARTNER_CONSENT_REQUIRED` change; raise `PRIVACY_NOTICE_VERSION` on both sides when it changes in substance. It has not had a legal review.
-- The account deletion warning (`deleteAccount.warning`) says backups go within 40 days: the 30-day backup retention plus the 7-day recovery hold and a purge delay.
+- The privacy notice text is under `onboarding.privacy*`. It describes the server's read rules (who sees what: nothing without signing in, hide after reports, suspensions, kept anonymised open reports, the 30-day backup rule), so it must change whenever those rules or `PARTNER_CONSENT_REQUIRED` change; raise `PRIVACY_NOTICE_VERSION` on both sides when it changes in substance. It has not had a legal review.
+- The account deletion warning (`deleteAccount.warning`) says the account leaves "our backups" within 30 days: in-server backups 21 days plus the 7-day recovery hold, with a hard 30-day ceiling, and `npm run backup` keeps at most 28 days. Host snapshots must be kept 30 days or less for this to stay true.
+- Age gate strings: `ageGate.confirm`, `ageGate.leaveHint`, `ageGate.logout`, `ageGate.deleteAccount` (no `ageGate.decline`). Moderation strings: `moderation.*`.
 - Server notification text is English only. The Smart Bar limit message hardcodes 500.
 
 ## Working rules (agreed with the user)
@@ -134,6 +142,7 @@ Custom LocalizationContext. Romanian (ro) and English (en) are complete; other l
 - Backend: `cd server` then `node server.js` (port 5000; expect "[firebase-admin] ✅ Initialized"). `server/.env` must set `NODE_ENV=development` locally; any other value, or none, applies production rules. Env vars and Docker usage: `server/README.md`.
 - App: `npx expo start` (Metro port 8081); phone via Expo Go on the same Wi-Fi
 - Type check: `npm run typecheck` · Lint: `npm run lint`
-- Backend tests: `cd server` then `npm test` (node:test and fetch, no extra dependency). About 975 tests taking about 10 minutes. They use port 5055 and a temp database, so only one run at a time.
+- Backend tests: `cd server` then `npm test` (node:test and fetch, no extra dependency). About 1037 tests taking about 12 minutes. They use port 5055 and a temp database, so only one run at a time.
+- Backup: `cd server` then `npm run backup` (daily on a real host; see `server/README.md`).
 - Client tests: no test framework is installed yet. If they are needed, propose the setup first (jest-expo + React Native Testing Library) and ask before adding dependencies.
 - Expo Go limitation: Google Sign-In is disabled in Expo Go (IS_EXPO_GO check); it needs a development build.

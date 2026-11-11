@@ -15,6 +15,26 @@ Branch: `auto/run-2026-10-30` (nothing committed or pushed; review with `git dif
 - **Next, your call:** device checks on sign-in, then lists and images; then commit (`git add CLAUDE.md .claude/` too, as they are untracked); then Tiers 3 to 6, which need your instruction.
 
 ## Done
+- **Item 6, John's moderation and backup decisions (D2): done, committed (937ccb0).**
+  - Admin queue: `GET /api/admin/reports` (oldest first) adds `ageHours`, `overdue` (over 24 h), `openReporterCount`, `autoHideReporterCount`, `autoHidden`, and `overdueCount`. Admins = `ADMIN_USER_IDS`.
+  - Auto-hide: 3 distinct open reporters hide a post, comment or profile from everyone but the owner (with a ro/en notice) and admins, with the same 404 as a missing item, on every list, detail, search and `/media` route. It is derived from open reports, so resolving unhides. **Lead decision (Sybil):** a reporter counts only if their account is 48 h old and has accepted the notice; other reports still reach the queue. Legacy users without `createdAt` count as old enough.
+  - Suspensions: `POST /api/admin/users/:id/suspend` (`reason`, `permanent`), `/unsuspend` (`void`), and `suspend: true` on resolve. 7 days first, permanent on any later non-voided one. Admins cannot be suspended. A suspended user gets 403 `account_suspended` (with `until`) on posting, comments, partner requests (send and accept), profile and avatar edits and reports; reading, cheers, saves, blocks, deletion and logout still work. A banner on Home and Profile. **Lead decisions:** suspending someone already suspended gives 409 `already_suspended` (both reviewers reproduced a double tap turning into a permanent ban), and escalation needs `permanent: true`; `void` on unsuspend for a mistaken suspension.
+  - Backups: in-server copies kept 21 days + 7-day recovery hold, with a hard 30-day ceiling even during the hold; `CORRUPT_BACKUP_RETENTION_DAYS` capped at 21. App text says deleted accounts leave "our backups" within 30 days (ro, en); the privacy notice mentions moderation, kept open reports (anonymised) and suspension history. `server/README.md`: host and volume snapshots must be kept 30 days or less, and `npm run backup` must run daily.
+  - Deleted reporters: their open reports stay under an anonymous `deleted-<hex>` id with no details; resolved ones are removed. **Lead decision:** acceptable, as no personal data is left.
+  - Tests: `moderation-decisions.test.js` (31). Final full run 1037 of 1037; typecheck 0; lint 15 warnings.
+  - Reviews: no BLOCKER from either reviewer; one fix loop for the should-fix items.
+  - For John: ban evasion by deleting the account and signing up again (needs a stored email hash or similar, a legal question); nothing alerts anyone about the 24 h target and there is no admin screen yet (use the API, see `server/README.md`); `PRIVACY_NOTICE_VERSION` stays 2, assuming nobody accepted v2 since 2f05704.
+  - Flaky test: "Firebase mode: a cascade that fails ... the sign-in branch finishes it" in `account-deletion.test.js` failed 3 of 6 isolated runs on this Windows machine (rename `EPERM` while the test polls `db.json`), and passed in every full run. The same `EPERM` could hit a real Windows server if something holds `db.json` open (antivirus, an editor): the save then fails with 503 and rolls back. Linux hosts are not affected. Fix candidates: retry the rename a few times in `saveDb`.
+- **Item 5 + decision "no logged-out reads" (D1): done, committed (2f05704).**
+  - Takeover closed with the flag off: a per-user `sessionGen` in the JWT (`sg`, left out when 0, so existing tokens stay valid). A strong verified sign-in (not stale, email verified, and federated or a password sign-in within 5 minutes) bumps it when the stored state is unverified or on the first federated sign-in (`federatedVerifiedAt`), which kills every earlier JWT. The auth floor (`verifiedAuthFloor`) is now set and checked with the flag off too: a password token from before it gets 403 `sign_in_again`. Accounts are matched by Firebase uid only; nothing looks up or links by email.
+  - Gate: one middleware, `requireSignedInAdult`, on `/api` and `/media`. Logged out: 401. Signed in but not 18+: 403 `age_required`. Exempt: `POST /api/auth/mobile`, `POST /api/account/delete-unverified`, `/healthz`, and for the caller's own uid only: `GET`/`PUT /api/users/:id`, `POST /api/users/:id/acknowledgements`, `POST /api/users/:id/delete-account`. The privacy notice text is updated in ro and en, and `PRIVACY_NOTICE_VERSION` is now 2, so existing users see it once.
+  - Client: `api.ts` gets a stale-token handler (a 401 on the current token triggers one re-exchange); the AuthContext stored-token check now uses the own-profile route.
+  - Tests: new `account-takeover.test.js` (14) and `sign-in-gate.test.js` (11); 20 files updated for the gate. Full run 997 of 998; the one failure was a clock-jitter bound in `account-deletion.test.js` (server clock 7 ms ahead of the test), which got 1 s of slack and then passed 60 of 60. Typecheck 0, lint 16 warnings.
+  - Developer's deliberate deviations: the bump is not rolled back on a failed save (a rollback would revive the attacker's JWT); the floor is also set on a new user's strong sign-in (closes the case where the owner's Google sign-in creates the record).
+  - Lead decisions on its open questions: a user who declines the age gate gets a screen with Confirm, Log out and Delete account (done in D2). Unconfirmed users cannot delete their own posts or comments, as John's rule says; account deletion stays open to them.
+  - Reviews: loop 1 had 3 BLOCKERs: a reproduced race where the attacker refreshing more often made the owner's Google token count as stale (no bump), plus declining the age gate leading into a broken app and untrue age-gate text. All were fixed: federated sign-ins decide from raw claims; the age gate is hard (Confirm, Log out, Delete account; shared DeleteAccountModal); the 401 handler also covers explicit headers. Loop 2 (no BLOCKER): the floor is checked before the flag-on unverified branch (a replay could log the owner out repeatedly, reproduced as V8); the federated floor is iat + 1; a throttled rebuild no longer leaves the app without a token. Security re-review: probes V1 to V8 all end with the attacker refused. Final: 1003 of 1003, typecheck 0, lint 16 warnings.
+  - Logged, not fixed: restoring an older db.json lowers sessionGen, so old JWTs work again until the owner's next exchange (bump all users after a restore; README runbook). The floor is password-only: if Firebase lets an attacker link another provider with a different email before the relink, it passes; check on the real project before enabling more providers. `src/components/AgeGateBanner.tsx` is now unused: delete with John's OK.
+  - Known effects: existing Google users get one bump at their first sign-in after deploy (other devices re-exchange automatically); admins need the 18+ confirmation too; only the Firebase stub was used.
 - **T2-7: email verification behind a flag, default off.**
   - Files: `server/server.js`, `server/test/email-verification.test.js` (new), `server/test/helpers/firebase-auth-stub-preload.js`; client: `src/screens/VerifyEmailScreen.tsx` (new), `src/context/AuthContext.tsx`, `LocalizationContext.tsx`, `src/navigation/AppNavigator.tsx`.
   - `REQUIRE_VERIFIED_EMAIL` is on only when exactly `true`. **Left off, for John to decide.** Off: users see no change, apart from older tokens no longer being able to change a stored email or verified state. On: unverified accounts get no JWT and lose existing access; JWTs without the new `ev` claim stop working; sign-in checks revocation; an old password session cannot get a JWT once the owner has verified; `POST /api/account/delete-unverified` and a delete action on the verify screen let an unverified user delete their account.
@@ -232,6 +252,29 @@ Branch: `auto/run-2026-10-30` (nothing committed or pushed; review with `git dif
 - `git` and `node` are not on this session's PATH. Commands use `/c/Program Files/nodejs` and `/c/Program Files/Git/cmd`, added per command. System settings were not changed.
 
 ## Backlog (code only, in priority order)
+### Tiers 3 to 6: adopted plan (planner spec, approved by the lead on 2026-11-11)
+Developer tasks, one at a time; the full server suite after every server task:
+
+| # | Task | Items | Security review |
+|---|---|---|---|
+| A | QA security tests (`qa-security.test.js`) and an API-vs-QA review table | T3-1, T3-3 | no |
+| B | saveDb/read retry backoff (6 tries, 25 to 400 ms) and the flaky deletion test | EPERM | light |
+| C | Typed navigation (`src/navigation/types.ts`; fixes the `PartnersList` param mismatch) | T4-4 | no |
+| D | Idempotent cheer/save with server rollback; shared `useDrinkToggles` with optimistic updates; empty `onCheer` on Profile and SmartBar fixed | T4-5 | yes |
+| E | Drink category (`tags: [category]`) and server-side Explore filters | found earlier | yes |
+| F | Edit post, `PUT /api/drinks/:id` (no image change; 409 while auto-hidden; suspension, ownership, age and size rules; `editedAt`) | T4-6 | yes |
+| G | Notifications rendered in ro/en at read time (`params`) | found earlier | yes |
+| H | Audit log: GDPR-minimal, 90 days, 20,000 cap, covered by account deletion, `GET /api/admin/audit` | T6-1 | yes |
+| I | Error boundary; PartnersList refresh error | T4-1, T4-2 | no |
+| J | Forgot password (Firebase web SDK, neutral message, 60 s cooldown); AuthScreen localization and Firebase error-code mapping | T4-3 | yes |
+| K | Remaining hardcoded strings; shared `formatTimeAgo` | found earlier | no |
+| L | Lint warnings to 0 without behaviour change | T4-7 | no |
+| M | Route-coverage guard and gap tests | T5-1 | no |
+| N | Docs: `npm run check` and QA checklists, jest-expo proposal in this log, skills, README, external docs | T3-2, T5-2 | no |
+
+- **T6-2 (weekly top 10) dropped:** cheers have no timestamps (new personal data needed), cheers can be inflated by fake accounts, a ranked chart of alcoholic posts needs a store-policy and product decision, and the cheap version is just trending with a date window. If John wants it: `?since=7d` on trending, with his OK.
+- Defaults adopted: image not editable; no edit history; edits allowed while a post has reports below the hide threshold (refusing would tell the owner they were reported); categories `cocktail`, `wine`, `beer`, `spirits` / `mocktail`, `coffee`, `tea`, `other`; audit retention 90 days; notice sentences go into the unreleased version 2.
+- **Open for John:** a password reset does not end the 30-day server JWT. Ending it needs a `tokensValidAfterTime` check (one Firebase call per sign-in) and a `sessionGen` bump.
 
 ### Tier 1: security and npm audit
 | ID | Item | Source |
