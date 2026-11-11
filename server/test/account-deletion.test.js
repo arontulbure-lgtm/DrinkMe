@@ -163,13 +163,25 @@ const stubToken = (uid, overrides = {}) => `stub:${JSON.stringify({
 
 const firebaseSignIn = (baseUrl, uid, overrides) => post(baseUrl, '/api/auth/mobile', { idToken: stubToken(uid, overrides), uid });
 
-const isSettled = (dbFile) => readDb(dbFile).pendingAccountDeletions.every((entry) => entry.until !== undefined);
-
 const deleteAccount = (baseUrl, uid, token, idToken) => (
   post(baseUrl, `/api/users/${uid}/delete-account`, idToken === undefined ? {} : { idToken }, token)
 );
 
-const readDb = (dbFile) => JSON.parse(fs.readFileSync(dbFile, 'utf8'));
+// On Windows a read can meet the server's rename of the file (EPERM and friends), and the server's own
+// rename can meet this read. Both retry, so a brief clash costs a few milliseconds instead of a failure.
+const TRANSIENT_READ_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const READ_RETRY_WAIT_MS = 25;
+const READ_RETRIES = 40;
+const readDb = (dbFile) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(fs.readFileSync(dbFile, 'utf8'));
+    } catch (err) {
+      if (attempt >= READ_RETRIES || !TRANSIENT_READ_CODES.has(err.code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, READ_RETRY_WAIT_MS);
+    }
+  }
+};
 const marker = (dbFile, suffix) => `${dbFile}${suffix}`;
 const setDeleteMode = (dbFile, mode) => {
   if (mode) fs.writeFileSync(marker(dbFile, '.stub-delete-user'), mode);
@@ -187,6 +199,30 @@ const waitFor = async (check, label) => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 };
+
+// Polls the saved file for a state, opening it only after its size or mtime changed (and once at the
+// start), so the test holds the file as little as possible while the server saves.
+const waitForDb = async (dbFile, check, label) => {
+  let lastSeen = null;
+  let result = false;
+  await waitFor(() => {
+    let stats;
+    try {
+      stats = fs.statSync(dbFile, { throwIfNoEntry: false });
+    } catch (err) {
+      if (TRANSIENT_READ_CODES.has(err.code)) return false;
+      throw err;
+    }
+    const seen = stats ? `${stats.size}:${stats.mtimeMs}` : 'missing';
+    if (seen !== lastSeen && stats) {
+      lastSeen = seen;
+      result = check(readDb(dbFile));
+    }
+    return result;
+  }, label);
+};
+
+const isSettledDb = (db) => db.pendingAccountDeletions.every((entry) => entry.until !== undefined);
 
 // The pending list is checked apart: a tombstone holds the uid, and nothing else.
 const assertNoTrace = (dbFile, traces = VICTIM_TRACES) => {
@@ -510,7 +546,7 @@ test('Firebase reporting the user as not found counts as success', async (t) => 
 
   const result = await deleteAccount(baseUrl, VICTIM, token, stubToken(VICTIM));
   assert.deepEqual(result.body, { deleted: true, firebaseDeleted: true });
-  assert.ok(isSettled(dbFile));
+  assert.ok(isSettledDb(readDb(dbFile)));
 });
 
 test('a Firebase failure says so, keeps the entry, refuses sign-in, and a sign-in retry clears it', async (t) => {
@@ -543,7 +579,7 @@ test('a Firebase failure says so, keeps the entry, refuses sign-in, and a sign-i
   // Firebase is back: this sign-in is still refused, and its retry finishes the job.
   setDeleteMode(dbFile, null);
   assert.equal((await firebaseSignIn(baseUrl, VICTIM)).status, 410);
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
   assertNoTrace(dbFile);
 });
 
@@ -553,16 +589,16 @@ test('a Firebase failure is retried periodically, with nobody restarting or sign
   setDeleteMode(dbFile, 'fail');
   assert.equal((await deleteAccount(baseUrl, VICTIM, token, stubToken(VICTIM))).body.firebaseDeleted, false);
   await waitFor(() => deleteCalls(dbFile).length >= 2, 'a periodic attempt');
-  assert.ok(!isSettled(dbFile));
+  assert.ok(!isSettledDb(readDb(dbFile)));
   setDeleteMode(dbFile, null);
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
 });
 
 test('a tombstone is pruned once it expires, and then holds nothing', async (t) => {
   const { baseUrl, dbFile } = await startOn(t, { ...firebaseEnv, ACCOUNT_TOMBSTONE_MS: '500', ACCOUNT_DELETION_RETRY_INTERVAL_MS: '200' }, { dbFixture: makeFixture() });
   const { token } = (await firebaseSignIn(baseUrl, VICTIM)).body;
   assert.equal((await deleteAccount(baseUrl, VICTIM, token, stubToken(VICTIM))).status, 200);
-  await waitFor(() => readDb(dbFile).pendingAccountDeletions.length === 0, 'the prune');
+  await waitForDb(dbFile, (db) => db.pendingAccountDeletions.length === 0, 'the prune');
   assert.ok(!fs.readFileSync(dbFile, 'utf8').includes(VICTIM));
 });
 
@@ -588,7 +624,7 @@ test('a Firebase failure is retried at the next start', async (t) => {
 
   setDeleteMode(dbFile, null);
   await server.restart();
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
   assertNoTrace(dbFile);
 });
 
@@ -732,7 +768,7 @@ test('Firebase mode: a crash mid-way finishes at startup, and repeating the casc
   fixture.pendingAccountDeletions = [{ uid: VICTIM }];
   const server = await startOn(t, firebaseEnv, { dbFixture: fixture });
   const { dbFile } = server;
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
   assert.deepEqual(deleteCalls(dbFile), [VICTIM]);
   assertNoTrace(dbFile);
   assertOthersIntact(dbFile);
@@ -741,7 +777,7 @@ test('Firebase mode: a crash mid-way finishes at startup, and repeating the casc
   const cascaded = readDb(dbFile);
   cascaded.pendingAccountDeletions = [{ uid: VICTIM }];
   await server.restart({ dbFixture: cascaded });
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
   assertOthersIntact(dbFile);
 });
 
@@ -758,7 +794,7 @@ test('a failed save after Firebase succeeded keeps the entry on disk, and the ne
   fs.rmSync(marker(dbFile, '.fail-saves'));
   setDeleteMode(dbFile, 'not-found');
   await server.restart();
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
   assertNoTrace(dbFile);
 });
 
@@ -791,7 +827,7 @@ test('Firebase mode: a cascade that fails says so and blocks the JWT, and the si
 
   fs.rmSync(marker(dbFile, '.fail-cascade'));
   assert.equal((await firebaseSignIn(baseUrl, uid)).status, 410);
-  await waitFor(() => isSettled(dbFile), 'the sign-in branch to finish it');
+  await waitForDb(dbFile, isSettledDb, 'the sign-in branch to finish it');
   assertNoTrace(dbFile, [uid, ...VICTIM_TRACES.filter((trace) => trace !== VICTIM)]);
   assertOthersIntact(dbFile);
 });
@@ -804,7 +840,7 @@ test('Firebase mode: a cascade that failed finishes on the periodic retry, with 
   assert.equal((await deleteAccount(baseUrl, uid, token, stubToken(uid))).status, 500);
 
   fs.rmSync(marker(dbFile, '.fail-cascade'));
-  await waitFor(() => isSettled(dbFile), 'the periodic retry');
+  await waitForDb(dbFile, isSettledDb, 'the periodic retry');
   assertNoTrace(dbFile, [uid, ...VICTIM_TRACES.filter((trace) => trace !== VICTIM)]);
   assertOthersIntact(dbFile);
 });
@@ -819,7 +855,7 @@ test('Firebase mode: a cascade that failed finishes at the next start', async (t
 
   fs.rmSync(marker(dbFile, '.fail-cascade'));
   await server.restart();
-  await waitFor(() => isSettled(dbFile), 'the entry to clear');
+  await waitForDb(dbFile, isSettledDb, 'the entry to clear');
   assertNoTrace(dbFile, [uid, ...VICTIM_TRACES.filter((trace) => trace !== VICTIM)]);
   assertOthersIntact(dbFile);
 });

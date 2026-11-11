@@ -440,10 +440,10 @@ const pendingAccountDeletions = [];
 const stories = [];
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
-const DB_RENAME_RETRIES       = 3;
-const DB_RENAME_RETRY_WAIT_MS = 50;
+// Waits between tries, doubling: 6 tries in all, about 0.8 s of blocking at most. Used for the rename
+// in saveDb and for the read at load.
+const DB_RETRY_WAITS_MS       = [25, 50, 100, 200, 400];
 const DB_RENAME_RETRY_CODES   = new Set(['EPERM', 'EBUSY', 'EACCES']);
-const DB_READ_RETRIES         = 3;
 const DB_READ_RETRY_CODES     = new Set([...DB_RENAME_RETRY_CODES, 'EMFILE']);
 
 const DB_COUNTER_KEYS = ['nextDrinkId', 'nextNotificationId', 'nextCommentId', 'nextReportId', 'dbSchemaVersion', 'recoveryStartedAt'];
@@ -462,21 +462,39 @@ let didBackUpDbOnLoad = false;
 // When a corrupt or missing file made this database start empty. Saved only while set. Holds the backup purge.
 let recoveryStartedAt;
 
-const waitBeforeDbRetry = () => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, DB_RENAME_RETRY_WAIT_MS);
+const waitBeforeDbRetry = (waitMs) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
 };
+
+/**
+ * Runs operation, retrying the error codes in retryCodes with the waits of DB_RETRY_WAITS_MS. Logs one
+ * line when any retry was needed: the action, the count and the codes, never a path or message.
+ */
+function runDbFileOperationWithRetry(action, retryCodes, operation) {
+  const codes = [];
+  const logRetries = (outcome) => {
+    if (codes.length === 0) return;
+    console.warn(`[db] ${action} needed ${codes.length} ${codes.length === 1 ? 'retry' : 'retries'} (${[...new Set(codes)].join(', ')}), ${outcome}.`);
+  };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = operation();
+      logRetries('then succeeded');
+      return result;
+    } catch (err) {
+      if (attempt >= DB_RETRY_WAITS_MS.length || !retryCodes.has(err.code)) {
+        logRetries(`then failed (${err.code ?? err.name})`);
+        throw err;
+      }
+      codes.push(err.code);
+      waitBeforeDbRetry(DB_RETRY_WAITS_MS[attempt]);
+    }
+  }
+}
 
 // Windows can refuse a rename briefly while another process (antivirus, indexer) holds the target.
 function renameDbFileWithRetry(tmpFile) {
-  for (let retriesLeft = DB_RENAME_RETRIES; ; retriesLeft--) {
-    try {
-      fs.renameSync(tmpFile, DB_FILE);
-      return;
-    } catch (err) {
-      if (retriesLeft === 0 || !DB_RENAME_RETRY_CODES.has(err.code)) throw err;
-      waitBeforeDbRetry();
-    }
-  }
+  runDbFileOperationWithRetry('Save', DB_RENAME_RETRY_CODES, () => fs.renameSync(tmpFile, DB_FILE));
 }
 
 // Atomic write: a crash or failed rename leaves the previous DB_FILE intact.
@@ -527,7 +545,8 @@ function saveDb() {
     lastSavedDbBytes = bytes.length;
     return true;
   } catch (err) {
-    console.error('[db] Failed to save, keeping the previous database:', err.message);
+    // The code only: Node's message names the temp and database paths.
+    console.error(`[db] Failed to save, keeping the previous database (${err.code ?? err.name}).`);
     try {
       fs.rmSync(tmpFile, { force: true });
     } catch (cleanupErr) {
@@ -561,15 +580,10 @@ function exitOnDbLoadFailure(action, reason) {
 }
 
 function readDbFileWithRetry() {
-  for (let retriesLeft = DB_READ_RETRIES; ; retriesLeft--) {
-    try {
-      return fs.readFileSync(DB_FILE);
-    } catch (err) {
-      if (retriesLeft === 0 || !DB_READ_RETRY_CODES.has(err.code)) {
-        exitOnDbLoadFailure('read', describeDbError(err));
-      }
-      waitBeforeDbRetry();
-    }
+  try {
+    return runDbFileOperationWithRetry('Read', DB_READ_RETRY_CODES, () => fs.readFileSync(DB_FILE));
+  } catch (err) {
+    exitOnDbLoadFailure('read', describeDbError(err));
   }
 }
 

@@ -280,6 +280,7 @@ test('a transient read failure is retried and the data loads', async (t) => {
 
   assert.equal((await getDrinks(server.baseUrl)).length, FULL_DB.drinks.length);
   assert.deepEqual(filesMatching(dbFile, '.corrupt-'), []);
+  assert.ok(server.getOutput().includes('[db] Read needed 2 retries (EBUSY), then succeeded.'));
 });
 
 for (const [fault, description] of [
@@ -375,4 +376,77 @@ test('a drinks array too large to spread loads and saves', async (t) => {
   const token = await signIn(baseUrl, 'large-user');
   assert.equal((await createDrink(baseUrl, token, 'One More')).id, DRINK_COUNT + 1);
   assert.equal(readDb(dbFile).drinks.length, DRINK_COUNT + 1);
+});
+
+// Renames refused with EPERM, as when an antivirus or indexer holds the file on Windows. The server tries
+// 6 times in all (5 retries), so 5 injected failures still save and 6 do not.
+const RENAME_RETRY_FIXTURE = {
+  dbSchemaVersion: 2,
+  nextDrinkId: 5,
+  users: [{ id: 'rename-retry-user', firstName: 'Rename', lastName: 'Retry', city: '', bio: '', avatar: null, ageConfirmedAt: '2026-01-01T00:00:00.000Z' }],
+  drinks: [],
+};
+const renameRetryToken = () => jwt.sign({ uid: 'rename-retry-user' }, 'test-only-jwt-secret', { algorithm: 'HS256', expiresIn: '1h' });
+
+const startWithRenameFailures = async (t, failures) => {
+  const server = await startServer(
+    {
+      DB_FAULT: 'rename-eperm',
+      DB_FAULT_RENAME_FAILURES: String(failures),
+      NODE_OPTIONS: `--import=${FAULT_PRELOAD}`,
+    },
+    { dbFixture: RENAME_RETRY_FIXTURE }
+  );
+  t.after(() => server.stop());
+  return server;
+};
+
+const injectedRenameFaults = (dbFile) => {
+  const file = `${dbFile}.rename-faults`;
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+};
+
+const retryLogLines = (output) => output.split(/\r?\n/).filter((line) => line.startsWith('[db] Save needed'));
+
+const postRetryDrink = (baseUrl, name) => postJson(
+  `${baseUrl}/api/drinks`,
+  { name, description: 'Persistence test', rating: 4, isAlcoholic: false, imageData: TINY_PNG },
+  renameRetryToken()
+);
+
+test('a save whose rename fails with EPERM 5 times succeeds on the 6th try and logs one line', async (t) => {
+  const { baseUrl, dbFile, getOutput } = await startWithRenameFailures(t, 5);
+  assert.equal(injectedRenameFaults(dbFile), 0, 'nothing saved at startup');
+
+  const created = await postRetryDrink(baseUrl, 'Retried Save');
+  assert.equal(created.status, 201);
+  assert.equal(created.body.id, 5);
+  assert.equal(injectedRenameFaults(dbFile), 5);
+  assert.deepEqual(readDb(dbFile).drinks.map((drink) => drink.name), ['Retried Save']);
+  assert.deepEqual(filesMatching(dbFile, '.tmp-'), []);
+
+  const lines = retryLogLines(getOutput());
+  assert.deepEqual(lines, ['[db] Save needed 5 retries (EPERM), then succeeded.']);
+  assert.ok(!lines[0].includes(path.dirname(dbFile)) && !lines[0].includes(DB_NAME), 'no path in the log line');
+});
+
+test('a save whose rename fails with EPERM 6 times returns 503, rolls back and keeps the file', async (t) => {
+  const { baseUrl, dbFile, getOutput } = await startWithRenameFailures(t, 6);
+  const before = fs.readFileSync(dbFile, 'utf8');
+
+  const failed = await postRetryDrink(baseUrl, 'Lost Save');
+  assert.equal(failed.status, 503);
+  assert.equal(typeof failed.body.error, 'string');
+  assert.equal(injectedRenameFaults(dbFile), 6);
+  assert.equal(fs.readFileSync(dbFile, 'utf8'), before, 'the previous file is kept');
+  assert.deepEqual(filesMatching(dbFile, '.tmp-'), []);
+  assert.deepEqual(await getDrinks(baseUrl, renameRetryToken()), [], 'the post is rolled back in memory');
+  assert.deepEqual(retryLogLines(getOutput()), ['[db] Save needed 5 retries (EPERM), then failed (EPERM).']);
+
+  // The fault is used up: the next save works and reuses the rolled-back id.
+  const created = await postRetryDrink(baseUrl, 'Next Save');
+  assert.equal(created.status, 201);
+  assert.equal(created.body.id, 5);
+  assert.deepEqual(readDb(dbFile).drinks.map((drink) => drink.name), ['Next Save']);
+  assert.equal(retryLogLines(getOutput()).length, 1, 'a save without retries logs nothing');
 });

@@ -72,6 +72,22 @@ const faults = {
       return realRename(from, to);
     };
   },
+  // The first DB_FAULT_RENAME_FAILURES renames onto DB_FILE fail with EPERM, as when another process
+  // holds the file on Windows. Each injected failure adds a line to <DB_FILE>.rename-faults.
+  'rename-eperm': () => {
+    let failuresLeft = Number(process.env.DB_FAULT_RENAME_FAILURES);
+    if (!Number.isInteger(failuresLeft) || failuresLeft < 0) throw new Error('DB_FAULT_RENAME_FAILURES must be a whole number');
+    const realRename = fs.renameSync;
+    const realAppend = fs.appendFileSync;
+    fs.renameSync = (from, to) => {
+      if (isDbFile(to) && failuresLeft > 0) {
+        failuresLeft--;
+        realAppend(`${dbFile}.rename-faults`, 'EPERM\n');
+        throw fault('EPERM');
+      }
+      return realRename(from, to);
+    };
+  },
   // The server calls unescape only while decoding at startup, and in the AI routes.
   migrate: () => {
     validator.unescape = () => {
