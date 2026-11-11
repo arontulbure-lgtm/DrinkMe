@@ -26,11 +26,9 @@ import { useConfirmAge } from '../lib/useConfirmAge';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface Props {
-  route: { params: { drinkId: number } };
-  navigation: { goBack: () => void; isFocused: () => boolean; navigate: (screen: string, params?: any) => void };
-}
+type Props = RootStackScreenProps<'DrinkDetail'>;
 
 export default function DrinkDetailScreen({ route, navigation }: Props) {
   const { drinkId } = route.params;
@@ -369,7 +367,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                   </View>
                   <TouchableOpacity
                     style={styles.tipButton}
-                    onPress={() => navigation.navigate('Scanner')}
+                    onPress={() => navigation.navigate('Main', { screen: 'Scanner' })}
                   >
                     <Ionicons name="camera" size={18} color="#FFFFFF" />
                     <Text style={styles.tipButtonText}>{t('drinkDetail.scan')}</Text>

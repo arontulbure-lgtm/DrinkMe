@@ -9,10 +9,9 @@ import { apiFetch, getImageSource } from '../lib/api';
 import { invalidateAfterUnblock } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface Props {
-  navigation: { goBack: () => void };
-}
+type Props = RootStackScreenProps<'BlockedUsers'>;
 
 export default function BlockedUsersScreen({ navigation }: Props) {
   const { serverUserId } = useAuth();

@@ -69,6 +69,11 @@ const translations = {
       loadError: 'Could not load drink partners.',
       requestsLoadError: 'Could not load partner requests.',
       requestLimit: 'You have reached the limit for partner requests. Please try again later.',
+      refreshError: 'Could not refresh.',
+    },
+    errorBoundary: {
+      title: 'Something went wrong',
+      message: 'The app ran into a problem. Try again, and if it keeps happening, restart the app.',
     },
     comment: {
       delete: 'Delete comment',
@@ -406,6 +411,11 @@ const translations = {
       loadError: 'Nu am putut încărca partenerii de băuturi.',
       requestsLoadError: 'Nu am putut încărca cererile de parteneriat.',
       requestLimit: 'Ai atins limita de cereri de parteneriat. Încearcă din nou mai târziu.',
+      refreshError: 'Nu am putut reîmprospăta.',
+    },
+    errorBoundary: {
+      title: 'Ceva nu a mers bine',
+      message: 'Aplicația a întâmpinat o problemă. Încearcă din nou, iar dacă se repetă, repornește aplicația.',
     },
     comment: {
       delete: 'Șterge comentariul',

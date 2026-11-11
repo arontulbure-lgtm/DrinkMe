@@ -14,6 +14,7 @@ import {
 import { flattenPages, getNextCursor, removeDrinkIfNotFound, syncSavedList, updateDrinkInCaches } from '../lib/drinkCache';
 import LoadMoreButton from '../components/LoadMoreButton';
 import PostActionsSheet from '../components/PostActionsSheet';
+import { TabScreenProps } from '../navigation/types';
 
 // ── Beta flag — set to false to re-enable AI recipe generation ────────────────
 const AI_RECIPES_ENABLED = false;
@@ -29,7 +30,7 @@ import CommentDrawer from '../components/CommentDrawer';
 
 type Tab = 'inventory' | 'recipes' | 'saved';
 
-export default function SmartBarScreen({ navigation }: any) {
+export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'>) {
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemName, setNewItemName] = useState('');
   const [newItemQuantity, setNewItemQuantity] = useState('');
@@ -489,10 +490,9 @@ export default function SmartBarScreen({ navigation }: any) {
             isSaved={drink.isSaved}
             cheersCount={drink.cheersCount}
             onPressAuthor={() =>
-              navigation.navigate(
-                drink.userId === serverUserId ? 'Profile' : 'UserProfile',
-                drink.userId === serverUserId ? undefined : { userId: drink.userId }
-              )
+              drink.userId === serverUserId
+                ? navigation.navigate('Profile')
+                : navigation.navigate('UserProfile', { userId: drink.userId })
             }
           />
         ))}

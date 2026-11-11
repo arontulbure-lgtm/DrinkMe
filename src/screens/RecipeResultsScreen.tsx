@@ -3,11 +3,9 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Recipe } from '../types/api';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface Props {
-  route: { params: { product: string; recipes: Recipe[] } };
-  navigation: { goBack: () => void };
-}
+type Props = RootStackScreenProps<'RecipeResults'>;
 
 const difficultyLabels: Record<Recipe['difficulty'], string> = {
   easy: 'Easy',

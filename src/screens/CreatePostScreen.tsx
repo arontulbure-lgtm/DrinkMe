@@ -22,6 +22,7 @@ import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { useLocalization } from '../context/LocalizationContext';
 import { Drink } from '../types/api';
 import LocationPickerModal from '../components/LocationPickerModal';
+import { RootStackScreenProps } from '../navigation/types';
 
 interface SelectedImage {
   uri: string;
@@ -37,7 +38,7 @@ interface CreateDrinkPayload {
   imageData: string;
 }
 
-export default function CreatePostScreen({ navigation }: any) {
+export default function CreatePostScreen({ navigation }: RootStackScreenProps<'CreatePost'>) {
   const [drinkName, setDrinkName] = useState('');
   const [description, setDescription] = useState('');
   const [rating, setRating] = useState(5);
@@ -318,7 +319,7 @@ export default function CreatePostScreen({ navigation }: any) {
             </View>
 
             <View style={styles.bottomActions}>
-              <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Scanner')}>
+              <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Main', { screen: 'Scanner' })}>
                 <Ionicons name="scan-outline" size={22} color="#8B5FBF" />
                 <Text style={styles.actionText}>{t('scanner.title')}</Text>
               </TouchableOpacity>

@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { LocalizationProvider } from './src/context/LocalizationContext';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,12 +38,14 @@ export default function App() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <LocalizationProvider>
-            <AuthProvider>
-              <NavigationContainer theme={DrinkMeTheme}>
-                <AppNavigator />
-                <StatusBar style="light" backgroundColor="#000000" />
-              </NavigationContainer>
-            </AuthProvider>
+            <ErrorBoundary onReset={() => queryClient.clear()}>
+              <AuthProvider>
+                <NavigationContainer theme={DrinkMeTheme}>
+                  <AppNavigator />
+                  <StatusBar style="light" backgroundColor="#000000" />
+                </NavigationContainer>
+              </AuthProvider>
+            </ErrorBoundary>
           </LocalizationProvider>
         </QueryClientProvider>
       </SafeAreaProvider>

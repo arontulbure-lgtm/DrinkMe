@@ -5,7 +5,7 @@ import { useLocalization } from '../context/LocalizationContext';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
-import { Recipe } from '../types/api';
+import { RootStackParamList, TabParamList } from './types';
 
 // Import screens
 import AuthScreen from '../screens/AuthScreen';
@@ -25,29 +25,6 @@ import VerifyEmailScreen from '../screens/VerifyEmailScreen';
 import AgeGateScreen from '../screens/AgeGateScreen';
 import OnboardingScreen, { PRIVACY_NOTICE_VERSION } from '../screens/OnboardingScreen';
 import BlockedUsersScreen from '../screens/BlockedUsersScreen';
-
-type TabParamList = {
-  Home: undefined;
-  Explore: undefined;
-  Scanner: undefined;
-  SmartBar: undefined;
-  Profile: undefined;
-};
-
-type RootStackParamList = {
-  Auth: undefined;
-  SessionError: undefined;
-  VerifyEmail: undefined;
-  Main: undefined;
-  CreatePost: undefined;
-  DrinkDetail: { drinkId: number };
-  EditProfile: undefined;
-  RecipeResults: { product: string; recipes: Recipe[]; isAlcoholic: boolean | null };
-  LanguageSettings: undefined;
-  PartnersList: undefined;
-  UserProfile: { userId: string };
-  BlockedUsers: undefined;
-};
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();

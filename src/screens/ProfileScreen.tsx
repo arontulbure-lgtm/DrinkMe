@@ -35,10 +35,15 @@ import PostActionsSheet from '../components/PostActionsSheet';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
 import ModerationNotice, { SuspensionBanner } from '../components/ModerationNotice';
+import type { NavigationProp } from '@react-navigation/native';
+import { RootStackParamList, RootStackScreenProps, TabScreenProps } from '../navigation/types';
 
+// Mounted twice: as the Profile tab (own profile) and as the UserProfile stack screen. navigation is the
+// part both mounts share (a union of the two cannot be called), so only navigate, goBack and isFocused
+// are available. Tabs are reached through 'Main', which works from both mounts.
 interface ProfileScreenProps {
-  navigation: any;
-  route: { params?: { userId?: string } };
+  navigation: NavigationProp<RootStackParamList>;
+  route: TabScreenProps<'Profile'>['route'] | RootStackScreenProps<'UserProfile'>['route'];
 }
 
 export default function ProfileScreen({ navigation, route }: ProfileScreenProps) {
@@ -525,10 +530,9 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
                     isSaved={drink.isSaved}
                     cheersCount={drink.cheersCount}
                     onPressAuthor={() =>
-                      navigation.navigate(
-                        drink.userId === serverUserId ? 'Profile' : 'UserProfile',
-                        drink.userId === serverUserId ? undefined : { userId: drink.userId }
-                      )
+                      drink.userId === serverUserId
+                        ? navigation.navigate('Main', { screen: 'Profile' })
+                        : navigation.navigate('UserProfile', { userId: drink.userId })
                     }
                   />
                 ))}

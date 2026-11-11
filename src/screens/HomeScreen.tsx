@@ -24,11 +24,12 @@ import { apiFetch, isAgeRequiredError } from '../lib/api';
 import { flattenPages, getNextCursor, invalidateAfterPartnerChange, invalidateAfterPartnerRequest, removeDrinkIfNotFound, syncSavedList, trimToFirstPage, updateDrinkInCaches } from '../lib/drinkCache';
 import { Drink, Page, Story, NotificationItem } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
+import { TabScreenProps } from '../navigation/types';
 
 // Stories are decorative for now — hide until the feature is implemented
 const STORIES_ENABLED = false;
 
-export default function HomeScreen({ navigation }: any) {
+export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const [refreshing, setRefreshing] = useState(false);
   const [isNotificationsVisible, setNotificationsVisible] = useState(false);
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
@@ -257,10 +258,9 @@ export default function HomeScreen({ navigation }: any) {
                 isSaved={drink.isSaved}
                 cheersCount={drink.cheersCount}
                 onPressAuthor={() =>
-                  navigation.navigate(
-                    drink.userId === serverUserId ? 'Profile' : 'UserProfile',
-                    drink.userId === serverUserId ? undefined : { userId: drink.userId }
-                  )
+                  drink.userId === serverUserId
+                    ? navigation.navigate('Profile')
+                    : navigation.navigate('UserProfile', { userId: drink.userId })
                 }
               />
             ))}

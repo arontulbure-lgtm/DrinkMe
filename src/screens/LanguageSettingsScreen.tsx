@@ -7,16 +7,13 @@ import {
   SupportedLocale,
   useLocalization,
 } from '../context/LocalizationContext';
+import { RootStackScreenProps } from '../navigation/types';
 
 // Only show languages that have complete translations — hide stubs (es, zh, hi, ar, bn)
 const COMPLETE_LOCALES: SupportedLocale[] = ['en', 'ro'];
 const SHOWN_LOCALES = AVAILABLE_LOCALES.filter((l) => COMPLETE_LOCALES.includes(l.code));
 
-interface Props {
-  navigation: {
-    goBack: () => void;
-  };
-}
+type Props = RootStackScreenProps<'LanguageSettings'>;
 
 export default function LanguageSettingsScreen({ navigation }: Props) {
   const { locale, setLocale, t } = useLocalization();

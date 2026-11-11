@@ -14,11 +14,12 @@ import PostActionsSheet from '../components/PostActionsSheet';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
 import { useLocalization } from '../context/LocalizationContext';
+import { TabScreenProps } from '../navigation/types';
 
 const TRENDING_LIMIT = 6;
 const SEARCH_MIN_LENGTH = 2;
 
-export default function ExploreScreen({ navigation }: any) {
+export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>) {
   const [searchQuery, setSearchQuery] = useState('');
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
   const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
@@ -280,10 +281,9 @@ export default function ExploreScreen({ navigation }: any) {
                     <TouchableOpacity
                       style={styles.userInfoContainer}
                       onPress={() =>
-                        navigation.navigate(
-                          isSelf ? 'Profile' : 'UserProfile',
-                          isSelf ? undefined : { userId: result.id }
-                        )
+                        isSelf
+                          ? navigation.navigate('Profile')
+                          : navigation.navigate('UserProfile', { userId: result.id })
                       }
                     >
                       <View style={styles.userAvatar}>
@@ -358,10 +358,9 @@ export default function ExploreScreen({ navigation }: any) {
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
                   onPressAuthor={() =>
-                    navigation.navigate(
-                      drink.userId === serverUserId ? 'Profile' : 'UserProfile',
-                      drink.userId === serverUserId ? undefined : { userId: drink.userId }
-                    )
+                    drink.userId === serverUserId
+                      ? navigation.navigate('Profile')
+                      : navigation.navigate('UserProfile', { userId: drink.userId })
                   }
                 />
               ))
@@ -448,10 +447,9 @@ export default function ExploreScreen({ navigation }: any) {
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
                   onPressAuthor={() =>
-                    navigation.navigate(
-                      drink.userId === serverUserId ? 'Profile' : 'UserProfile',
-                      drink.userId === serverUserId ? undefined : { userId: drink.userId }
-                    )
+                    drink.userId === serverUserId
+                      ? navigation.navigate('Profile')
+                      : navigation.navigate('UserProfile', { userId: drink.userId })
                   }
                 />
               ))}

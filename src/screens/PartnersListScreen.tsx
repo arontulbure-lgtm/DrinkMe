@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,11 +25,9 @@ import { BaseUser, PartnerActionResult, PartnerRequests } from '../types/api';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 import ListLoadState from '../components/ListLoadState';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface PartnersListScreenProps {
-  navigation: any;
-  route: { params?: { userId?: string } };
-}
+type PartnersListScreenProps = RootStackScreenProps<'PartnersList'>;
 
 type PartnerRow = { kind: 'incoming' | 'outgoing' | 'partner'; user: BaseUser };
 type PartnerSection = { key: 'requests' | 'partners'; title?: string; data: PartnerRow[] };
@@ -62,6 +61,7 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
   // Under drink-partners, so whatever refreshes the partner list refreshes this too.
   const {
     data: requests,
+    error: requestsError,
     isError: isRequestsError,
     isFetching: isRequestsFetching,
     refetch: refetchRequests,
@@ -75,6 +75,32 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
   // Also over cached data: someone who stopped being a partner must not keep seeing the list.
   const isPrivate = isForbiddenError(partnersError);
   const isGone = isNotFoundError(partnersError);
+  const canLoadRequests = isOwner && !!serverUserId;
+
+  // A failed refetch over cached rows keeps the rows and says so, instead of looking up to date.
+  const isPartnersRefreshError = isPartnersError && partners !== undefined && !isPrivate && !isGone;
+  const isRequestsRefreshError =
+    canLoadRequests &&
+    isRequestsError &&
+    requests !== undefined &&
+    !isForbiddenError(requestsError) &&
+    !isNotFoundError(requestsError);
+  const isFetchingAny = isPartnersFetching || isRequestsFetching;
+
+  const [refreshing, setRefreshing] = useState(false);
+  // refetch() ignores `enabled`, so the requests list is only refetched for the owner.
+  const refetchAll = useCallback(
+    () => Promise.all([refetchPartners(), canLoadRequests ? refetchRequests() : undefined]),
+    [canLoadRequests, refetchPartners, refetchRequests]
+  );
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetchAll();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchAll]);
 
   const { pressPartner, pendingTargetId } = usePartnerAction();
 
@@ -126,10 +152,9 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
       <TouchableOpacity
         style={styles.row}
         onPress={() =>
-          navigation.navigate(
-            user.id === serverUserId ? 'Profile' : 'UserProfile',
-            user.id === serverUserId ? undefined : { userId: user.id }
-          )
+          user.id === serverUserId
+            ? navigation.navigate('Main', { screen: 'Profile' })
+            : navigation.navigate('UserProfile', { userId: user.id })
         }
       >
         <View style={styles.avatar}>
@@ -224,7 +249,7 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
       return (
         <ListLoadState
           isError={isPartnersError}
-          isFetching={isPartnersFetching}
+          isFetching={isPartnersFetching && !refreshing}
           message={t('partners.loadError')}
           onRetry={() => refetchPartners()}
         />
@@ -248,8 +273,24 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
         <View style={styles.headerButton} />
       </View>
 
-      {isPartnersFetching && partners !== undefined && !isPrivate && (
+      {!refreshing && isPartnersFetching && partners !== undefined && !isPrivate && (
         <ActivityIndicator size="small" color="#8B5FBF" style={styles.refreshIndicator} />
+      )}
+
+      {!isFetchingAny && (isPartnersRefreshError || isRequestsRefreshError) && (
+        <View style={styles.refreshErrorRow}>
+          <Text style={styles.refreshErrorText}>{t('partners.refreshError')}</Text>
+          <TouchableOpacity
+            style={styles.refreshErrorButton}
+            onPress={() => {
+              refetchAll();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.retry')}
+          >
+            <Text style={styles.refreshErrorButtonText}>{t('common.retry')}</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       <SectionList<PartnerRow, PartnerSection>
@@ -257,6 +298,7 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
         keyExtractor={(item) => `${item.kind}-${item.user.id}`}
         renderItem={renderItem}
         stickySectionHeadersEnabled={false}
+        refreshControl={<RefreshControl tintColor="#8B5FBF" refreshing={refreshing} onRefresh={onRefresh} />}
         renderSectionHeader={({ section }) =>
           section.title ? <Text style={styles.sectionTitle}>{section.title}</Text> : null
         }
@@ -380,6 +422,31 @@ const styles = StyleSheet.create({
   actionText: {
     color: '#FFFFFF',
     fontSize: 13,
+    fontWeight: '600',
+  },
+  refreshErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+  },
+  refreshErrorText: {
+    flex: 1,
+    color: '#9CA3AF',
+    fontSize: 13,
+  },
+  refreshErrorButton: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+  },
+  refreshErrorButtonText: {
+    color: '#8B5FBF',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

@@ -8,7 +8,7 @@ import { useLocalization } from '../context/LocalizationContext';
 // ── Beta flag — set to false to re-enable AI features ────────────────────────
 const AI_ENABLED = false;
 
-export default function ScannerScreen({ navigation }: any) {
+export default function ScannerScreen() {
   const { t } = useLocalization();
   const { profile } = useAuth();
   const isAgeConfirmed = profile?.ageConfirmed === true;

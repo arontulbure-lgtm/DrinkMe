@@ -10,10 +10,9 @@ import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DeleteAccountModal from '../components/DeleteAccountModal';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface Props {
-  navigation: { goBack: () => void; navigate: (screen: string) => void };
-}
+type Props = RootStackScreenProps<'EditProfile'>;
 
 export default function EditProfileScreen({ navigation }: Props) {
   const { profile, serverUserId, setProfile } = useAuth();
