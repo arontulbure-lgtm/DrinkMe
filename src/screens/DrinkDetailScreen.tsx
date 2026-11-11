@@ -17,7 +17,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getCommentErrorKey, getImageSource, isAgeRequiredError, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
 import { flattenPages, getNextCursor, removeDrinkIfNotFound } from '../lib/drinkCache';
-import { Drink, Comment, Page } from '../types/api';
+import { Drink, Comment, Page, isDrinkCategory } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
 import ModerationNotice from '../components/ModerationNotice';
@@ -239,7 +239,8 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     <View style={styles.tagsRow}>
                       {drink.tags.map((tag) => (
                         <View key={tag} style={styles.tagChip}>
-                          <Text style={styles.tagText}>{tag}</Text>
+                          {/* A known category shows its label; any other stored tag shows as it is. */}
+                          <Text style={styles.tagText}>{isDrinkCategory(tag) ? t(`categories.${tag}`) : tag}</Text>
                         </View>
                       ))}
                     </View>

@@ -20,7 +20,13 @@ import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, ApiError, isAccountSuspendedErro
 import { prependDrink } from '../lib/drinkCache';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { useLocalization } from '../context/LocalizationContext';
-import { Drink } from '../types/api';
+import {
+  ALCOHOLIC_DRINK_CATEGORIES,
+  CreateDrinkRequest,
+  Drink,
+  DrinkCategory,
+  NON_ALCOHOLIC_DRINK_CATEGORIES,
+} from '../types/api';
 import LocationPickerModal from '../components/LocationPickerModal';
 import { RootStackScreenProps } from '../navigation/types';
 
@@ -29,14 +35,6 @@ interface SelectedImage {
   base64: string;
 }
 
-interface CreateDrinkPayload {
-  name: string;
-  description: string;
-  rating: number;
-  location: string | null;
-  isAlcoholic: boolean;
-  imageData: string;
-}
 
 export default function CreatePostScreen({ navigation }: RootStackScreenProps<'CreatePost'>) {
   const [drinkName, setDrinkName] = useState('');
@@ -48,6 +46,8 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
   const { getJwtToken, profile, serverUserId, user: firebaseUser, refreshProfile } = useAuth();
   const isAgeConfirmed = profile?.ageConfirmed === true;
   const [isAlcoholic, setIsAlcoholic] = useState(isAgeConfirmed);
+  // Optional, single choice, and always one of the categories that match the Alcoholic toggle.
+  const [category, setCategory] = useState<DrinkCategory | null>(null);
   const queryClient = useQueryClient();
   const { t } = useLocalization();
   const refreshIfSuspended = useRefreshIfSuspended();
@@ -70,7 +70,7 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
     return null;
   }, [firebaseUser, profile, serverUserId]);
 
-  const createPostMutation = useMutation<Drink, unknown, CreateDrinkPayload>({
+  const createPostMutation = useMutation<Drink, unknown, CreateDrinkRequest>({
     mutationFn: async (payload) => {
       const token = await getJwtToken();
       const headers: Record<string, string> = {};
@@ -106,6 +106,7 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
       setLocation('');
       setRating(5);
       setIsAlcoholic(isAgeConfirmed);
+      setCategory(null);
       setPhoto(null);
 
       Alert.alert(t('createPost.title'), t('createPost.success'), [
@@ -126,6 +127,17 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
       Alert.alert(t('createPost.title'), message);
     },
   });
+
+  // The server refuses a category that does not match the toggle, so a flip clears the choice.
+  const selectAlcoholic = (value: boolean) => {
+    if (value === isAlcoholic) return;
+    setIsAlcoholic(value);
+    setCategory(null);
+  };
+
+  const visibleCategories: readonly DrinkCategory[] = isAlcoholic
+    ? ALCOHOLIC_DRINK_CATEGORIES
+    : NON_ALCOHOLIC_DRINK_CATEGORIES;
 
   const handlePickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -183,6 +195,7 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
       location: location.trim() || null,
       isAlcoholic,
       imageData: photo.base64,
+      ...(category && { category }),
     });
   };
 
@@ -267,7 +280,7 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
               <View style={styles.toggleRow}>
                 <TouchableOpacity
                   style={[styles.toggleOption, isAlcoholic && styles.toggleOptionActive, !isAgeConfirmed && styles.toggleOptionLocked]}
-                  onPress={() => setIsAlcoholic(true)}
+                  onPress={() => selectAlcoholic(true)}
                   disabled={!isAgeConfirmed}
                   accessibilityState={{ disabled: !isAgeConfirmed, selected: isAlcoholic }}
                 >
@@ -278,7 +291,7 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.toggleOption, !isAlcoholic && styles.toggleOptionActive]}
-                  onPress={() => setIsAlcoholic(false)}
+                  onPress={() => selectAlcoholic(false)}
                 >
                   <Ionicons name="leaf" size={16} color={!isAlcoholic ? '#FFFFFF' : '#6B7280'} />
                   <Text style={[styles.toggleOptionText, !isAlcoholic && styles.toggleOptionTextActive]}>
@@ -288,6 +301,31 @@ export default function CreatePostScreen({ navigation }: RootStackScreenProps<'C
               </View>
               {/* Defence in depth: the hard age gate means an unconfirmed user never reaches this screen. */}
               {!isAgeConfirmed && <Text style={styles.toggleHint}>{t('ageGate.banner')}</Text>}
+            </View>
+
+            <View style={styles.toggleSection}>
+              <Text style={styles.label}>{t('createPost.categoryLabel')}</Text>
+              <View style={styles.categoryRow}>
+                {visibleCategories.map((option) => {
+                  const isSelected = option === category;
+                  const label = t(`categories.${option}`);
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.categoryChip, isSelected && styles.categoryChipActive]}
+                      onPress={() => setCategory(isSelected ? null : option)}
+                      accessibilityRole="button"
+                      accessibilityLabel={label}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <Text style={[styles.categoryChipText, isSelected && styles.categoryChipTextActive]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.toggleHint}>{t('createPost.categoryHint')}</Text>
             </View>
 
             <View style={styles.photoSection}>
@@ -517,5 +555,32 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     flex: 1,
     fontSize: 14,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  categoryChip: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#374151',
+    backgroundColor: '#1F2937',
+  },
+  categoryChipActive: {
+    backgroundColor: '#8B5FBF',
+    borderColor: '#8B5FBF',
+  },
+  categoryChipText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#9CA3AF',
+  },
+  categoryChipTextActive: {
+    color: '#FFFFFF',
   },
 });

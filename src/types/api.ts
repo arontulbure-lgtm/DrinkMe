@@ -49,6 +49,33 @@ export interface Page<T> {
   total?: number;
 }
 
+// Post categories. Must match DRINK_CATEGORIES in server/server.js. A post stores its category as
+// tags: [category]; older posts have tags: []. An alcoholic category needs isAlcoholic true, and a
+// non-alcoholic one needs isAlcoholic false, or the server answers 400.
+// server/test/categories.test.js reads these two arrays from this file and compares them with the
+// server's lists, so keep each one a single-line array literal.
+export const ALCOHOLIC_DRINK_CATEGORIES = ['cocktail', 'wine', 'beer', 'spirits'] as const;
+export const NON_ALCOHOLIC_DRINK_CATEGORIES = ['mocktail', 'coffee', 'tea', 'other'] as const;
+
+export type AlcoholicDrinkCategory = (typeof ALCOHOLIC_DRINK_CATEGORIES)[number];
+export type NonAlcoholicDrinkCategory = (typeof NON_ALCOHOLIC_DRINK_CATEGORIES)[number];
+export type DrinkCategory = AlcoholicDrinkCategory | NonAlcoholicDrinkCategory;
+
+export const isDrinkCategory = (value: unknown): value is DrinkCategory =>
+  (ALCOHOLIC_DRINK_CATEGORIES as readonly unknown[]).includes(value)
+  || (NON_ALCOHOLIC_DRINK_CATEGORIES as readonly unknown[]).includes(value);
+
+// POST /api/drinks. category is optional; without it the post is stored with tags: [].
+export interface CreateDrinkRequest {
+  name: string;
+  description: string;
+  rating: number;
+  location: string | null;
+  isAlcoholic: boolean;
+  imageData: string;
+  category?: DrinkCategory;
+}
+
 export interface Drink {
   id: number;
   userId: string;

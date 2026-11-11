@@ -1393,6 +1393,42 @@ const toAvatarUrl = (user) => (
 
 const toDrinkImageUrl = (drink) => (isServableImage(drink.imageUrl) ? `/media/drinks/${drink.id}` : null);
 
+// ── Post categories ───────────────────────────────────────────────────────────
+// The one list of post categories, split by whether the drink is alcoholic. A post stores its category
+// as `tags: [category]` (no category: `tags: []`). Creating a post and the Explore filter validate
+// against this list, and any future edit-post route must validate against this list too (through
+// parseDrinkCategory). It must match the arrays in src/types/api.ts; test/categories.test.js checks that.
+const DRINK_CATEGORIES = Object.freeze({
+  alcoholic: Object.freeze(['cocktail', 'wine', 'beer', 'spirits']),
+  nonAlcoholic: Object.freeze(['mocktail', 'coffee', 'tea', 'other']),
+});
+const ALCOHOLIC_DRINK_CATEGORIES = new Set(DRINK_CATEGORIES.alcoholic);
+const NON_ALCOHOLIC_DRINK_CATEGORIES = new Set(DRINK_CATEGORIES.nonAlcoholic);
+
+const isDrinkCategory = (value) => (
+  typeof value === 'string' && (ALCOHOLIC_DRINK_CATEGORIES.has(value) || NON_ALCOHOLIC_DRINK_CATEGORIES.has(value))
+);
+
+/**
+ * Validates an optional category against the post's alcoholic state (true unless isAlcoholic === false).
+ * Returns { tags } to store, or { error } for a 400. undefined or null means no category.
+ */
+const parseDrinkCategory = (category, isAlcoholicPost) => {
+  if (category === undefined || category === null) return { tags: [] };
+  if (!isDrinkCategory(category)) return { error: 'Invalid category' };
+  if (ALCOHOLIC_DRINK_CATEGORIES.has(category) !== isAlcoholicPost) {
+    return { error: 'Category does not match isAlcoholic' };
+  }
+  return { tags: [category] };
+};
+
+// A stored post matches a category only if its alcoholic state agrees too, so an inconsistent record
+// can never show under the wrong filter.
+const drinkHasCategory = (drink, category) => (
+  Array.isArray(drink.tags) && drink.tags.includes(category)
+  && isAlcoholicDrink(drink) === ALCOHOLIC_DRINK_CATEGORIES.has(category)
+);
+
 // ── Bounded lists ─────────────────────────────────────────────────────────────
 const PAGE_DEFAULT_LIMIT = 20;
 const PAGE_MAX_LIMIT = 50;
@@ -2948,12 +2984,16 @@ app.get('/api/drinks', (req, res) => {
   if (!page) return respondInvalidPage(res);
   const cityQuery = parseSearchText(req.query.city);
   const searchQuery = parseSearchText(req.query.q);
-  const { alcoholic, scope, sort } = req.query;
+  const { alcoholic, scope, sort, category } = req.query;
   const isTrending = sort === 'trending';
+  // category works with every scope and sort here; it contradicts only alcoholic=false with an
+  // alcoholic category, which is refused rather than answered with an always-empty list.
   const hasValidFilters = cityQuery !== null && searchQuery !== null
     && (alcoholic === undefined || alcoholic === 'false')
     && (scope === undefined || scope === 'discover')
     && (sort === undefined || isTrending)
+    && (category === undefined || isDrinkCategory(category))
+    && !(alcoholic === 'false' && ALCOHOLIC_DRINK_CATEGORIES.has(category))
     && !(isTrending && page.before !== undefined);
   if (!hasValidFilters) return res.status(400).json({ error: 'Invalid filter' });
   if (scope === 'discover' && !currentUserId) return res.status(401).json({ error: 'Authentication required' });
@@ -2970,6 +3010,10 @@ app.get('/api/drinks', (req, res) => {
   }
   if (alcoholic === 'false') {
     list = list.filter((d) => d.isAlcoholic === false);
+  }
+  // Before the ranking and the paging, so every page is full and cursors stay stable.
+  if (category !== undefined) {
+    list = list.filter((d) => drinkHasCategory(d, category));
   }
   if (scope === 'discover') {
     const partnerSet = ensurePartnerSet(currentUserId);
@@ -3107,13 +3151,19 @@ app.post('/api/drinks', requireAuth, refuseIfSuspended, postBodyParser, (req, re
   // The account can have been deleted while the body arrived, after requireAuth.
   if (!isLiveAccount(req.userId)) return res.status(401).json({ error: 'Authentication required' });
   const currentUserId = req.userId;
-  const { name, description, rating, location, isAlcoholic, imageData } = req.body || {};
+  const { name, description, rating, location, isAlcoholic, imageData, category } = req.body || {};
   // Before any validation, so the image of a post that would be refused is never processed.
   // Defence in depth: requireSignedInAdult already refuses an unconfirmed user before this route.
   if (isAlcoholic !== false && !isAgeConfirmed(currentUserId)) return respondAgeRequired(res);
   if (!name || !description || !imageData) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
+  // A missing isAlcoholic means alcoholic (the stored flag below); any other non-boolean is refused.
+  if (isAlcoholic !== undefined && typeof isAlcoholic !== 'boolean') {
+    return res.status(400).json({ error: 'Invalid isAlcoholic' });
+  }
+  const parsedCategory = parseDrinkCategory(category, isAlcoholic !== false);
+  if (parsedCategory.error) return res.status(400).json({ error: parsedCategory.error });
   const normalizedRating = Number(rating);
   if (Number.isNaN(normalizedRating) || normalizedRating < 0 || normalizedRating > 5) {
     return res.status(400).json({ error: 'Rating must be between 0 and 5' });
@@ -3149,7 +3199,7 @@ app.post('/api/drinks', requireAuth, refuseIfSuspended, postBodyParser, (req, re
     isAlcoholic: isAlcoholic !== false,
     createdAt: new Date().toISOString(),
     cheersCount: 0,
-    tags: [],
+    tags: parsedCategory.tags,
     imageUrl: normalizedImage.dataUrl,
     isPartner: true,
   };

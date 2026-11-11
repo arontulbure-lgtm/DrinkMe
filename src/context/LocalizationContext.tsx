@@ -183,9 +183,6 @@ const translations = {
       searchMinChars: 'Type at least 2 characters to search.',
       filters: {
         all: 'All',
-        cocktail: 'Cocktails',
-        wine: 'Wine',
-        beer: 'Beer',
         nonAlcoholic: 'Non-alcoholic',
       },
       sections: {
@@ -292,6 +289,17 @@ const translations = {
       noComments: 'No comments yet',
       commentsLoadError: 'Could not load comments.',
     },
+    // Post category labels, shared by CreatePost, DrinkDetail and the Explore chips.
+    categories: {
+      cocktail: 'Cocktail',
+      wine: 'Wine',
+      beer: 'Beer',
+      spirits: 'Spirits',
+      mocktail: 'Mocktail',
+      coffee: 'Coffee',
+      tea: 'Tea',
+      other: 'Other',
+    },
     createPost: {
       title: 'Create Post',
       imageTooLarge: 'This photo is too large. Please choose one under 7 MB.',
@@ -317,6 +325,8 @@ const translations = {
       error: 'Failed to create post. Please try again.',
       fieldsError: 'Please fill in all required fields',
       photoRequired: 'A photo is required to post.',
+      categoryLabel: 'Category',
+      categoryHint: 'Optional. Tap the selected category again to clear it.',
     },
     languageSettings: {
       title: 'Language',
@@ -525,9 +535,6 @@ const translations = {
       searchMinChars: 'Scrie cel puțin 2 caractere ca să cauți.',
       filters: {
         all: 'Toate',
-        cocktail: 'Cocktailuri',
-        wine: 'Vinuri',
-        beer: 'Bere',
         nonAlcoholic: 'Fără alcool',
       },
       sections: {
@@ -633,6 +640,17 @@ const translations = {
       noComments: 'Încă nu există comentarii',
       commentsLoadError: 'Nu am putut încărca comentariile.',
     },
+    // Etichetele categoriilor, folosite în CreatePost, DrinkDetail și filtrele din Explore.
+    categories: {
+      cocktail: 'Cocktail',
+      wine: 'Vin',
+      beer: 'Bere',
+      spirits: 'Spirtoase',
+      mocktail: 'Mocktail',
+      coffee: 'Cafea',
+      tea: 'Ceai',
+      other: 'Altele',
+    },
     createPost: {
       title: 'Create Post',
       imageTooLarge: 'Fotografia este prea mare. Alege una sub 7 MB.',
@@ -658,6 +676,8 @@ const translations = {
       error: 'Nu am putut publica postarea. Încearcă din nou.',
       fieldsError: 'Completează toate câmpurile obligatorii',
       photoRequired: 'Este necesară o fotografie pentru a publica.',
+      categoryLabel: 'Categorie',
+      categoryHint: 'Opțional. Apasă din nou pe categoria aleasă ca să o anulezi.',
     },
     languageSettings: {
       title: 'Limba aplicației',

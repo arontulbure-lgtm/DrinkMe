@@ -8,7 +8,14 @@ import { apiFetch } from '../lib/api';
 import { flattenPages, getNextCursor } from '../lib/drinkCache';
 import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
 import { useDrinkToggles } from '../lib/useDrinkToggles';
-import { Drink, BaseUser, Page } from '../types/api';
+import {
+  ALCOHOLIC_DRINK_CATEGORIES,
+  BaseUser,
+  Drink,
+  DrinkCategory,
+  NON_ALCOHOLIC_DRINK_CATEGORIES,
+  Page,
+} from '../types/api';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
@@ -20,6 +27,9 @@ import { TabScreenProps } from '../navigation/types';
 const TRENDING_LIMIT = 6;
 const SEARCH_MIN_LENGTH = 2;
 
+// 'all' and 'non-alcoholic' as before; every other chip is a post category the server filters on.
+type ExploreFilterId = 'all' | 'non-alcoholic' | DrinkCategory;
+
 export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>) {
   const [searchQuery, setSearchQuery] = useState('');
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
@@ -29,21 +39,18 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
   const isAgeConfirmed = profile?.ageConfirmed === true;
 
   const filters = useMemo(
-    () => [
+    (): { id: ExploreFilterId; label: string }[] => [
       { id: 'all', label: t('explore.filters.all') },
       ...(isAgeConfirmed
-        ? [
-            { id: 'cocktail', label: t('explore.filters.cocktail') },
-            { id: 'wine', label: t('explore.filters.wine') },
-            { id: 'beer', label: t('explore.filters.beer') },
-          ]
+        ? ALCOHOLIC_DRINK_CATEGORIES.map((id) => ({ id, label: t(`categories.${id}`) }))
         : []),
       { id: 'non-alcoholic', label: t('explore.filters.nonAlcoholic') },
+      ...NON_ALCOHOLIC_DRINK_CATEGORIES.map((id) => ({ id, label: t(`categories.${id}`) })),
     ],
     [isAgeConfirmed, t]
   );
 
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeFilter, setActiveFilter] = useState<ExploreFilterId>('all');
 
   // Debounce search query by 300ms to avoid firing on every keystroke
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -62,8 +69,11 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
   const drinkSearchTerm = rawQuery.toLowerCase();
   const isDrinkSearch = !isUserQuery && rawQuery.length >= SEARCH_MIN_LENGTH;
 
-  // The server filters, so a match on a later page is found. Tag chips stay a client filter below.
+  // The server filters before paging, so a match on a later page is found. Each chip has its own cache.
+  // Posts without a category (tags: []) show only under All, and Non-alcoholic when isAlcoholic is false.
   const isNonAlcoholicFilter = activeFilter === 'non-alcoholic';
+  const categoryFilter: DrinkCategory | undefined =
+    activeFilter === 'all' || activeFilter === 'non-alcoholic' ? undefined : activeFilter;
   const {
     data: discoverPages,
     refetch: refetchDiscover,
@@ -73,12 +83,17 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
     fetchNextPage: fetchMoreDiscover,
     isFetchingNextPage: isFetchingMoreDiscover,
   } = useInfiniteQuery({
-    queryKey: ['drinks.all', isNonAlcoholicFilter ? 'non-alcoholic' : 'all'],
+    queryKey: ['drinks.all', activeFilter],
     enabled: !!serverUserId,
     initialPageParam: undefined as number | undefined,
     queryFn: ({ pageParam }) =>
       apiFetch<Page<Drink>>('/api/drinks', {
-        query: { scope: 'discover', alcoholic: isNonAlcoholicFilter ? 'false' : undefined, before: pageParam },
+        query: {
+          scope: 'discover',
+          alcoholic: isNonAlcoholicFilter ? 'false' : undefined,
+          category: categoryFilter,
+          before: pageParam,
+        },
       }),
     getNextPageParam: getNextCursor,
   });
@@ -125,20 +140,6 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
   const discoveryDrinks = useMemo(
     () => flattenPages(discoverPages).map(applyLocalUser),
     [discoverPages, applyLocalUser]
-  );
-
-  const matchesFilter = (drink: Drink, filter: string) => {
-    if (filter === 'all') return true;
-    const tags = drink.tags || [];
-    if (filter === 'non-alcoholic') {
-      return drink.isAlcoholic === false;
-    }
-    return tags.includes(filter);
-  };
-
-  const filteredDrinks = useMemo(
-    () => discoveryDrinks.filter((drink) => matchesFilter(drink, activeFilter)),
-    [discoveryDrinks, activeFilter]
   );
 
   const matchingDrinks = useMemo(() => {
@@ -203,6 +204,9 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                 key={filter.id}
                 style={[styles.filterChip, isActive && styles.filterChipActive]}
                 onPress={() => setActiveFilter(filter.id)}
+                accessibilityRole="button"
+                accessibilityLabel={filter.label}
+                accessibilityState={{ selected: isActive }}
               >
                 <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
                   {filter.label}
@@ -384,14 +388,14 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                   message={t('explore.loadError')}
                   onRetry={() => refetchDiscover()}
                 />
-              ) : filteredDrinks.length === 0 ? (
+              ) : discoveryDrinks.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="wine-outline" size={48} color="#6B7280" />
                   <Text style={styles.emptyTitle}>{t('explore.sections.noDrinksTitle')}</Text>
                   <Text style={styles.emptySubtitle}>{t('explore.sections.noDrinksSubtitle')}</Text>
                 </View>
               ) : null}
-              {filteredDrinks.map((drink) => (
+              {discoveryDrinks.map((drink) => (
                 <DrinkPostCard
                   key={drink.id}
                   drink={drink}
@@ -409,7 +413,7 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                   }
                 />
               ))}
-              {hasMoreDiscover && (activeFilter === 'all' || isNonAlcoholicFilter) && (
+              {hasMoreDiscover && (
                 <LoadMoreButton onPress={() => fetchMoreDiscover()} isLoading={isFetchingMoreDiscover} />
               )}
             </View>
