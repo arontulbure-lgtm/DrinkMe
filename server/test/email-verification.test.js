@@ -653,7 +653,9 @@ test('delete-unverified: a failed Firebase delete leaves the entry pending and i
   const { status, body } = await postDelete(server.baseUrl, passwordClaims(false));
   assert.equal(status, 200);
   assert.deepEqual(body, { deleted: true, firebaseDeleted: false });
-  assert.deepEqual(readDb(server.dbFile).pendingAccountDeletions, [{ uid: UID }]);
+  const [{ anonId, ...pending }] = readDb(server.dbFile).pendingAccountDeletions;
+  assert.deepEqual(pending, { uid: UID });
+  assert.match(anonId, /^deleted-[0-9a-f]{16}$/, 'the anonymous id of the cascade is saved with the entry');
   assert.equal((await postDelete(server.baseUrl, passwordClaims(false))).body.code, 'account_deleted');
 });
 

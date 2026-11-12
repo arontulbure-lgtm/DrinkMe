@@ -16,7 +16,7 @@ import { BaseUser } from '../types/api';
 // anyone can then add themselves and read the list.
 // Rollout: deploy the server first, then release the client. The server accepts any version from 1 up to
 // its own and stores the highest, so older builds still answering their own notice are never stranded.
-// Version 2: nothing is visible without signing in, or before the 18+ confirmation.
+// Version 2: nothing is visible without signing in, or before the 18+ confirmation, and the 90-day audit log.
 export const PRIVACY_NOTICE_VERSION = 2;
 
 const NAME_MAX_LENGTH = 120;

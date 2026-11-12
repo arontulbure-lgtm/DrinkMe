@@ -416,6 +416,7 @@ let nextDrinkId      = 1;
 let nextNotificationId = 1;
 let nextCommentId    = 1;
 let nextReportId     = 1;
+let nextAuditId      = 1;
 // 2: text is stored plain. A file with a lower or missing value holds HTML-escaped text.
 const DB_SCHEMA_VERSION = 2;
 let dbSchemaVersion  = DB_SCHEMA_VERSION;
@@ -436,6 +437,8 @@ const reports           = [];
 // [{ uid }]: accounts whose deletion was accepted and has not finished. No JWT or sign-in works for a uid here.
 // [{ uid, until }]: a finished deletion, kept for ACCOUNT_TOMBSTONE_MS and then pruned. See isTokenFromBeforeDeletion.
 const pendingAccountDeletions = [];
+// Security and moderation actions, oldest first. Only through the helpers in the Audit log section.
+const auditLog = [];
 
 const stories = [];
 
@@ -446,8 +449,8 @@ const DB_RETRY_WAITS_MS       = [25, 50, 100, 200, 400];
 const DB_RENAME_RETRY_CODES   = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const DB_READ_RETRY_CODES     = new Set([...DB_RENAME_RETRY_CODES, 'EMFILE']);
 
-const DB_COUNTER_KEYS = ['nextDrinkId', 'nextNotificationId', 'nextCommentId', 'nextReportId', 'dbSchemaVersion', 'recoveryStartedAt'];
-const DB_LIST_KEYS    = ['drinks', 'users', 'reports', 'pendingAccountDeletions'];
+const DB_COUNTER_KEYS = ['nextDrinkId', 'nextNotificationId', 'nextCommentId', 'nextReportId', 'nextAuditId', 'dbSchemaVersion', 'recoveryStartedAt'];
+const DB_LIST_KEYS    = ['drinks', 'users', 'reports', 'pendingAccountDeletions', 'auditLog'];
 const DB_MAP_KEYS     = [
   'cheersByUser', 'savedByUser', 'smartBarByUser',
   'partnersByUser', 'notificationsByUser', 'commentsByDrink', 'limitEventsByUser', 'blocksByUser',
@@ -507,6 +510,7 @@ function saveDb() {
       nextNotificationId,
       nextCommentId,
       nextReportId,
+      nextAuditId,
       dbSchemaVersion,
       users: Array.from(userIndex.values()),
       reports,
@@ -530,6 +534,7 @@ function saveDb() {
       ),
       partnerRequestsByUser: Object.fromEntries(partnerRequestsByUser.entries()),
       pendingAccountDeletions,
+      auditLog,
       ...(recoveryStartedAt !== undefined && { recoveryStartedAt }),
     };
     const serialized = JSON.stringify(data, null, 2);
@@ -778,6 +783,7 @@ function migrateLegacyDbText(rawBytes) {
 }
 
 function loadDb() {
+  let prunedAuditAtLoad = false;
   let dbStats;
   try {
     dbStats = fs.statSync(DB_FILE, { throwIfNoEntry: false });
@@ -818,6 +824,7 @@ function loadDb() {
     if (typeof data.nextNotificationId === 'number') nextNotificationId = data.nextNotificationId;
     if (typeof data.nextCommentId    === 'number') nextCommentId    = data.nextCommentId;
     if (typeof data.nextReportId     === 'number') nextReportId     = data.nextReportId;
+    if (typeof data.nextAuditId      === 'number') nextAuditId      = data.nextAuditId;
 
     // Restore drinks (a loop, because spreading a large array throws RangeError)
     if (data.drinks) {
@@ -934,12 +941,30 @@ function loadDb() {
 
     // Restore pendingAccountDeletions. Finished before the server starts listening: see resumePendingAccountDeletions.
     if (data.pendingAccountDeletions) {
-      for (const { uid, until } of data.pendingAccountDeletions) {
+      for (const { uid, until, anonId } of data.pendingAccountDeletions) {
         if (typeof uid === 'string' && uid && !pendingAccountDeletions.some((entry) => entry.uid === uid)) {
           // An unusable until counts as unfinished, the safe side. One too far ahead cannot outlast the retention.
-          pendingAccountDeletions.push(Number.isFinite(until) ? { uid, until: Math.min(until, Date.now() + ACCOUNT_TOMBSTONE_MS) } : { uid });
+          // A tombstone never keeps the anonymous id; an unfinished entry from before it has none (see getDeletionAnonId).
+          pendingAccountDeletions.push(Number.isFinite(until)
+            ? { uid, until: Math.min(until, Date.now() + ACCOUNT_TOMBSTONE_MS) }
+            : { uid, ...(isDeletionAnonId(anonId) && { anonId }) });
         }
       }
+    }
+
+    // Restore auditLog. A file from before it has none. Expired entries go now (see pruneAuditLog).
+    if (data.auditLog) {
+      // Each entry is rebuilt with only the known fields and allowed meta keys. One that cannot be an entry
+      // (no whole-number id, an unknown action, an id that is not a string or null) is left out.
+      let changed = false;
+      for (const stored of data.auditLog) {
+        const entry = normalizeAuditEntry(stored);
+        if (!entry || JSON.stringify(entry) !== JSON.stringify(stored)) changed = true;
+        if (!entry) continue;
+        auditLog.push(entry);
+        if (entry.id >= nextAuditId) nextAuditId = entry.id + 1;
+      }
+      prunedAuditAtLoad = pruneAuditLog() > 0 || changed;
     }
 
     // A value ahead of the clock would hold the purge for longer than it should.
@@ -949,9 +974,12 @@ function loadDb() {
   }
 
   if (!(data.dbSchemaVersion >= DB_SCHEMA_VERSION)) {
-    migrateLegacyDbText(rawBytes);
+    migrateLegacyDbText(rawBytes); // saves, expired audit entries included
   } else {
     dbSchemaVersion = data.dbSchemaVersion; // a newer version is kept as found
+    // Expired or rebuilt audit entries reach the file now, not at the next mutation. A failed save is
+    // logged, and the next successful save writes them.
+    if (prunedAuditAtLoad) saveDb();
   }
 
   // Empty, so backups may be all that is left. Saved now, so the 7-day hold counts from here across restarts.
@@ -1765,6 +1793,156 @@ const pruneResolvedReporters = () => {
   }
 };
 
+// ── Audit log (T6-1, SEC-H) ───────────────────────────────────────────────────
+// A GDPR-minimal record of security and moderation actions. Every read and write of auditLog goes through
+// these helpers, so they can move to a real database (DATA-1) without touching the routes.
+// An entry is { id, at, action, actorId, targetId, meta? }: ids are uids, a deleted-<hex> id or null, and
+// meta holds only the keys AUDIT_META_KEYS allows for its action. Never stored: IP, user agent, email,
+// names, report or suspension reason text, tokens or request bodies. Refused sign-ins are not logged:
+// anyone could trigger them, so they would only be noise.
+// Written in the same save as its action and undone with it when that save fails. Allowed while the
+// growth guard blocks writes, because each budget below has a cap.
+// Two budgets, so user activity can never push out a moderation record (lead decision): entries users
+// cause themselves (AUDIT_SELF_ACTIONS) keep their newest AUDIT_USER_MAX_ENTRIES among themselves; admin
+// entries and completed deletions leave only through the retention, plus a safety cap of
+// AUDIT_SYSTEM_MAX_ENTRIES that only admins and completed deletions can fill.
+// Kept AUDIT_RETENTION_DAYS (pruned at load and by the 24-hour purge timer); backups add up to 30 days.
+const AUDIT_RETENTION_DAYS = 90;
+const AUDIT_RETENTION_MS = AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const AUDIT_USER_MAX_ENTRIES = 15_000;
+const AUDIT_SYSTEM_MAX_ENTRIES = 20_000;
+const AUDIT_META_KEYS = {
+  'ack.age_confirmed': [],
+  'ack.privacy_accepted': ['version'],
+  'auth.session_revoked': [],
+  'account.deletion_requested': [],
+  'account.deletion_completed': [],
+  // resolvedCount: how many open reports on the same target the resolve closed.
+  'admin.report_resolved': ['reportId', 'action', 'resolvedCount'],
+  'admin.user_suspended': ['permanent'],
+  'admin.user_unsuspended': ['void'],
+};
+const AUDIT_ACTIONS = new Set(Object.keys(AUDIT_META_KEYS));
+// The user's own actions. Lead decision (data minimisation): they are deleted with the account, not
+// anonymised; account.deletion_completed under the anonymous id stays as the record. Admin entries keep
+// the anonymous id instead of the uid.
+const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'auth.session_revoked', 'account.deletion_requested']);
+const isUserAuditEntry = (entry) => AUDIT_SELF_ACTIONS.has(entry.action);
+const auditCapFor = (entry) => (isUserAuditEntry(entry) ? AUDIT_USER_MAX_ENTRIES : AUDIT_SYSTEM_MAX_ENTRIES);
+
+// Only the allowed meta keys with plain values, or undefined when none is left.
+const pickAuditMeta = (action, meta) => {
+  const kept = {};
+  for (const key of AUDIT_META_KEYS[action]) {
+    const value = meta?.[key];
+    if (['string', 'number', 'boolean'].includes(typeof value)) kept[key] = value;
+  }
+  return Object.keys(kept).length > 0 ? kept : undefined;
+};
+
+// Rebuilds a stored entry with exactly the known fields, or returns null when it cannot be one.
+const normalizeAuditEntry = (entry) => {
+  if (!isPlainObject(entry) || !Number.isSafeInteger(entry.id) || !AUDIT_ACTIONS.has(entry.action)) return null;
+  const isId = (value) => value === null || typeof value === 'string';
+  if (!isId(entry.actorId) || !isId(entry.targetId)) return null;
+  const meta = pickAuditMeta(entry.action, entry.meta);
+  return { id: entry.id, at: entry.at, action: entry.action, actorId: entry.actorId, targetId: entry.targetId, ...(meta && { meta }) };
+};
+
+// Removes the oldest entries of this entry's budget beyond its cap. Returns [index, entry] pairs in
+// ascending index order, so an undo can put them back exactly where they were.
+const evictOverAuditCap = (entry) => {
+  const sameBudget = isUserAuditEntry(entry);
+  const indexes = [];
+  auditLog.forEach((item, index) => {
+    if (isUserAuditEntry(item) === sameBudget) indexes.push(index);
+  });
+  const excess = indexes.length - auditCapFor(entry);
+  if (excess <= 0) return [];
+  const evicted = indexes.slice(0, excess).map((index) => [index, auditLog[index]]);
+  for (let i = evicted.length - 1; i >= 0; i--) auditLog.splice(evicted[i][0], 1);
+  return evicted;
+};
+
+/**
+ * Adds one entry and returns its undo, for a save that fails. actorId is who acted (null for the server),
+ * targetId the account acted on. meta keeps only the keys allowed for the action.
+ */
+const appendAudit = (action, { actorId = null, targetId = null, meta } = {}) => {
+  if (!AUDIT_ACTIONS.has(action)) throw new Error(`Unknown audit action ${action}`);
+  const keptMeta = pickAuditMeta(action, meta);
+  const entry = {
+    id: nextAuditId++,
+    at: new Date().toISOString(),
+    action,
+    actorId: actorId ?? null,
+    targetId: targetId ?? null,
+    ...(keptMeta && { meta: keptMeta }),
+  };
+  auditLog.push(entry);
+  const evicted = evictOverAuditCap(entry);
+  return () => {
+    const index = auditLog.lastIndexOf(entry);
+    if (index !== -1) auditLog.splice(index, 1);
+    for (const [evictedIndex, evictedEntry] of evicted) auditLog.splice(evictedIndex, 0, evictedEntry);
+    if (nextAuditId === entry.id + 1) nextAuditId = entry.id;
+  };
+};
+
+// Drops entries past the retention, or with an unreadable date, then keeps the newest of each budget
+// within its cap. No save. Returns how many went.
+const pruneAuditLog = () => {
+  const cutoff = Date.now() - AUDIT_RETENTION_MS;
+  const before = auditLog.length;
+  const current = auditLog.filter((entry) => {
+    const at = Date.parse(entry?.at);
+    return Number.isFinite(at) && at > cutoff;
+  });
+  const userCount = current.filter(isUserAuditEntry).length;
+  let userExcess = userCount - AUDIT_USER_MAX_ENTRIES;
+  let systemExcess = current.length - userCount - AUDIT_SYSTEM_MAX_ENTRIES;
+  const kept = current.filter((entry) => {
+    if (isUserAuditEntry(entry)) return userExcess-- <= 0;
+    return systemExcess-- <= 0;
+  });
+  auditLog.length = 0;
+  for (const entry of kept) auditLog.push(entry);
+  return before - auditLog.length;
+};
+
+// The deleted-<hex> id that stands for a deleted user in kept reports and audit entries.
+const DELETION_ANON_ID_PATTERN = /^deleted-[0-9a-f]{16}$/;
+const isDeletionAnonId = (value) => typeof value === 'string' && DELETION_ANON_ID_PATTERN.test(value);
+const newDeletionAnonId = () => `deleted-${crypto.randomBytes(8).toString('hex')}`;
+// The id saved on the unfinished deletion entry. An entry from before anonId (or a cascade with no entry)
+// gets a new one, as before.
+const getDeletionAnonId = (uid) => {
+  const anonId = pendingAccountDeletions.find((entry) => entry.uid === uid && entry.until === undefined)?.anonId;
+  return isDeletionAnonId(anonId) ? anonId : newDeletionAnonId();
+};
+
+// For account deletion. The user's own entries go; in the rest (admin actions by or about them) their
+// uid becomes anonId, the deleted-<hex> id their anonymised reports carry. No save.
+const anonymizeAuditForUser = (uid, anonId) => {
+  for (let index = auditLog.length - 1; index >= 0; index--) {
+    const entry = auditLog[index];
+    if (entry.actorId !== uid && entry.targetId !== uid) continue;
+    if (AUDIT_SELF_ACTIONS.has(entry.action)) {
+      auditLog.splice(index, 1);
+      continue;
+    }
+    if (entry.actorId === uid) entry.actorId = anonId;
+    if (entry.targetId === uid) entry.targetId = anonId;
+  }
+};
+
+// Newest first, paged like every other list. action, when given, must be one of AUDIT_ACTIONS.
+// Copies, so a caller cannot change the stored entries.
+const listAuditEntries = ({ action, limit, before }) => {
+  const page = paginateById(action === undefined ? auditLog : auditLog.filter((entry) => entry.action === action), { limit, before });
+  return { ...page, items: page.items.map((entry) => ({ ...entry, ...(entry.meta && { meta: { ...entry.meta } }) })) };
+};
+
 // ── Load persisted state on startup ──────────────────────────────────────────
 loadDb();
 
@@ -1979,7 +2157,8 @@ const toPublicUser = (user, viewerId) => {
 // Its partner sentence is untrue with PARTNER_CONSENT_REQUIRED=false, an emergency rollback only: anyone
 // can then add themselves and read the list.
 // Version 2: nothing is visible without signing in (requireSignedInAdult). Still unreleased, it also
-// covers the hide after reports, suspensions and the 30-day backup rule (owner decisions of 2026-11-10).
+// covers the hide after reports, suspensions and the 30-day backup rule (owner decisions of 2026-11-10),
+// and the 90-day audit log.
 const PRIVACY_NOTICE_VERSION = 2;
 
 const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVersion) ? user.privacyNoticeVersion : null);
@@ -2197,7 +2376,7 @@ const deleteUserDataCascade = (uid) => {
   // It keeps counting towards the auto-hide only if the user counted at this moment (old enough, notice
   // accepted): the flag is fixed here, so a deleted account never ages into counting. The flag is a plain
   // boolean, which says nothing more about the person. Their resolved reports go, as before.
-  const anonymousReporterId = `deleted-${crypto.randomBytes(8).toString('hex')}`;
+  const anonymousReporterId = getDeletionAnonId(uid);
   const countedForAutoHide = getAutoHideReporterStatus(user).counts;
   for (let index = reports.length - 1; index >= 0; index--) {
     const report = reports[index];
@@ -2217,6 +2396,9 @@ const deleteUserDataCascade = (uid) => {
     if (report.resolvedBy === uid) delete report.resolvedBy;
   }
   markReportsChanged();
+  // Right after the reports, with the same anonymous id, so an admin entry about this account still matches
+  // its open reports. The user's own entries go (see AUDIT_SELF_ACTIONS); a retry finds nothing left to change.
+  anonymizeAuditForUser(uid, anonymousReporterId);
   // Another account's suspension history names the admin who acted; that id goes with the admin's account.
   for (const other of userIndex.values()) {
     const history = getSuspensionHistory(other);
@@ -2281,6 +2463,9 @@ const deleteUserDataCascade = (uid) => {
 
   // Last: while the record exists, a cascade that threw can be retried with the same JWT.
   userIndex.delete(uid);
+  // After everything else, so a cascade that threw records nothing. Only once: a repeat finds no record.
+  // The anonymous id only, never the uid. Saved by the caller's save, like the rest of the cascade.
+  if (user) appendAudit('account.deletion_completed', { targetId: anonymousReporterId });
 };
 
 const runAccountCascade = (uid) => {
@@ -2308,13 +2493,15 @@ const deleteFirebaseUser = async (uid) => {
 };
 
 // Finished: the pending entry becomes a tombstone. Without Firebase nothing can use a tombstone.
+// The tombstone drops the anonymous id, so nothing links the uid to it once the deletion is done.
 const settleAccountDeletion = (uid) => {
+  const pendingEntry = pendingAccountDeletions.find((entry) => entry.uid === uid && entry.until === undefined) ?? { uid };
   removeAccountDeletionEntries(uid);
   if (firebaseAuth) pendingAccountDeletions.push({ uid, until: Date.now() + ACCOUNT_TOMBSTONE_MS });
   if (saveDb()) return;
   // A failed save leaves the pending entry in the file, so it must stay in memory too.
   removeAccountDeletionEntries(uid);
-  pendingAccountDeletions.push({ uid });
+  pendingAccountDeletions.push(pendingEntry);
 };
 
 // Resolves to whether a Firebase user was removed, never rejects, and runs once per uid at a time.
@@ -2571,6 +2758,8 @@ app.post('/api/auth/mobile', async (req, res) => {
   if (bumpsSessionGen) {
     user.sessionGen = getSessionGen(user) + 1;
     user.emailVerified = true;
+    // Kept with the bump when the save fails (see below), so the next save records the bump that stays.
+    appendAudit('auth.session_revoked', { actorId: verifiedUid });
   }
   if (isStrongFederatedSignIn && !user.federatedVerifiedAt) user.federatedVerifiedAt = new Date().toISOString();
   // Not rolled back when the save fails, like the rest of sign-in: earlier JWTs stay logged out in
@@ -2717,7 +2906,10 @@ app.post('/api/users/:id/acknowledgements', requireAuth, (req, res) => {
     delete user.noticePending;
     // The user's open reports may now count towards an auto-hide.
     markReportsChanged();
+    // Only a new, higher version is an acceptance; ending the hidden state alone is not.
+    const undoAudit = version > storedVersion ? appendAudit('ack.privacy_accepted', { actorId: user.id, meta: { version } }) : null;
     if (!saveDbOrRespond(res)) {
+      undoAudit?.();
       markReportsChanged();
       if (previousVersion === undefined) delete user.privacyNoticeVersion;
       else user.privacyNoticeVersion = previousVersion;
@@ -2733,7 +2925,9 @@ app.post('/api/users/:id/acknowledgements', requireAuth, (req, res) => {
   if (isAgeConfirmed(user.id)) return res.json(toOwnerUser(user));
   const previousConfirmedAt = user.ageConfirmedAt;
   user.ageConfirmedAt = new Date().toISOString();
+  const undoAudit = appendAudit('ack.age_confirmed', { actorId: user.id });
   if (!saveDbOrRespond(res)) {
+    undoAudit();
     if (previousConfirmedAt === undefined) delete user.ageConfirmedAt;
     else user.ageConfirmedAt = previousConfirmedAt;
     return;
@@ -2795,8 +2989,12 @@ const deleteAccountDurably = async (uid, res) => {
   // A tombstone from an earlier account with this uid is replaced, and comes back if this save fails.
   const previousEntries = [...pendingAccountDeletions];
   removeAccountDeletionEntries(uid);
-  pendingAccountDeletions.push({ uid });
+  // anonId: chosen once and saved with the entry, so a retried cascade uses the same id in the reports and the audit log.
+  pendingAccountDeletions.push({ uid, anonId: newDeletionAnonId() });
+  // Removed again by the cascade below, with the user's other own entries.
+  const undoAudit = appendAudit('account.deletion_requested', { actorId: uid });
   if (!saveDbOrRespond(res)) {
+    undoAudit();
     pendingAccountDeletions.splice(0, pendingAccountDeletions.length, ...previousEntries);
     return;
   }
@@ -3962,6 +4160,8 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
   }
   const forcePermanent = permanent === true;
   const skipsSuspension = Boolean(userToSuspend) && isAlreadySuspended(userToSuspend, forcePermanent);
+  // Whose content it was, read before the removal below. Undefined once the content is gone.
+  const targetOwnerId = findReportTargetOwnerId(report);
 
   const undoRemoval = action === 'dismiss' ? null : removeReportTarget(report);
   const removed = Boolean(undoRemoval); // false for a target that was already gone
@@ -3982,7 +4182,18 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
   const undoSuspension = userToSuspend && !skipsSuspension
     ? suspendUser(userToSuspend, req.userId, `report ${report.id}: ${report.reason}`, { forcePermanent })
     : null;
+  const undoAudits = [appendAudit('admin.report_resolved', {
+    actorId: req.userId,
+    targetId: typeof targetOwnerId === 'string' ? targetOwnerId : null,
+    meta: { reportId: report.id, action, resolvedCount: resolved.length },
+  })];
+  if (undoSuspension) {
+    undoAudits.push(appendAudit('admin.user_suspended', {
+      actorId: req.userId, targetId: userToSuspend.id, meta: { permanent: getActiveSuspension(userToSuspend)?.permanent === true },
+    }));
+  }
   if (!saveDbOrRespond(res)) {
+    for (const undo of undoAudits.reverse()) undo();
     undoSuspension?.();
     undoRemoval?.();
     resolved.forEach((item, index) => {
@@ -4024,7 +4235,12 @@ app.post('/api/admin/users/:id/suspend', requireAuth, requireAdmin, (req, res) =
     return res.status(409).json({ error: ALREADY_SUSPENDED_MESSAGE, code: 'already_suspended', ...toAdminSuspensionResult(user) });
   }
   const undoSuspension = suspendUser(user, req.userId, sanitizeOptional(reason, SUSPENSION_REASON_MAX_LENGTH), { forcePermanent });
+  // The reason stays in the user's history only, never in the audit log.
+  const undoAudit = appendAudit('admin.user_suspended', {
+    actorId: req.userId, targetId: user.id, meta: { permanent: getActiveSuspension(user)?.permanent === true },
+  });
   if (!saveDbOrRespond(res)) {
+    undoAudit();
     undoSuspension();
     return;
   }
@@ -4046,11 +4262,25 @@ app.post('/api/admin/users/:id/unsuspend', requireAuth, requireAdmin, (req, res)
   user.suspensions = getSuspensionHistory(user).map((entry) => (
     entry === active ? { ...entry, endedAt, endedBy: req.userId, ...(isVoid === true && { voided: true }) } : entry
   ));
+  const undoAudit = appendAudit('admin.user_unsuspended', { actorId: req.userId, targetId: user.id, meta: { void: isVoid === true } });
   if (!saveDbOrRespond(res)) {
+    undoAudit();
     user.suspensions = previous;
     return;
   }
   res.json(toAdminSuspensionResult(user));
+});
+
+// Admin only, no screen yet. Newest first, paged ({ items, nextCursor }); ?action= must be one of
+// AUDIT_ACTIONS (400 otherwise). Entries hold ids only, never names or emails.
+app.get('/api/admin/audit', requireAuth, requireAdmin, (req, res) => {
+  const page = parsePageParams(req.query);
+  if (!page) return respondInvalidPage(res);
+  const { action } = req.query;
+  if (action !== undefined && !(typeof action === 'string' && AUDIT_ACTIONS.has(action))) {
+    return res.status(400).json({ error: 'Invalid action' });
+  }
+  res.json(listAuditEntries({ action, ...page }));
 });
 
 // ── AI endpoints (off unless AI_ENABLED=true; the client flags are separate) ───
@@ -4479,11 +4709,21 @@ function purgeExpiredDbBackups() {
   return removeDbBackupsPastDeadline((backup) => backup.expiresAt, 'Removed an expired backup');
 }
 
+// Runs with the backup purge timer. Saves only when an entry went; a failed save is logged and the
+// entries go with the next save.
+const purgeExpiredAuditEntries = () => {
+  const removed = pruneAuditLog();
+  if (removed > 0 && saveDb()) console.log(`[audit] Removed ${removed} entr${removed === 1 ? 'y' : 'ies'} past the ${AUDIT_RETENTION_DAYS}-day retention.`);
+};
+
 // Every 24 hours, or sooner when a backup expires sooner, so none outlives the period by up to a day.
 // unref: this timer alone never keeps the process alive.
 function scheduleDbBackupPurge(nextExpiry) {
   const wait = Math.max(DB_BACKUP_PURGE_MIN_WAIT_MS, Math.min(DB_BACKUP_PURGE_INTERVAL_MS, nextExpiry - Date.now()));
-  setTimeout(() => scheduleDbBackupPurge(purgeExpiredDbBackups()), wait).unref();
+  setTimeout(() => {
+    purgeExpiredAuditEntries();
+    scheduleDbBackupPurge(purgeExpiredDbBackups());
+  }, wait).unref();
 }
 
 // A start that lost its data purges only past the ceiling: an operator may need the rest to recover, so

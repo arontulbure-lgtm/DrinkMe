@@ -46,6 +46,9 @@ const FULL_DB = {
   // Recent, because an expired request is dropped at load.
   partnerRequestsByUser: { 'round-trip-2': [{ fromId: 'round-trip-1', createdAt: new Date().toISOString() }] },
   pendingAccountDeletions: [],
+  // Recent, because an entry past the 90-day retention is pruned at load.
+  auditLog: [{ id: 1, at: new Date().toISOString(), action: 'admin.user_suspended', actorId: 'round-trip-1', targetId: 'round-trip-2', meta: { permanent: false } }],
+  nextAuditId: 2,
 };
 
 // Stat only: the real database must never be read.

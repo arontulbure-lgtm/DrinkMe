@@ -113,6 +113,16 @@ const makeFixture = () => ({
     { id: 8, reporterId: CAROL, targetType: 'drink', targetId: 20, reason: 'other', details: 'kept report', status: 'open', createdAt: recent() },
   ],
   pendingAccountDeletions: [],
+  // The victim's own entries, an admin action about them, one they took as an admin, and Bob's own entry.
+  auditLog: [
+    { id: 1, at: recent(), action: 'ack.age_confirmed', actorId: VICTIM, targetId: null },
+    { id: 2, at: recent(), action: 'ack.privacy_accepted', actorId: VICTIM, targetId: null, meta: { version: 1 } },
+    { id: 3, at: recent(), action: 'auth.session_revoked', actorId: VICTIM, targetId: null },
+    { id: 4, at: recent(), action: 'admin.user_suspended', actorId: CAROL, targetId: VICTIM, meta: { permanent: false } },
+    { id: 5, at: recent(), action: 'admin.report_resolved', actorId: VICTIM, targetId: BOB, meta: { reportId: 7, action: 'dismiss' } },
+    { id: 6, at: recent(), action: 'ack.age_confirmed', actorId: BOB, targetId: null },
+  ],
+  nextAuditId: 7,
 });
 
 const statReal = (target) => {
@@ -222,13 +232,21 @@ const waitForDb = async (dbFile, check, label) => {
   }, label);
 };
 
+// An unfinished entry made by the route carries the anonymous id its cascade uses; checked, then left out.
+const pendingWithoutAnonId = (db) => db.pendingAccountDeletions.map(({ anonId, ...entry }) => {
+  if (entry.until === undefined) assert.match(anonId, /^deleted-[0-9a-f]{16}$/);
+  else assert.equal(anonId, undefined, 'a tombstone keeps no anonymous id');
+  return entry;
+});
 const isSettledDb = (db) => db.pendingAccountDeletions.every((entry) => entry.until !== undefined);
 
-// The pending list is checked apart: a tombstone holds the uid, and nothing else.
+// The pending list is checked apart: a tombstone holds the uid and until, and nothing else; an unfinished
+// entry holds the uid and the anonymous id its cascade uses (anonId).
 const assertNoTrace = (dbFile, traces = VICTIM_TRACES) => {
   const { pendingAccountDeletions, ...rest } = readDb(dbFile);
   for (const entry of pendingAccountDeletions) {
-    assert.deepEqual(Object.keys(entry).filter((key) => key !== 'until'), ['uid']);
+    if (entry.until !== undefined) assert.deepEqual(Object.keys(entry).sort(), ['uid', 'until']);
+    else assert.deepEqual(Object.keys(entry).filter((key) => key !== 'anonId'), ['uid']);
   }
   const raw = JSON.stringify(rest);
   for (const trace of traces) assert.ok(!raw.includes(trace), `the saved file still holds ${trace}`);
@@ -290,6 +308,15 @@ test('dev mode: every trace of the user goes, other users\' data stays correct, 
   assert.deepEqual(db.pendingAccountDeletions, []);
   assertNoTrace(dbFile);
   assertOthersIntact(dbFile, ['reader-uid']);
+  // Audit log (SEC-H): the victim's own entries go, the deletion request included. Admin entries keep the
+  // anonymous id of their open report, and the completion names that id only.
+  const anonymousId = db.reports.find((r) => r.id === 1).reporterId;
+  assert.deepEqual(db.auditLog.map(({ id, action, actorId, targetId }) => ({ id, action, actorId, targetId })), [
+    { id: 4, action: 'admin.user_suspended', actorId: CAROL, targetId: anonymousId },
+    { id: 5, action: 'admin.report_resolved', actorId: anonymousId, targetId: BOB },
+    { id: 6, action: 'ack.age_confirmed', actorId: BOB, targetId: null },
+    { id: 8, action: 'account.deletion_completed', actorId: null, targetId: anonymousId },
+  ]);
 
   await waitFor(() => getOutput().includes('delete-account'), 'the request log line');
   const output = getOutput().slice(outputBefore);
@@ -557,7 +584,7 @@ test('a Firebase failure says so, keeps the entry, refuses sign-in, and a sign-i
   const result = await deleteAccount(baseUrl, VICTIM, token, stubToken(VICTIM));
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, { deleted: true, firebaseDeleted: false }, 'never a false success');
-  assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid: VICTIM }]);
+  assert.deepEqual(pendingWithoutAnonId(readDb(dbFile)), [{ uid: VICTIM }]);
   assertOthersIntact(dbFile);
   assertNoTrace(dbFile, VICTIM_TRACES.filter((trace) => trace !== VICTIM));
   await waitFor(() => getOutput().includes('deleteUser failed'), 'the failure log line');
@@ -570,7 +597,7 @@ test('a Firebase failure says so, keeps the entry, refuses sign-in, and a sign-i
   await waitFor(() => deleteCalls(dbFile).length === 2, 'the retry');
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.ok(!readDb(dbFile).users.some((u) => u.id === VICTIM));
-  assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid: VICTIM }]);
+  assert.deepEqual(pendingWithoutAnonId(readDb(dbFile)), [{ uid: VICTIM }]);
 
   // An unverified token learns nothing and causes no retry.
   assert.equal((await post(baseUrl, '/api/auth/mobile', { idToken: 'bad', uid: VICTIM })).status, 401);
@@ -619,7 +646,7 @@ test('a Firebase failure is retried at the next start', async (t) => {
   // Still failing at this start: nothing is lost.
   await server.restart();
   await waitFor(() => deleteCalls(dbFile).length === 2, 'the startup retry');
-  assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid: VICTIM }]);
+  assert.deepEqual(pendingWithoutAnonId(readDb(dbFile)), [{ uid: VICTIM }]);
   assert.equal((await firebaseSignIn(baseUrl, VICTIM)).status, 410);
 
   setDeleteMode(dbFile, null);
@@ -789,7 +816,7 @@ test('a failed save after Firebase succeeded keeps the entry on disk, and the ne
 
   const result = await deleteAccount(baseUrl, VICTIM, token, stubToken(VICTIM));
   assert.deepEqual(result.body, { deleted: true, firebaseDeleted: true });
-  assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid: VICTIM }]);
+  assert.deepEqual(pendingWithoutAnonId(readDb(dbFile)), [{ uid: VICTIM }]);
 
   fs.rmSync(marker(dbFile, '.fail-saves'));
   setDeleteMode(dbFile, 'not-found');
@@ -813,7 +840,7 @@ test('Firebase mode: a cascade that fails says so and blocks the JWT, and the si
   assert.equal(failed.status, 500);
   assert.equal(failed.body.code, 'account_deletion_incomplete');
   assert.ok(!('deleted' in failed.body));
-  assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid }], 'the entry must survive');
+  assert.deepEqual(pendingWithoutAnonId(readDb(dbFile)), [{ uid }], 'the entry must survive');
 
   // The record is still there, but the old JWT reads and writes nothing, and cannot repeat the request.
   assert.equal((await get(baseUrl, '/api/smart-bar', token)).status, 401);
@@ -823,7 +850,7 @@ test('Firebase mode: a cascade that fails says so and blocks the JWT, and the si
   // Still failing: refused, and the entry stays even though Firebase accepted the deletion.
   assert.equal((await firebaseSignIn(baseUrl, uid)).status, 410);
   await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.deepEqual(readDb(dbFile).pendingAccountDeletions, [{ uid }], 'an unfinished cascade must not clear');
+  assert.deepEqual(pendingWithoutAnonId(readDb(dbFile)), [{ uid }], 'an unfinished cascade must not clear');
 
   fs.rmSync(marker(dbFile, '.fail-cascade'));
   assert.equal((await firebaseSignIn(baseUrl, uid)).status, 410);

@@ -197,6 +197,35 @@ export interface AdminSuspensionResult {
   code?: 'already_suspended'; // resolve only, when applied is false
 }
 
+// Unused until an admin screen exists. GET /api/admin/audit?action=&limit=&before= answers Page<AuditEntry>,
+// newest first; an unknown action is 400. Must match AUDIT_META_KEYS in server/server.js. Kept 90 days.
+export type AuditAction =
+  | 'ack.age_confirmed'
+  | 'ack.privacy_accepted'
+  | 'auth.session_revoked'
+  | 'account.deletion_requested'
+  | 'account.deletion_completed'
+  | 'admin.report_resolved'
+  | 'admin.user_suspended'
+  | 'admin.user_unsuspended';
+
+// actorId and targetId are uids, a `deleted-<hex>` id after an account deletion, or null.
+export interface AuditEntry {
+  id: number;
+  at: string; // ISO date
+  action: AuditAction;
+  actorId: string | null;
+  targetId: string | null;
+  meta?: {
+    version?: number; // ack.privacy_accepted
+    reportId?: number; // admin.report_resolved
+    action?: 'dismiss' | 'remove_content' | 'clear_profile'; // admin.report_resolved
+    resolvedCount?: number; // admin.report_resolved: open reports on the same target it closed
+    permanent?: boolean; // admin.user_suspended
+    void?: boolean; // admin.user_unsuspended
+  };
+}
+
 export interface SmartBarItem {
   id: number;
   name: string;
