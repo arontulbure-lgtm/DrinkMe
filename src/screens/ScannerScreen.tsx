@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 
-// ── Beta flag — set to false to re-enable AI features ────────────────────────
+// ── Beta flag — set to true to re-enable AI features ────────────────────────
 const AI_ENABLED = false;
 
 export default function ScannerScreen() {

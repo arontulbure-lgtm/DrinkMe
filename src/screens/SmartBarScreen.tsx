@@ -17,8 +17,6 @@ import LoadMoreButton from '../components/LoadMoreButton';
 import PostActionsSheet from '../components/PostActionsSheet';
 import { TabScreenProps } from '../navigation/types';
 
-// ── Beta flag — set to false to re-enable AI recipe generation ────────────────
-const AI_RECIPES_ENABLED = false;
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -28,6 +26,9 @@ import { Drink, Page, SmartBarItem, Recipe } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
+
+// ── Beta flag — set to true to re-enable AI recipe generation ────────────────
+const AI_RECIPES_ENABLED = false;
 
 type Tab = 'inventory' | 'recipes' | 'saved';
 
@@ -202,23 +203,25 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
 
   const allSelected = inventory.length > 0 && inventory.every((item) => selectedIds.has(item.id));
 
-  const handleSelectAll = () => {
+  const handleSelectAll = useCallback(() => {
     if (allSelected) {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(inventory.map((item) => item.id)));
     }
-  };
+  }, [allSelected, inventory]);
 
-  const handleGenerateRecipes = () => {
+  // mutate is stable across renders (TanStack Query v5), unlike the mutation result object.
+  const generateRecipes = generateRecipesMutation.mutate;
+  const handleGenerateRecipes = useCallback(() => {
     const selectedItems = inventory.filter((item) => selectedIds.has(item.id));
     if (selectedItems.length === 0) {
       Alert.alert(t('smartBar.generateRecipes'), t('smartBar.selectIngredientsHint'));
       return;
     }
     const ingredientNames = selectedItems.map((item) => item.name);
-    generateRecipesMutation.mutate(ingredientNames);
-  };
+    generateRecipes(ingredientNames);
+  }, [generateRecipes, inventory, selectedIds, t]);
 
   const { toggleCheer, toggleSave } = useDrinkToggles();
 

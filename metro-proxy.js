@@ -51,7 +51,7 @@ function rewriteManifest(body) {
     if (json.packagerOpts) json.packagerOpts = json.packagerOpts;
 
     return JSON.stringify(json);
-  } catch (e) {
+  } catch {
     return body;
   }
 }
