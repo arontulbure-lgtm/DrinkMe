@@ -668,8 +668,12 @@ test('a token issued before the deletion cannot bring the account back, even dur
   assert.equal((await firebaseSignIn(baseUrl, VICTIM, { iat: undefined })).status, 410);
   assertNoTrace(dbFile);
 
-  // A genuinely new user is not held up by the outage.
-  assert.equal((await firebaseSignIn(baseUrl, 'brand-new-uid')).status, 200);
+  // Every other sign-in fails closed during the outage (the password-reset check needs the lookup), and
+  // creates nothing.
+  const outage = await firebaseSignIn(baseUrl, 'brand-new-uid');
+  assert.equal(outage.status, 503);
+  assert.equal(outage.body.code, 'auth_unavailable');
+  assert.ok(!readDb(dbFile).users.some((user) => user.id === 'brand-new-uid'));
 
   // Within the clock margin the delete route accepts, a token still counts as from before.
   assert.equal((await firebaseSignIn(baseUrl, VICTIM, { iat: nowSeconds(30_000) })).status, 410);
@@ -744,9 +748,19 @@ test('while a uid is pending it reads as not found to others, as a user and as a
   assert.ok(!(await get(baseUrl, '/api/drink-partners', (await firebaseSignIn(baseUrl, BOB)).body.token)).body.some((user) => user.id === uid));
 });
 
-test('an existing user\'s sign-in does not depend on the Firebase user lookup', async (t) => {
+// Owner decision of 2026-11-12: every sign-in looks the user up (password reset check), so an existing
+// user is refused too when Firebase has no such user (410) or the lookup fails (503).
+test('an existing user\'s sign-in depends on the Firebase user lookup', async (t) => {
   const { baseUrl, dbFile } = await startOn(t, firebaseEnv, { dbFixture: makeFixture() });
   fs.writeFileSync(marker(dbFile, '.stub-user-gone'), '');
+  const gone = await firebaseSignIn(baseUrl, BOB);
+  assert.equal(gone.status, 410);
+  assert.equal(gone.body.code, 'account_deleted');
+  fs.writeFileSync(marker(dbFile, '.stub-user-gone'), 'outage');
+  const outage = await firebaseSignIn(baseUrl, BOB);
+  assert.equal(outage.status, 503);
+  assert.equal(outage.body.token, undefined);
+  fs.rmSync(marker(dbFile, '.stub-user-gone'));
   assert.equal((await firebaseSignIn(baseUrl, BOB)).status, 200);
 });
 

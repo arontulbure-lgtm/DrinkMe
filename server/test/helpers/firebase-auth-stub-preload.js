@@ -5,6 +5,11 @@
 //   .stub-user-gone makes getUser report that the user does not exist, or fail if it holds outage.
 //   .stub-user-email-verified makes getUser report a confirmed address.
 //   .stub-get-user-delay holds a wait in ms for the next getUser call only.
+//   .stub-tokens-valid-after holds the user's tokensValidAfterTime (any string, normally a UTC date); with
+//     no file getUser reports none. Moving it forward stands for a password reset. It is read when the
+//     call starts, before any .stub-get-user-delay wait.
+//   .stub-user-disabled makes getUser report a disabled user.
+//   .stub-get-user-calls receives one line per getUser call.
 //   .stub-revoked makes verifyIdToken refuse any token when asked to check revocation.
 //   .stub-delete-calls receives one line per deleteUser call.
 import { register } from 'node:module';
@@ -22,6 +27,10 @@ const STUB_URL = toDataUrl(`
       return JSON.parse(idToken.slice('stub:'.length));
     },
     getUser: async (uid) => {
+      fs.appendFileSync(marker('.stub-get-user-calls'), uid + String.fromCharCode(10));
+      // Read before the delay, like a real lookup answered before a reset that lands while it travels back.
+      const validAfterFile = marker('.stub-tokens-valid-after');
+      const validAfter = fs.existsSync(validAfterFile) ? fs.readFileSync(validAfterFile, 'utf8') : undefined;
       if (fs.existsSync(marker('.stub-get-user-delay'))) {
         const wait = Number(fs.readFileSync(marker('.stub-get-user-delay'), 'utf8'));
         fs.rmSync(marker('.stub-get-user-delay'));
@@ -30,7 +39,12 @@ const STUB_URL = toDataUrl(`
       if (fs.existsSync(marker('.stub-user-gone'))) {
         throw fail(fs.readFileSync(marker('.stub-user-gone'), 'utf8') === 'outage' ? 'auth/internal-error' : 'auth/user-not-found', uid);
       }
-      return { uid, emailVerified: fs.existsSync(marker('.stub-user-email-verified')) };
+      return {
+        uid,
+        emailVerified: fs.existsSync(marker('.stub-user-email-verified')),
+        disabled: fs.existsSync(marker('.stub-user-disabled')),
+        ...(validAfter !== undefined && { tokensValidAfterTime: validAfter }),
+      };
     },
     deleteUser: async (uid) => {
       fs.appendFileSync(marker('.stub-delete-calls'), uid + String.fromCharCode(10));

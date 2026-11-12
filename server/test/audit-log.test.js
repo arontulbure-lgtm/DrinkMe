@@ -24,7 +24,7 @@ const ENTRY_KEYS = new Set(['id', 'at', 'action', 'actorId', 'targetId', 'meta']
 const META_KEYS = {
   'ack.age_confirmed': [],
   'ack.privacy_accepted': ['version'],
-  'auth.session_revoked': [],
+  'auth.session_revoked': ['reason'],
   'account.deletion_requested': [],
   'account.deletion_completed': [],
   'admin.report_resolved': ['action', 'reportId', 'resolvedCount'],

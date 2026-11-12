@@ -233,7 +233,8 @@ export function isStaleJwtError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401 && error.code === undefined;
 }
 
-// Translation key for the session error screen. 503 is a failed save or missing Firebase key, 507 is full storage.
+// Translation key for the session error screen. 503 is a failed save, a missing Firebase key or a failed
+// Firebase user lookup at sign-in (code auth_unavailable, retryable); 507 is full storage.
 export function getSessionErrorKey(error: unknown): string {
   if (!(error instanceof ApiError)) return 'session.errorBody';
   if (error.status === 503 || error.status === 507) return 'common.serviceUnavailable';

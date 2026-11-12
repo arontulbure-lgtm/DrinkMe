@@ -73,9 +73,14 @@ Email takeover guard (works with `REQUIRE_VERIFIED_EMAIL` on or off):
 - It raises `sessionGen` (logging out every earlier JWT) when the stored state is unverified, or on the account's first federated sign-in (`federatedVerifiedAt` is then set). The bump is not rolled back on a failed save, on purpose.
 - It also sets the auth floor `verifiedAuthFloor` (password: its `auth_time`; federated: `iat + 1`; also on a new account's strong sign-in). A password token whose `auth_time` is below the floor gets 403 `sign_in_again`, checked before anything is written.
 - With the flag off, a verified but not strong token gets a JWT without `ev` and the stored state stays unverified. Once `federatedVerifiedAt` is set, an unverified token cannot lower the stored verified state.
+Password reset ends the server session (Firebase mode, owner decision of 2026-11-12):
+- Every sign-in makes one `getUser(uid)` call (`lookUpFirebaseUser`) after the token check and the deletion and growth checks. With `REQUIRE_VERIFIED_EMAIL` off it is the only Firebase call: `verifyIdToken(idToken, true)` would do the same lookup inside firebase-admin and not return the value. Failed lookup or unreadable date: 503 `auth_unavailable`, no JWT, nothing written (fails closed, also for new users). No such user: 410 `account_deleted`; disabled: 401 (same body as an invalid token). For an existing live account both also raise `sessionGen` once per state (`firebaseSessionEndedReason`, cleared by the next good lookup), in their own save, with `auth.session_revoked` `reason: 'account_gone'` / `'account_disabled'`; a brand-new uid writes nothing. An ID token whose `auth_time` (missing counts as before) is before `tokensValidAfterTime` (Firebase's answer, or the stored value when a concurrent sign-in stored a newer one during the lookup): 401.
+- `user.tokensValidAfterSeen` (ms since epoch; 0 = looked up, Firebase reported none; missing = never looked up). Newer Firebase value than the stored one: `sessionGen` + 1 (one bump even when the takeover guard bumps too) and `auth.session_revoked` with `meta.reason: 'tokens_revoked'`. First lookup of an existing account (nothing stored): bumps only if the Firebase value is later than `lastIdTokenIat` (the iat of the last accepted ID token sign-in, so no JWT is newer), otherwise only stores. A new account stores without a bump. The bump is applied right after the revocation checks, before the 403 answers (`sign_in_again`, `email_not_verified`), which save it too. Kept on a failed save like the other bump, so a retry does not bump again. Never in a response or a log line; leaves with the user record on account deletion.
+- With `REQUIRE_VERIFIED_EMAIL` on, the flag's own `verifyIdToken(idToken, true)` still runs, so that mode makes two Firebase calls per sign-in.
+- Dev mode (`ALLOW_INSECURE_DEV_AUTH`) makes no lookup and stores nothing.
 - Limit: the floor covers password sessions only. If Firebase lets an attacker link another provider with a different email before the relink, it passes; check on the real project before enabling more providers.
 
-Sign-in answers 410 `account_deleted` for a pending deletion or a token issued before a deletion finished, 403 `sign_in_again` for a password token below the auth floor, and 507 `storage_full` for a new user when the database is full. With `REQUIRE_VERIFIED_EMAIL` on it can also answer 403 `email_not_verified` or `sign_in_again` for other reasons (see the rollout note).
+Sign-in answers 410 `account_deleted` for a pending deletion, a token issued before a deletion finished or a uid Firebase does not know, 503 `auth_unavailable` when the Firebase lookup fails, 401 for a token issued before `tokensValidAfterTime`, 403 `sign_in_again` for a password token below the auth floor, and 507 `storage_full` for a new user when the database is full. With `REQUIRE_VERIFIED_EMAIL` on it can also answer 403 `email_not_verified` or `sign_in_again` for other reasons (see the rollout note).
 New accounts are stored with `noticePending` and `createdAt`, and look blank to others (no name, city, bio or avatar, and left out of search) until the owner accepts the privacy notice.
 
 ## Sign-in and age gate (alcohol policy rule 1, enforced here)
@@ -91,7 +96,7 @@ Owner decision: nothing is readable without signing in, and nothing but the firs
 
 ## Audit log (T6-1, SEC-H)
 - `auditLog` in the database: `{ id, at, action, actorId, targetId, meta? }`. Ids are uids, a `deleted-<hex>` id or null. Never stored: IP, user agent, email, names, report or suspension reason text, tokens or request bodies. Refused sign-ins are not logged.
-- 8 actions (`AUDIT_META_KEYS` lists the only meta keys each may keep): `ack.age_confirmed`, `ack.privacy_accepted` (`version`), `auth.session_revoked` (a `sessionGen` bump), `account.deletion_requested`, `account.deletion_completed`, `admin.report_resolved` (`reportId`, `action`, `resolvedCount`), `admin.user_suspended` (`permanent`), `admin.user_unsuspended` (`void`). `appendAudit` throws on any other action.
+- 8 actions (`AUDIT_META_KEYS` lists the only meta keys each may keep): `ack.age_confirmed`, `ack.privacy_accepted` (`version`), `auth.session_revoked` (a `sessionGen` bump; `reason`: `tokens_revoked` for the password-reset bump, `account_disabled` / `account_gone` when Firebase reports an existing account disabled or deleted, absent for the takeover guard's), `account.deletion_requested`, `account.deletion_completed`, `admin.report_resolved` (`reportId`, `action`, `resolvedCount`), `admin.user_suspended` (`permanent`), `admin.user_unsuspended` (`void`). `appendAudit` throws on any other action.
 - Written in the same save as its action and undone with it when that save fails. Allowed while the growth guard blocks writes, because both budgets are capped.
 - Retention 90 days (`AUDIT_RETENTION_DAYS`), pruned at load and by the 24-hour purge timer; backups add up to 30 days.
 - Two budgets, so users cannot push moderation records out: the user's own actions (`AUDIT_SELF_ACTIONS`: the two acknowledgements, `auth.session_revoked`, `account.deletion_requested`) keep their newest 15,000 (`AUDIT_USER_MAX_ENTRIES`) among themselves; admin entries and completed deletions have a separate safety cap of 20,000 (`AUDIT_SYSTEM_MAX_ENTRIES`). Eviction is undone with a failed save.
@@ -226,7 +231,8 @@ Errors are `{ error, code? }`. Only the app's own messages reach clients; other 
 | 500 | `account_deletion_incomplete` | The deletion is retried in the background |
 | 502 | `ai_upstream_error`, `ai_invalid_output` | The AI call failed or its output was unusable |
 | 503 | `ai_disabled` | AI is off; checked after auth and before any upload is read |
-| 503 | none | Save failed, sign-in has no Firebase key, or a Firebase lookup failed |
+| 503 | `auth_unavailable` | Sign-in: the Firebase user lookup failed; retry |
+| 503 | none | Save failed, sign-in has no Firebase key, or another Firebase lookup failed |
 | 507 | `storage_full`, `image_storage_full`, `user_image_quota` | Storage limits above |
 
 ## AI
@@ -244,6 +250,7 @@ The server-side age gate now covers AI recipes. Do not set `AI_ENABLED=true` whe
 ## Security already in place - do not regress
 - `requireSignedInAdult` on `/api` and `/media` with the short exemption list above; requireAuth on every mutation except sign-in (401 on invalid token); getUserId() returns null on invalid tokens, unknown or deleting accounts and older session generations (no demo fallback).
 - Email takeover guard: `sg` / `sessionGen`, `federatedVerifiedAt` and the auth floor, with the flag on or off. Accounts matched by uid only.
+- Password reset check: one `getUser` per sign-in, `tokensValidAfterSeen`, fails closed (503 `auth_unavailable`).
 - Moderation: auto-hide after 3 counting reporters, suspensions via `refuseIfSuspended` (runs after requireAuth and ownership checks, before any body parser or upload), admins cannot be suspended.
 - Ownership checks (403) on profile edits, acknowledgements, avatars, saved lists, account deletion and post deletion.
 - Other users get the `toPublicUser` allowlist and owners get `toOwnerUser`; email goes only to the owner. Names derived from an email are hidden. Search terms and the uid in the account deletion URL stay out of request logs.
@@ -266,7 +273,9 @@ The server-side age gate now covers AI recipes. Do not set `AI_ENABLED=true` whe
 - The auth floor is password-only: check on the real Firebase project before enabling more sign-in providers.
 - Restoring an older `db.json` revives sessions logged out since the backup; rotate `JWT_SECRET` after a restore until a fix exists.
 - 3 colluding accounts that are 48 hours old and accepted the notice can still hide content until an admin reviews it.
-- A password reset does not end the 30-day server JWT, and reset is the recovery path users reach for after a compromise. Fix when approved: on sign-in, `getUser(uid)` and bump `sessionGen` when `tokensValidAfterTime` is newer than the stored value.
+- Password reset: earlier JWTs end at the owner's next sign-in after the reset, not at the reset itself (the app is signed out by Firebase then, so this follows quickly in practice). On an account's first lookup after the deploy, a reset is detected only against `lastIdTokenIat`; accounts with none (older records, dev mode) only store the value. `lastIdTokenIat` is also written by a refused flag-on `email_not_verified` sign-in, which can hide a reset between the last JWT and that refusal.
+- An account deleted in Firebase outside the app leaves an orphan server record (its sessions end at the next sign-in attempt, the data stays until a cleanup or deletion exists).
+- Every sign-in costs one Firebase `getUser`: the per-IP `/api` limiter (100 / 15 min) is the only throttle, so watch the Firebase Admin lookup quota at scale. No change for now.
 - Firebase Console (not code): email enumeration protection, a password policy with enforcement, restricting the Firebase web API key, and App Check before the public launch. The app's password-reset cooldown is not a security control.
 - Sign-up still says when an email is taken (Firebase does not hide it; accepted).
 - Later: refresh tokens, Firebase App Check.

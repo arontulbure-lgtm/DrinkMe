@@ -82,9 +82,10 @@ function isSignInAgainError(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'sign_in_again';
 }
 
-// Firebase no longer accepts this session, for example after the account was deleted on another device.
-// There is nothing to retry, so these sign out instead of showing the session error screen.
-const ENDED_FIREBASE_SESSION_CODES = new Set(['auth/user-token-expired', 'auth/user-not-found']);
+// Firebase no longer accepts this session, for example after the account was deleted on another device,
+// the password was reset or the account was disabled. There is nothing to retry, so these sign out instead
+// of showing the session error screen.
+const ENDED_FIREBASE_SESSION_CODES = new Set(['auth/user-token-expired', 'auth/user-not-found', 'auth/user-disabled']);
 
 function isEndedFirebaseSession(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code;
@@ -159,6 +160,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       return await requestToken(false);
     } catch (error) {
+      // A 401 can mean Firebase revoked this session (password reset elsewhere, account disabled) while a
+      // cached ID token was still in use. One forced refresh: a revoked session then fails in Firebase with
+      // auth/user-token-expired or auth/user-disabled, which signs out cleanly (isEndedFirebaseSession)
+      // instead of leaving the user on the session error screen. A second 401 is the server's answer.
+      if (error instanceof ApiError && error.status === 401) return requestToken(true);
       if (!isEmailNotVerifiedError(error)) throw error;
       // A cached token can be older than the opened link, and that user should not see the verify screen.
       // A failed check keeps the server's answer, which is the one that decides.

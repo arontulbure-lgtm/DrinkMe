@@ -1814,7 +1814,10 @@ const AUDIT_SYSTEM_MAX_ENTRIES = 20_000;
 const AUDIT_META_KEYS = {
   'ack.age_confirmed': [],
   'ack.privacy_accepted': ['version'],
-  'auth.session_revoked': [],
+  // reason: 'tokens_revoked' when Firebase revoked the refresh tokens (password reset or change, email
+  // change, revokeRefreshTokens); 'account_disabled' / 'account_gone' when Firebase reports the account
+  // disabled or deleted outside the app; absent for the email takeover guard's bump.
+  'auth.session_revoked': ['reason'],
   'account.deletion_requested': [],
   'account.deletion_completed': [],
   // resolvedCount: how many open reports on the same target the resolve closed.
@@ -2558,23 +2561,55 @@ const retryAccountDeletions = () => {
   }
 };
 
-// The tombstone covers tokens issued before a deletion. This also covers a tombstone lost with a
-// restored file. Any other failure lets sign-in go on: a Firebase outage or permission problem must not
-// stop every new sign-up.
-const isFirebaseUserGone = async (uid) => {
+// The one Firebase user lookup of a sign-in (Firebase mode only; owner decision of 2026-11-12). It answers:
+// - 'gone': Firebase has no such user. The tombstone covers tokens issued before a deletion; this also
+//   covers a tombstone lost with a restored file, and a user removed in the Firebase Console.
+// - 'unavailable': the lookup failed (network, outage, permissions) or returned an unreadable date. Sign-in
+//   fails closed, because without tokensValidAfterTime a password reset could not end older sessions.
+// - 'ok' with tokensValidAfterMs (ms since epoch, or null when Firebase reports none) and disabled.
+// tokensValidAfterTime moves forward whenever Firebase revokes the user's refresh tokens: a password reset
+// or change, an email change, or revokeRefreshTokens(). Only the error code is logged, never the value.
+const lookUpFirebaseUser = async (uid) => {
+  let record;
   try {
-    await firebaseAuth.getUser(uid);
-    return false;
+    record = await firebaseAuth.getUser(uid);
   } catch (err) {
-    if (err.code === 'auth/user-not-found') return true;
+    if (err.code === 'auth/user-not-found') return { status: 'gone' };
     console.warn('[firebase-admin] getUser failed:', err.code ?? err.name);
-    return false;
+    return { status: 'unavailable' };
   }
+  const disabled = record?.disabled === true;
+  const raw = record?.tokensValidAfterTime;
+  if (raw === undefined || raw === null || raw === '') return { status: 'ok', tokensValidAfterMs: null, disabled };
+  const tokensValidAfterMs = typeof raw === 'string' ? Date.parse(raw) : NaN;
+  if (!Number.isFinite(tokensValidAfterMs)) {
+    console.warn('[firebase-admin] getUser returned an unreadable tokensValidAfterTime.');
+    return { status: 'unavailable' };
+  }
+  return { status: 'ok', tokensValidAfterMs, disabled };
 };
 
 const respondAccountDeleted = (res) => res.status(410).json({
   error: 'This account has been deleted.',
   code: 'account_deleted',
+});
+
+// Firebase reports an existing, live account as disabled or gone (Console action): raise sessionGen so every
+// API JWT ends, once per state (firebaseSessionEndedReason, cleared by the next good lookup), in its own
+// save. A failed save keeps the bump in memory, like the other bumps. Writes nothing for an unknown uid.
+const endSessionsForFirebaseState = (uid, reason) => {
+  const user = userIndex.get(uid);
+  if (!user || !isLiveAccount(uid) || user.firebaseSessionEndedReason === reason) return;
+  user.sessionGen = getSessionGen(user) + 1;
+  user.firebaseSessionEndedReason = reason;
+  appendAudit('auth.session_revoked', { actorId: uid, meta: { reason } });
+  saveDb();
+};
+
+// Retryable: the client shows its session error screen with Retry.
+const respondAuthUnavailable = (res) => res.status(503).json({
+  error: 'Sign-in is temporarily unavailable. Please try again.',
+  code: 'auth_unavailable',
 });
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -2643,7 +2678,33 @@ app.post('/api/auth/mobile', async (req, res) => {
   if (firebaseAuth && isTokenFromBeforeDeletion(verifiedUid, issuedAtSeconds)) return respondAccountDeleted(res);
 
   if (!userIndex.has(verifiedUid) && isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
-  if (firebaseAuth && !userIndex.has(verifiedUid) && await isFirebaseUserGone(verifiedUid)) return respondAccountDeleted(res);
+  // ── Password reset ends the server session (Firebase mode only) ──
+  // One getUser per sign-in. With REQUIRE_VERIFIED_EMAIL off (the default) it is the only Firebase call:
+  // verifyIdToken(idToken, true) would make the same lookup inside firebase-admin and still not hand back
+  // tokensValidAfterTime, so it would cost a second call. With the flag on, the flag's own
+  // verifyIdToken(idToken, true) below still runs, so that mode makes two calls.
+  // The refusal below is the same rule firebase-admin applies for checkRevoked: a token whose auth_time
+  // is before tokensValidAfterTime was revoked, and a disabled user is refused.
+  let firebaseTokensValidAfterMs = null;
+  if (firebaseAuth) {
+    const lookup = await lookUpFirebaseUser(verifiedUid);
+    if (lookup.status === 'unavailable') return respondAuthUnavailable(res);
+    // Disabled or deleted outside the app (Firebase Console): every API session of an existing account
+    // ends too. The answers stay the usual ones, and a brand-new uid writes nothing.
+    if (lookup.status === 'gone') {
+      endSessionsForFirebaseState(verifiedUid, 'account_gone');
+      return respondAccountDeleted(res);
+    }
+    if (lookup.disabled) {
+      endSessionsForFirebaseState(verifiedUid, 'account_disabled');
+      return res.status(401).json({ error: 'Invalid Firebase ID token' });
+    }
+    firebaseTokensValidAfterMs = lookup.tokensValidAfterMs;
+    // Real ID tokens always carry auth_time; one without it cannot be checked, so it is refused.
+    const isRevokedToken = firebaseTokensValidAfterMs !== null
+      && !(Number.isFinite(authTimeSeconds) && authTimeSeconds * 1000 >= firebaseTokensValidAfterMs);
+    if (isRevokedToken) return res.status(401).json({ error: 'Invalid Firebase ID token' });
+  }
   // After the deletion checks, so a deleted account still gets 410. A failure here, including a Firebase
   // outage, refuses the sign-in.
   if (REQUIRE_VERIFIED_EMAIL && firebaseAuth && !(await verifyFirebaseToken(idToken, { checkRevoked: true }))) {
@@ -2653,6 +2714,39 @@ app.post('/api/auth/mobile', async (req, res) => {
   if (isAccountDeletionPending(verifiedUid) || (firebaseAuth && isTokenFromBeforeDeletion(verifiedUid, issuedAtSeconds))) return respondAccountDeleted(res);
 
   const existingUser = userIndex.get(verifiedUid);
+  // A concurrent sign-in may have stored a newer tokensValidAfterTime while this one waited for its lookup
+  // (the reset happened in between). The stored value is a Firebase value too, so the same rule applies.
+  if (
+    firebaseAuth && existingUser?.tokensValidAfterSeen > 0
+    && !(Number.isFinite(authTimeSeconds) && authTimeSeconds * 1000 >= existingUser.tokensValidAfterSeen)
+  ) {
+    return res.status(401).json({ error: 'Invalid Firebase ID token' });
+  }
+  // The token passed the revocation check. Firebase revoked the refresh tokens after the last value this
+  // server saw, so every earlier JWT is logged out. Applied here, before the 403 answers below, which then
+  // save it too: the revocation is real whatever happens to this sign-in.
+  // tokensValidAfterSeen is ms since epoch, or 0 for "looked up, Firebase reported none"; missing means
+  // never looked up. On that first lookup the value is compared with lastIdTokenIat (the iat of the last ID
+  // token sign-in accepted, so no JWT is newer): a revocation after it bumps, anything else is only stored,
+  // so the deploy logs out only accounts reset since their last sign-in. Repeated sign-ins see the stored
+  // value and bump nothing. Kept on a failed save like the takeover bump, so a retry does not bump again.
+  let revocationBumped = false;
+  if (firebaseAuth && existingUser) {
+    const storedTokensValidAfter = existingUser.tokensValidAfterSeen;
+    const hasStoredValue = Number.isFinite(storedTokensValidAfter);
+    const isNewerThanStored = hasStoredValue && firebaseTokensValidAfterMs !== null
+      && firebaseTokensValidAfterMs > storedTokensValidAfter;
+    const isRevokedSinceLastSignIn = !hasStoredValue && firebaseTokensValidAfterMs !== null
+      && Number.isFinite(existingUser.lastIdTokenIat) && firebaseTokensValidAfterMs > existingUser.lastIdTokenIat * 1000;
+    if (isNewerThanStored || isRevokedSinceLastSignIn) {
+      existingUser.sessionGen = getSessionGen(existingUser) + 1;
+      appendAudit('auth.session_revoked', { actorId: verifiedUid, meta: { reason: 'tokens_revoked' } });
+      revocationBumped = true;
+    }
+    if (!hasStoredValue || isNewerThanStored) existingUser.tokensValidAfterSeen = firebaseTokensValidAfterMs ?? 0;
+    // Firebase accepts the account again (re-enabled), so a later disable ends the sessions again.
+    delete existingUser.firebaseSessionEndedReason;
+  }
   const isStaleToken = Boolean(existingUser) && isOlderIdToken(existingUser, issuedAtSeconds);
   const isPasswordToken = signInProvider === 'password';
   // Strong: a confirmed address, and either a provider that confirmed it (Google, Apple) or a password
@@ -2678,11 +2772,13 @@ app.post('/api/auth/mobile', async (req, res) => {
   // a strong verified sign-in raises it and logs out every earlier JWT, and the auth floor then refuses
   // the password session that was kept. Written from the documented Firebase claims (see the flag notes).
   // The floor comes first, before the flag-on branch below can write anything: a replayed password token
-  // from before the owner's sign-in must not change the stored state or log the owner out.
+  // from before the owner's sign-in must not change the stored state or log the owner out. Only a Firebase
+  // revocation applied above is saved here, because it holds whatever this token is.
   if (
     firebaseAuth && isPasswordToken && Number.isFinite(existingUser?.verifiedAuthFloor)
     && !(authTimeSeconds >= existingUser.verifiedAuthFloor)
   ) {
+    if (revocationBumped) saveDb();
     return res.status(403).json({ error: 'Please sign in again.', code: 'sign_in_again' });
   }
   // Once the owner has signed in through a provider that confirms the address, an unverified token
@@ -2694,11 +2790,12 @@ app.post('/api/auth/mobile', async (req, res) => {
   if (REQUIRE_VERIFIED_EMAIL && firebaseAuth) {
     if (!emailVerified) {
       // An unknown uid leaves nothing behind. A known one loses access now, even if this save fails.
-      if (existingUser && !isStaleToken && !keepsVerifiedState && existingUser.emailVerified !== false) {
+      const losesVerifiedState = existingUser && !isStaleToken && !keepsVerifiedState && existingUser.emailVerified !== false;
+      if (losesVerifiedState) {
         existingUser.emailVerified = false;
         if (Number.isFinite(issuedAtSeconds)) existingUser.lastIdTokenIat = issuedAtSeconds;
-        saveDb();
       }
+      if (losesVerifiedState || revocationBumped) saveDb();
       return res.status(403).json({ error: 'Please confirm your email address.', code: 'email_not_verified' });
     }
     // A wrong clock on either side would refuse every password sign-in here, so it should be visible.
@@ -2717,6 +2814,7 @@ app.post('/api/auth/mobile', async (req, res) => {
     const isBelowFloor = isPasswordToken && hasAuthFloor && !(authTimeSeconds >= existingUser.verifiedAuthFloor);
     const isNotFreshEnough = establishesAuthFloor && (typeof signInProvider !== 'string' || (isPasswordToken && !isRecentTokenTime(authTimeSeconds)));
     if (isBelowFloor || isNotFreshEnough) {
+      if (revocationBumped) saveDb();
       return res.status(403).json({ error: 'Please sign in again.', code: 'sign_in_again' });
     }
   }
@@ -2755,12 +2853,15 @@ app.post('/api/auth/mobile', async (req, res) => {
     if (Number.isFinite(floor)) user.verifiedAuthFloor = Math.max(floor, user.verifiedAuthFloor ?? floor);
   }
   // A stale strong token does not update the stored state in registerUserIfNeeded, so it is set here.
-  if (bumpsSessionGen) {
+  if (bumpsSessionGen) user.emailVerified = true;
+  // One bump and one entry even when the password-reset bump above already applied (its entry has the reason).
+  if (bumpsSessionGen && !revocationBumped) {
     user.sessionGen = getSessionGen(user) + 1;
-    user.emailVerified = true;
     // Kept with the bump when the save fails (see below), so the next save records the bump that stays.
     appendAudit('auth.session_revoked', { actorId: verifiedUid });
   }
+  // A new account stores the value without a bump (an existing one was handled above).
+  if (firebaseAuth && !existingUser) user.tokensValidAfterSeen = firebaseTokensValidAfterMs ?? 0;
   if (isStrongFederatedSignIn && !user.federatedVerifiedAt) user.federatedVerifiedAt = new Date().toISOString();
   // Not rolled back when the save fails, like the rest of sign-in: earlier JWTs stay logged out in
   // memory, and a retry finds the work done and issues a JWT at the new generation.

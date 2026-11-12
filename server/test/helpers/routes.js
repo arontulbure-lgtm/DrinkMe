@@ -99,7 +99,7 @@ export const ROUTE_MANIFEST = {
   'GET /media/drinks/:id': { gate: 'adult', files: ['media-pages.test.js', 'age-gate.test.js', 'sign-in-gate.test.js', 'route-gates.test.js'] },
   'GET /media/avatars/:userId': { gate: 'adult', files: ['media-pages.test.js', 'moderation-decisions.test.js', 'sign-in-gate.test.js', 'route-gates.test.js'] },
 
-  'POST /api/auth/mobile': { gate: 'public', files: ['auth.test.js', 'account-takeover.test.js', 'email-verification.test.js', 'sign-in-gate.test.js'] },
+  'POST /api/auth/mobile': { gate: 'public', files: ['auth.test.js', 'account-takeover.test.js', 'email-verification.test.js', 'sign-in-gate.test.js', 'password-reset-session.test.js'] },
   'POST /api/account/delete-unverified': { gate: 'public', files: ['email-verification.test.js', 'sign-in-gate.test.js'] },
 
   'GET /api/users/search': { gate: 'adult', files: ['email-exposure.test.js', 'null-user.test.js', 'onboarding.test.js', 'route-gates.test.js'] },

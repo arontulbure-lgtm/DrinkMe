@@ -218,6 +218,9 @@ export interface AuditEntry {
   targetId: string | null;
   meta?: {
     version?: number; // ack.privacy_accepted
+    // auth.session_revoked: Firebase revoked the refresh tokens (password reset), or reported the account
+    // disabled or deleted outside the app. Absent for the email takeover guard's bump.
+    reason?: 'tokens_revoked' | 'account_disabled' | 'account_gone';
     reportId?: number; // admin.report_resolved
     action?: 'dismiss' | 'remove_content' | 'clear_profile'; // admin.report_resolved
     resolvedCount?: number; // admin.report_resolved: open reports on the same target it closed
