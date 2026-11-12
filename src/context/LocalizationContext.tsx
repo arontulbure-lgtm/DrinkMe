@@ -355,6 +355,14 @@ const translations = {
     notifications: {
       title: 'Activity',
       empty: 'No notifications yet',
+      someone: 'Someone',
+      cheer: '{{actor}} cheered your drink {{drink}}.',
+      cheerWithoutPost: '{{actor}} cheered your post.',
+      comment: '{{actor}} commented on {{drink}}.',
+      commentWithoutPost: '{{actor}} commented on your post.',
+      partner: '{{actor}} accepted your drink partner request.',
+      partnerAdded: '{{actor}} added you as a drink partner.',
+      partner_request: '{{actor}} sent you a drink partner request.',
     },
     onboarding: {
       privacyTitle: 'What others can see',
@@ -725,6 +733,14 @@ const translations = {
     notifications: {
       title: 'Activitate',
       empty: 'Nu ai notificări încă',
+      someone: 'Cineva',
+      cheer: '{{actor}} a dat noroc băuturii tale {{drink}}.',
+      cheerWithoutPost: '{{actor}} a dat noroc postării tale.',
+      comment: '{{actor}} a comentat la {{drink}}.',
+      commentWithoutPost: '{{actor}} a comentat la postarea ta.',
+      partner: '{{actor}} a acceptat cererea ta de partener de băut.',
+      partnerAdded: '{{actor}} te-a adăugat ca partener de băut.',
+      partner_request: '{{actor}} ți-a trimis o cerere de partener de băut.',
     },
     onboarding: {
       privacyTitle: 'Ce pot vedea ceilalți',
@@ -821,9 +837,11 @@ export function LocalizationProvider({ children }: { children: React.ReactNode }
 
       if (!params) return raw;
 
-      return Object.keys(params).reduce((acc, paramKey) =>
-        acc.replace(`{{${paramKey}}}`, String(params[paramKey]))
-      , raw);
+      // One pass with a replacer function: a value is inserted as-is, so user text such as a name with
+      // "$&" or "{{drink}}" in it is never read as a pattern or a placeholder. Unknown placeholders stay.
+      return raw.replace(/\{\{(\w+)\}\}/g, (placeholder, paramKey: string) =>
+        Object.prototype.hasOwnProperty.call(params, paramKey) ? String(params[paramKey]) : placeholder
+      );
     },
     [locale]
   );

@@ -231,3 +231,14 @@ export interface Recipe {
   garnish: string | null;
   instructions: string;
 }
+// Worked out by the server on each read. actorName is "Someone" when the actor's name is hidden or gone.
+// drinkName is null when the post is gone or the reader may not see it. variant only on type 'partner'.
+export interface NotificationParams {
+  actorName: string;
+  drinkName: string | null;
+  variant?: 'accepted' | 'added';
+}
+
+  // 'cheer' | 'comment' | 'partner' | 'partner_request'; kept as string so a newer server type still shows.
+  // English text stored by the server: shown for older entries (params null) and unknown types.
+  params?: NotificationParams | null;

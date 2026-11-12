@@ -29,6 +29,28 @@ import { TabScreenProps } from '../navigation/types';
 // Stories are decorative for now — hide until the feature is implemented
 const STORIES_ENABLED = false;
 
+type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
+
+// Types the app can write in the reader's language. Anything else shows the server's stored text.
+const LOCALIZED_NOTIFICATION_TYPES = new Set(['cheer', 'comment', 'partner', 'partner_request']);
+
+// The server sends the names (params), the app writes the sentence. Entries from before params existed,
+// and types this version does not know, keep the server's English text.
+function getNotificationText(item: NotificationItem, t: TranslateFn): string {
+  const params = item.params;
+  if (!params || !LOCALIZED_NOTIFICATION_TYPES.has(item.type)) return item.message;
+  if (typeof params.actorName !== 'string' || !params.actorName) return item.message;
+  // The server's fallback name; a real user called "Someone" reads the same either way.
+  const actor = params.actorName === 'Someone' ? t('notifications.someone') : params.actorName;
+  if (item.type === 'cheer' || item.type === 'comment') {
+    return params.drinkName
+      ? t(`notifications.${item.type}`, { actor, drink: params.drinkName })
+      : t(`notifications.${item.type}WithoutPost`, { actor });
+  }
+  if (item.type === 'partner' && params.variant === 'added') return t('notifications.partnerAdded', { actor });
+  return t(`notifications.${item.type}`, { actor });
+}
+
 export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const [refreshing, setRefreshing] = useState(false);
   const [isNotificationsVisible, setNotificationsVisible] = useState(false);
@@ -36,7 +58,8 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
   const { serverUserId, profile } = useAuth();
   const queryClient = useQueryClient();
-  const { t } = useLocalization();
+  const { t, locale } = useLocalization();
+  const dateLocale = locale === 'ro' ? 'ro-RO' : 'en-GB';
 
   const {
     data: partnerDrinksData,
@@ -260,8 +283,8 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                         <Ionicons name={iconName} size={18} color={iconColor} />
                       </View>
                       <View style={styles.notificationBody}>
-                        <Text style={styles.notificationMessage}>{item.message}</Text>
-                        <Text style={styles.notificationTimestamp}>{new Date(item.createdAt).toLocaleString()}</Text>
+                        <Text style={styles.notificationMessage}>{getNotificationText(item, t)}</Text>
+                        <Text style={styles.notificationTimestamp}>{new Date(item.createdAt).toLocaleString(dateLocale)}</Text>
                       </View>
                     </View>
                   );
