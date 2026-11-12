@@ -57,7 +57,6 @@ DrinkMeFinal/
 │   │               React Query cache and remounts; logs the error name and component stack only),
 │   │               DeleteAccountModal (shared by AgeGate and EditProfile),
 │   │               ModerationNotice (hidden-content notice + SuspensionBanner),
-│   │               AgeGateBanner (unused since the hard age gate; delete only with the user's OK)
 │   ├── context/    AuthContext.tsx, LocalizationContext.tsx
 │   ├── config/     firebase.ts
 │   ├── lib/        api.ts  ← apiFetch wrapper, injects the JWT automatically; getImageSource
