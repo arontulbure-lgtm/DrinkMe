@@ -15,7 +15,7 @@ Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_
 | 2 | Email sign-up with a new address and a valid password | Age gate (18+), then the privacy notice, then the name prompt. After these, Home loads with no error. |
 | 3 | At the age gate, look for a way past it without confirming | There is none: the only alternatives to "I am 18 or older" are Log out and Delete account, with a hint explaining them. Log out returns to sign-in; signing in again shows the gate again. Delete account opens the same delete confirmation as Edit Profile and removes the account. No tab, feed or image loads before confirming. |
 | 4 | Sign out, sign in again with the same email and password | Goes straight to Home: age gate, notice and name are not asked again. |
-| 5 | Sign in with a wrong password | A clear ro/en error. The app stays on the sign-in screen. |
+| 5 | Sign in with a wrong password, then with an email that has no account | Both show the same "Email or password is incorrect" message (ro/en), never Firebase's own English text. The app stays on the sign-in screen. |
 | 6 | Sign up with an invalid email or a too-short password | A validation message before any network call. |
 | 7 | Google sign-in on a development build (Expo Go only works through the auth.expo.io proxy) | Google consent screen, then the same first-run screens as step 2 for a new account. Your Google photo is shown as avatar. |
 | 8 | Google sign-in with the same Gmail address you used for an email/password account | You land in the same account (same posts). The other device's session is logged out (expected: this is the takeover fix). |
@@ -24,6 +24,16 @@ Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_
 | 11 | Turn the backend off, reopen the app | Session error screen with Retry, not an empty feed. Retry after starting the backend works. |
 | 12 | Sign out as user A, sign in as user B on the same phone | B never sees A's feed, profile or notifications, not even for a moment. |
 | 13 | Delete account (Profile, Settings) | Confirmation, then signed out. Signing in again with the same account says the account was deleted. |
+| 14 | Sign-in screen, "Forgot password?", enter the email of a real account, tap Send | A neutral confirmation ("if an account exists, we sent an email"). The reset email arrives, in the app's language. |
+| 15 | The same with an email that has no account | Exactly the same confirmation as step 14. Nothing tells you whether the account exists. |
+| 16 | Tap Send again straight away | The button waits about 60 seconds and shows the time left. Leaving and reopening the screen keeps the wait; restarting the app ends it. |
+| 17 | Forgot password with an invalid email (no @), then with airplane mode on | Invalid email: a format message and no wait. Airplane mode: a network message, and you can try again at once (no wait). |
+| 18 | Complete a reset from the email, sign in with the new password | Sign-in works. The old password is refused with the step 5 message. |
+| 19 | Sign up with an email that already has an account | "Email already in use" (expected: Firebase does not hide this; accepted). |
+| 20 | Google sign-in, then cancel in the browser | Back on the sign-in screen with no error message. |
+| 21 | VoiceOver (iOS) and TalkBack (Android) on the sign-in screen and in forgot-password mode | Every field, link and button is read with a ro/en label; error and confirmation messages are announced. |
+| 22 | Type the email in forgot-password mode and press the keyboard's Send / Done key | It sends, the same as tapping the button. Email autofill is offered. |
+| 23 | Pre-registration takeover: phone A signs up with an email address you own but that has no DrinkMe account, and stays signed in. Then, as the real owner, sign up with that email on phone B (expect "email in use"), use "Forgot password?", reset from the email and sign in on phone B | Phone A is logged out on its next request (pull to refresh): the owner's fresh verified sign-in ends every older session. **If phone A keeps working, write it down and tell the next run**: a reset alone does not end server sessions (open item in SECURITY.md), so phone A would keep access for up to 30 days. |
 
 ### 1b. Lists and images
 
@@ -41,6 +51,9 @@ Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_
 | 10 | Report a post from three different accounts that are at least 48 hours old and have accepted the privacy notice | After the third report the post disappears for everyone except its author and you (admin). The author sees a "hidden pending review" notice on it. Reports from newer accounts reach the queue but do not hide anything. |
 | 11 | Block a user | Their posts, comments and profile disappear for you, and yours for them. Blocked Users lists them; unblocking restores. |
 | 12 | Switch language ro/en (Settings) | Every new screen (age gate, notice, verify email, report sheet, suspension banner, hidden-content notice) is translated. |
+| 13 | With the app in Romanian, go through every tab, the sign-in screen, Create Post, Smart Bar (Inventory, Saved, the Recipes and Scanner "coming soon" previews), the location picker and Edit Profile | No English text left anywhere, apart from names and post text people typed. The tab reads "Smart Bar". Notifications read in Romanian too (for example "Ana a dat noroc băuturii tale Negroni.", not the English "cheered your drink" sentence); a deleted or hidden actor reads "Cineva". |
+| 14 | In Romanian on Android, look at a post or comment at least 7 days old | A short date such as "12 nov." instead of "acum N zile". Newer items read "acum 5 min", "acum o zi", "acum N zile". Check iOS too. |
+| 15 | VoiceOver / TalkBack over the icon-only buttons (cheer, save, comment, post menu, close, back, notification bell) | Each is read with a ro/en name and as a button; small icons are still easy to hit (44 px target). |
 
 ### 1c. Moderation as admin
 
@@ -93,6 +106,15 @@ This key is inside the app bundle, so anyone can extract it. Restriction limits 
 3. Application restrictions: the app calls Places through plain HTTPS, not the Maps SDK, so an Android/iOS app restriction only works if each request sends `X-Android-Package` and `X-Android-Cert` (Android) or `X-Ios-Bundle-Identifier` (iOS). Ask the next run to add these headers after the first EAS build gives you the SHA-1, then turn on the restriction. The safer long-term fix is to call Places from the server.
 4. Quotas: cap Places requests per day (for example 1,000) so a leaked key cannot run up a bill.
 5. Billing: set a budget alert.
+
+### Firebase Authentication settings (from the forgot-password security review)
+Project drinkme-b2269, Firebase console. These are console settings, not code; the app's 60-second reset cooldown is only a convenience and stops nobody who calls Firebase directly.
+1. Authentication, Settings, User actions: confirm **Email enumeration protection** is on. Without it, the public web API key lets anyone check which emails have an account, whatever the app shows.
+2. Authentication, Settings, Password policy: require at least 8 characters with an uppercase letter, a digit and a special character, and choose **enforce** (not just notify). Firebase's hosted reset page otherwise accepts 6 characters. This may need the Identity Platform upgrade; write down if it does.
+3. Google Cloud console, Credentials, the Firebase web API key (`EXPO_PUBLIC_FIREBASE_API_KEY`): restrict it to the Identity Toolkit API and the Token Service API (add other Firebase APIs only if a later feature needs them).
+4. App Check (SEC-I): plan it **before the public launch**, not after. Scripted reset requests could otherwise use up the project's shared email quota.
+5. Accepted, no action: sign-up still says when an email is already in use (Firebase does not hide it).
+6. Open, needs your OK for a server change: a password reset does not end the 30-day server session. The fix is one Firebase call per sign-in (`tokensValidAfterTime`) and a session bump. Now more urgent, because a reset is what users do after a compromise. See 1a, step 23.
 
 ### Other keys
 1. The Firebase web API key and Maps key appear in plain text in `D:\DrinkMeApp\CLAUDE.md`. Replace them with placeholders there.

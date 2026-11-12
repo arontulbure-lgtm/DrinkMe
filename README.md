@@ -18,13 +18,19 @@ npm start
 ```
 Then follow the Expo prompts for iOS, Android, or web.
 
+## Checks
+```bash
+npm run check        # typecheck + lint (client); same as npm run typecheck && npm run lint
+```
+Server tests are separate and slow (about 14 minutes, port 5055, one run at a time): `cd server`, then `npm test`. The client has no test framework yet.
+
 ## Running the Server
 ```bash
 cd server
 npm install
 npm start
 ```
-The mock API listens on `PORT` (default `5000`). Configure additional values via `server/.env`.
+The Express API listens on `PORT` (default `5000`). `server/.env` must set `NODE_ENV=development` locally; otherwise production rules apply. Every variable, the routes and operations (backups, moderation, audit log) are in `server/README.md`.
 
 ## Building Mobile Clients
 - Development build: `npx expo run:android` or `npx expo run:ios`
@@ -41,10 +47,11 @@ The mock API listens on `PORT` (default `5000`). Configure additional values via
 - `EXPO_PUBLIC_FIREBASE_APP_ID`
 - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
 
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+
 ### Server (`server/.env`)
-- `PORT`
-- `OPENAI_API_KEY`
-- `CORS_ALLOWED_ORIGINS`
+- `NODE_ENV`, `PORT`, `JWT_SECRET`, `FIREBASE_SERVICE_ACCOUNT_KEY`, `CORS_ALLOWED_ORIGINS`, `ADMIN_USER_IDS`
+- Optional: `OPENAI_API_KEY` (AI stays off unless `AI_ENABLED=true`). Full list: `server/README.md`.
 
 ## Privacy
 Add a link to the production privacy policy before launch.

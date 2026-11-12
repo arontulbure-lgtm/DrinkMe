@@ -2,6 +2,30 @@
 
 Notable changes to DrinkMe (client and server). Newest first. Details: `server/README.md`, `.claude/skills/drinkme-backend-api/SKILL.md`, `AUTONOMOUS_RUN_LOG.md`.
 
+## 2026-11-12
+
+Tiers 3 to 6 of the autonomous run (commits 0c7b20b to d96bbd9, plus the docs below). None of the client changes has run on a device yet; see `docs/JOHN_TODO.md`.
+
+### Added
+- **Forgot password** (dbfc339): "Forgot password?" on the sign-in screen sends Firebase's reset email in the app's language, with the same neutral confirmation for any email and a 60 s cooldown. Firebase errors go through `src/lib/authErrors.ts`: wrong password and unknown email share one message, and raw Firebase text is never shown. AuthScreen is fully ro/en. Why: users had no way back into a password account (FEAT-1).
+- **Edit post** (3ee33f3): `PUT /api/drinks/:id` (text, rating, alcoholic flag, category; never the image) and Edit in the post menu; edited posts show "edited". 409 `hidden_pending_review` while the post is hidden after reports; the first edit after an open report keeps the reported content on the report (`targetSnapshot`) for the moderator. Why: FEAT-3, without letting an owner erase what was reported.
+- **Drink categories** (277157b): optional `category` on posts (cocktail, wine, beer, spirits / mocktail, coffee, tea, other), stored as `tags: [category]`; `GET /api/drinks?category=`; CreatePost picker and Explore chips. Why: Explore's Cocktail, Wine and Beer chips were always empty.
+- **Audit log** (3954281): 8 security and moderation actions, ids only (no IP, email or free text), 90 days, separate caps for user and admin entries, cleaned up by account deletion; `GET /api/admin/audit`. Why: SEC-H, and moderation decisions need a record.
+- **Error boundary** and **typed navigation** (00c986e): a crash shows "Try again" instead of a blank app; route params are checked by TypeScript, which also fixed four buttons that did nothing. PartnersList got pull-to-refresh and an error state.
+- **Route-coverage guard** : every server route must be listed in `server/test/helpers/routes.js` (`ROUTE_MANIFEST`) with its gate; tests check 401, `age_required`, `account_suspended` and admin refusals on every route. Why: a new route can no longer skip the sign-in or 18+ gate unnoticed.
+- `npm run check` (typecheck + lint) in the root `package.json`. Why: the QA checklist referred to it and it did not exist.
+
+### Changed
+- **Cheers and saves** (e0f1e29): the app updates at once and sends the wanted state (`{ cheered }` / `{ saved }`); the server is idempotent and rolls back a failed save; one cheer notification per person and post per 7 days. Cheer now works on Profile and Smart Bar Saved. Why: FEAT-7, and an empty `onCheer` handler; the de-duplication stops notification floods.
+- **Notifications in ro/en** (7051e84, bb639d5): the server adds `params` (`actorName`, `drinkName`, `variant`) and the app writes the sentence in its language; the English `message` stays for older apps. Why: notifications were English only.
+- **Remaining English strings localized; one `formatTimeAgo`** (d96bbd9): about 70 strings moved to ro/en; posts and comments 7+ days old show a short date; icon-only buttons have screen-reader labels and 44 px targets.
+- **Windows `EPERM` on save** (0c7b20b): the database rename and read are retried briefly instead of failing the request.
+- Docs: skills, `server/README.md` (audit log, routes), `docs/JOHN_TODO.md` (device checks for forgot password and localization, Firebase Console settings), external docs in `D:\DrinkMeApp\`, and a jest-expo proposal in `AUTONOMOUS_RUN_LOG.md` (not installed).
+
+### Known limits
+- A password reset does not end the 30-day server session; fixing it needs one Firebase call per sign-in (waiting for the owner's OK).
+- Firebase Console settings are still to confirm: email enumeration protection, an enforced password policy, a restricted web API key, App Check before the public launch. The app's reset cooldown is not a security control.
+
 ## 2026-11-11
 
 ### Added

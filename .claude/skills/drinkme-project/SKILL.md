@@ -52,7 +52,9 @@ DrinkMeFinal/
 │   │               SessionErrorScreen, VerifyEmailScreen, AgeGateScreen, OnboardingScreen,
 │   │               BlockedUsersScreen
 │   ├── components/ CommentDrawer, DrinkPostCard, LocationPickerModal, StoriesSection,
-│   │               ListLoadState, LoadMoreButton, PostActionsSheet, ReportSheet,
+│   │               ListLoadState, LoadMoreButton, PostActionsSheet (Edit, Delete, Report, Block), ReportSheet,
+│   │               ErrorBoundary (in App.tsx, inside LocalizationProvider; "Try again" clears the
+│   │               React Query cache and remounts; logs the error name and component stack only),
 │   │               DeleteAccountModal (shared by AgeGate and EditProfile),
 │   │               ModerationNotice (hidden-content notice + SuspensionBanner),
 │   │               AgeGateBanner (unused since the hard age gate; delete only with the user's OK)
@@ -60,14 +62,18 @@ DrinkMeFinal/
 │   ├── config/     firebase.ts
 │   ├── lib/        api.ts  ← apiFetch wrapper, injects the JWT automatically; getImageSource
 │   │               drinkCache.ts  ← React Query cache helpers for posts, comments, users
+│   │               useDrinkToggles.ts + drinkToggleChains.ts ← the one cheer/save hook (optimistic)
+│   │               authErrors.ts  ← Firebase error code → auth.errors.* key (pure)
+│   │               passwordReset.ts ← forgot-password helpers, 60 s cooldown (pure)
+│   │               formatTimeAgo.ts ← the one "time ago" label for posts and comments (pure)
 │   │               useConfirmAge.ts, usePartnerAction.ts, useRefreshIfSuspended.ts
-│   ├── types/      api.ts  ← all shared types
-│   └── navigation/ AppNavigator.tsx
+│   ├── types/      api.ts  ← all shared types, incl. the drink category lists
+│   └── navigation/ AppNavigator.tsx, types.ts (param lists, global RootParamList)
 ├── server/
 │   ├── server.js            ← Express backend (all routes)
 │   ├── README.md            ← setup, routes, env vars, backups, moderation, Docker
 │   ├── scripts/backup.js    ← scheduled backup (`npm run backup`), shipped in the Docker image
-│   ├── test/                ← node:test suites and helpers
+│   ├── test/                ← node:test suites and helpers; helpers/routes.js holds ROUTE_MANIFEST
 │   ├── data/db.json         ← JSON persistence (gitignored)
 │   ├── serviceAccount.json  ← Firebase Admin key (gitignored) - never read or print
 │   └── .env                 ← server secrets - never read or print
@@ -87,12 +93,13 @@ Stack Root (headerShown: false)
 ├── VerifyEmail (sessionStatus 'verification_required')
 └── Main (sessionStatus 'ready')
     ├── TabNavigator: Home, Explore, Scanner, SmartBar, Profile
-    ├── CreatePost (default card presentation, headerShown: false)
+    ├── CreatePost (default card presentation, headerShown: false; `{ drinkId }` opens it in edit mode)
     ├── DrinkDetail, EditProfile, PartnersList, BlockedUsers
     ├── RecipeResults (modal), LanguageSettings (modal)
     └── UserProfile (reuses ProfileScreen; its X button must call navigation.goBack(), not navigate('Profile'))
 ```
 Steps 2 and 3 render outside the stack and only once the session is `ready` with a profile, so the effective order is: session, verify email, age gate, onboarding, Main.
+Navigation is typed: route params live in `src/navigation/types.ts` (`TabParamList`, `RootStackParamList`, global `RootParamList`); no `any` on navigation props. A stack screen reaches a tab with `navigate('Main', { screen: 'Scanner' })`, never `navigate('Scanner')` (React Navigation 7 ignores that).
 
 ## Session and cache (src/context/AuthContext.tsx)
 - `SessionStatus` is `'loading' | 'ready' | 'error' | 'verification_required'`. `'ready'` also covers signed out. `isAuthenticated` only means a Firebase user exists; the API works only when the status is `'ready'`.
@@ -105,6 +112,12 @@ Steps 2 and 3 render outside the stack and only once the session is `ready` with
 - Images: always render API image paths through `getImageSource()` (src/lib/api.ts). It sends the JWT only to this server's `/media` routes (which need a signed-in, 18+ confirmed user) and gives other URLs empty headers, so Android cannot resend the token to Google.
 - Hidden after reports: posts and comments with `hiddenPendingReview: true` reach only their owner and admins; show `ModerationNotice` (`moderation.hiddenPost`, `moderation.hiddenComment`, `moderation.hiddenProfile`).
 - Failed lists show `ListLoadState` with Retry, never an empty state.
+- Cheer and save: always through `useDrinkToggles` (src/lib/useDrinkToggles.ts), used by Home, Explore, Profile, DrinkDetail and Smart Bar Saved. It updates every cached list optimistically, sends the target state (`{ cheered }` / `{ saved }`), serializes requests per post, lets the last request to settle write the cache, and rolls back on failure. Its shared state (`drinkToggleChains.ts`) is reset together with the query cache.
+- Categories: `ALCOHOLIC_DRINK_CATEGORIES` (cocktail, wine, beer, spirits) and `NON_ALCOHOLIC_DRINK_CATEGORIES` (mocktail, coffee, tea, other) in `src/types/api.ts` must equal `DRINK_CATEGORIES` in server.js (a server test checks it). CreatePost's picker follows the alcoholic toggle; Explore chips query `GET /api/drinks?category=`; labels are `categories.*`.
+- Edit post: Edit in `PostActionsSheet` opens CreatePost with `{ drinkId }` (prefilled from the cache; sends only changed fields; the image cannot change). Edited posts show an "edited" label (`post.edited`).
+- Auth errors: every Firebase error goes through `src/lib/authErrors.ts`; never show `error.message`. Wrong password, unknown email and invalid credential share one message, social sign-in never shows it, and cancellations show nothing.
+- Forgot password: AuthScreen's "Forgot password?" calls `AuthContext.sendPasswordReset` (Firebase `sendPasswordResetEmail`, in the app's language). The same neutral confirmation for any account state; a 60 s cooldown after every outcome except invalid email and network errors (survives remounts, resets on app restart). The cooldown is UX, not a security control. A reset does not end the server JWT (open item).
+- Times: `formatTimeAgo` (src/lib/formatTimeAgo.ts) for every "time ago" label; 7 days or older shows a short date in the app's locale.
 
 ## Feature flags
 | Feature | Flag | Default | File |
@@ -127,7 +140,8 @@ Custom LocalizationContext. Romanian (ro) and English (en) are complete; other l
 - The privacy notice text is under `onboarding.privacy*`. It describes the server's read rules (who sees what: nothing without signing in, hide after reports, suspensions, kept anonymised open reports, the 30-day backup rule), so it must change whenever those rules or `PARTNER_CONSENT_REQUIRED` change; raise `PRIVACY_NOTICE_VERSION` on both sides when it changes in substance. It has not had a legal review.
 - The account deletion warning (`deleteAccount.warning`) says the account leaves "our backups" within 30 days: in-server backups 21 days plus the 7-day recovery hold, with a hard 30-day ceiling, and `npm run backup` keeps at most 28 days. Host snapshots must be kept 30 days or less for this to stay true.
 - Age gate strings: `ageGate.confirm`, `ageGate.leaveHint`, `ageGate.logout`, `ageGate.deleteAccount` (no `ageGate.decline`). Moderation strings: `moderation.*`.
-- Server notification text is English only. The Smart Bar limit message hardcodes 500.
+- Notifications are written on the client from `params` (`actorName`, `drinkName`, `variant`) with the `notifications.*` templates (`getNotificationText` in HomeScreen); the server's English `message` is the fallback for older apps and unknown types. `t()` replaces placeholders in one pass, so user text such as `{{drink}}` or `$&` is inserted as typed. The Smart Bar limit message hardcodes 500.
+- Every AuthScreen string is `auth.*`; icon-only buttons need `accessibilityRole`, a ro/en `accessibilityLabel` and a 44 px target (`hitSlop`).
 
 ## Working rules (agreed with the user)
 1. Keep the current structure; do not rewrite the architecture without a strong reason.
@@ -141,8 +155,8 @@ Custom LocalizationContext. Romanian (ro) and English (en) are complete; other l
 ## Running locally (the user runs these)
 - Backend: `cd server` then `node server.js` (port 5000; expect "[firebase-admin] ✅ Initialized"). `server/.env` must set `NODE_ENV=development` locally; any other value, or none, applies production rules. Env vars and Docker usage: `server/README.md`.
 - App: `npx expo start` (Metro port 8081); phone via Expo Go on the same Wi-Fi
-- Type check: `npm run typecheck` · Lint: `npm run lint`
-- Backend tests: `cd server` then `npm test` (node:test and fetch, no extra dependency). About 1037 tests taking about 12 minutes. They use port 5055 and a temp database, so only one run at a time.
+- Type check: `npm run typecheck` · Lint: `npm run lint` · Both: `npm run check` (server tests stay separate)
+- Backend tests: `cd server` then `npm test` (node:test and fetch, no extra dependency). Over 1165 tests taking about 14 minutes. They use port 5055 and a temp database, so only one run at a time.
 - Backup: `cd server` then `npm run backup` (daily on a real host; see `server/README.md`).
-- Client tests: no test framework is installed yet. If they are needed, propose the setup first (jest-expo + React Native Testing Library) and ask before adding dependencies.
+- Client tests: no test framework is installed yet. A jest-expo proposal (first targets: authErrors, passwordReset, formatTimeAgo, drinkToggleChains, ro/en key parity) is in `AUTONOMOUS_RUN_LOG.md` under Tier 5; it needs the user's OK because it adds dependencies.
 - Expo Go limitation: Google Sign-In is disabled in Expo Go (IS_EXPO_GO check); it needs a development build.

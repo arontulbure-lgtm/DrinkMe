@@ -2158,7 +2158,7 @@ const toPublicUser = (user, viewerId) => {
 // can then add themselves and read the list.
 // Version 2: nothing is visible without signing in (requireSignedInAdult). Still unreleased, it also
 // covers the hide after reports, suspensions and the 30-day backup rule (owner decisions of 2026-11-10),
-// and the 90-day audit log.
+// the 90-day audit log, and the reported version kept when a reported post is edited.
 const PRIVACY_NOTICE_VERSION = 2;
 
 const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVersion) ? user.privacyNoticeVersion : null);

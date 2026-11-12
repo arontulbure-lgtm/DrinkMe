@@ -35,8 +35,8 @@ External documentation (not in the repo) is in `D:\DrinkMeApp\`: TECHNICAL_REFER
 10. Reply in the user's language. Be concise.
 
 ## Commands
-- Type check: `npm run typecheck` · Lint: `npm run lint`
+- Type check: `npm run typecheck` · Lint: `npm run lint` · Both: `npm run check` (client only; server tests stay separate)
 - Backend: `cd server` then `node server.js` (port 5000). `server/.env` must set `NODE_ENV=development` locally; any other value, or none, applies production rules and the server may refuse to start. See `server/README.md`.
 - App: `npx expo start` (port 8081)
-- Backend tests: `cd server` then `npm test` (node:test, no extra dependency). About 1037 tests taking about 12 minutes; they use port 5055, so only one run at a time.
+- Backend tests: `cd server` then `npm test` (node:test, no extra dependency). Over 1165 tests taking about 14 minutes; they use port 5055, so only one run at a time. A new route must also be listed in `server/test/helpers/routes.js` (`ROUTE_MANIFEST`), or `route-coverage.test.js` fails.
 - The client has no test framework yet: the test-engineer proposes one before adding it.

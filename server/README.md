@@ -25,7 +25,9 @@ The first start on a database from before schema version 2 migrates it once and 
 npm test
 ```
 
-Uses `node:test` and `fetch`, with no extra dependency. About 1037 tests, taking about 12 minutes. Each test server gets a temp database, never `server/data/`. Tests use port 5055, so only one run can go at a time.
+Uses `node:test` and `fetch`, with no extra dependency. Over 1165 tests, taking about 14 minutes. Each test server gets a temp database, never `server/data/`. Tests use port 5055, so only one run can go at a time.
+
+Every route must be listed in `ROUTE_MANIFEST` (`test/helpers/routes.js`) with its gate, its `suspended` and `admin` flags and the test files that exercise it. `test/route-coverage.test.js` fails when a route in `server.js` is missing there, and `test/route-gates.test.js` checks the listed gates against a running server.
 
 ## Access rules in short
 - Nothing is readable without signing in. Every `/api` and `/media` route needs a valid API token (401 otherwise) and a user who has confirmed they are 18+ (403 `age_required` otherwise).
@@ -60,14 +62,15 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | DELETE | `/api/drink-partners/:targetId` | signed in | Removes or cancels; optional `?expect=partner\|request` |
 | GET | `/api/friends/count` | signed in | |
 | GET | `/api/stories` | signed in | Always empty |
-| GET | `/api/drinks` | signed in | Paged; `?q=`, `?city=`, `?alcoholic=false`, `?scope=discover`, `?sort=trending` |
+| GET | `/api/drinks` | signed in | Paged; `?q=`, `?city=`, `?alcoholic=false`, `?category=`, `?scope=discover`, `?sort=trending` |
 | GET | `/api/drinks/partners` | signed in | Paged; own and partners' posts |
 | GET | `/api/drinks/user/:userId` | signed in | Paged, plus `total` |
 | GET | `/api/drinks/:id` | signed in | |
-| POST | `/api/drinks` | signed in, not suspended | 201 |
+| POST | `/api/drinks` | signed in, not suspended | 201; optional `category` (must match `isAlcoholic`) |
+| PUT | `/api/drinks/:id` | post owner, not suspended | Edit text, rating, flag, category; never the image. 409 `hidden_pending_review` while hidden after reports |
 | DELETE | `/api/drinks/:id` | post owner | 204 |
-| POST | `/api/drinks/:id/like` | signed in | Toggle |
-| POST | `/api/drinks/:id/save` | signed in | Toggle |
+| POST | `/api/drinks/:id/like` | signed in | `{ cheered: true\|false }` sets the state; no body toggles |
+| POST | `/api/drinks/:id/save` | signed in | `{ saved: true\|false }` sets the state; no body toggles |
 | GET | `/api/drinks/:id/comments` | signed in | Paged |
 | POST | `/api/drinks/:id/comments` | signed in, not suspended | 201 |
 | DELETE | `/api/drinks/:id/comments/:commentId` | comment author or post owner | 204 |
@@ -75,7 +78,7 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | POST | `/api/blocks/:targetId` | signed in | `{ blocked: true }` |
 | DELETE | `/api/blocks/:targetId` | signed in | 204 |
 | POST | `/api/reports` | signed in, not suspended | `{ targetType, targetId, reason, details? }` |
-| GET | `/api/notifications` | signed in | |
+| GET | `/api/notifications` | signed in | Items carry `params` (`actorName`, `drinkName`, `variant`) for the app's ro/en text |
 | POST | `/api/notifications/read` | signed in | Marks all read |
 | GET, POST | `/api/smart-bar` | signed in | |
 | DELETE | `/api/smart-bar/:itemId` | signed in | |
@@ -86,6 +89,7 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | POST | `/api/admin/reports/:id/resolve` | admin | See Moderation |
 | POST | `/api/admin/users/:id/suspend` | admin | See Moderation |
 | POST | `/api/admin/users/:id/unsuspend` | admin | See Moderation |
+| GET | `/api/admin/audit` | admin | Paged, newest first; `?action=`. See Audit log |
 
 ## Environment Variables
 | Variable | Default | Used by | Meaning |
@@ -132,7 +136,8 @@ With production rules, the server exits at startup and names the setting to fix,
 - The database file holds valid data, unless `ALLOW_EMPTY_DB=true`. An invalid file is copied to `<DB_FILE>.corrupt-<timestamp>` first.
 
 ## Data operations
-- Saves are atomic. A failed save answers 503 and keeps the previous file; creates, profile edits, moderation actions and most other changes are undone in memory. Cheer and save toggles, marking notifications read and deleting a Smart Bar item are not.
+- Saves are atomic. A failed save answers 503 and keeps the previous file; creates, edits, cheers and saves, moderation actions, audit entries and most other changes are undone in memory. Marking notifications read and deleting a Smart Bar item are not.
+- On Windows, something holding the file open (antivirus, an editor) can make the rename fail with `EPERM`. The rename and the startup read are retried up to 5 times (25 to 400 ms, about 0.8 s at most) and log one `[db] ... needed N retries` line with the error codes only.
 - Size guard: once the saved file passes 450,000,000 bytes, anything that grows the database answers 507 `storage_full`. The file cannot be loaded above about 536.87 million bytes, so this keeps the server able to restart. Sign-in of existing users, removals, blocks, moderation and account deletion keep working.
 - Text is stored as typed, not HTML-escaped, because the only client renders it with React Native `<Text>`. Any web client must encode it on output.
 - Keep the server clock accurate (NTP). Account deletion needs a Firebase token issued within the last 5 minutes and allows 60 seconds of skew.
@@ -167,7 +172,22 @@ With production rules, the server exits at startup and names the setting to fix,
 6. Repeat by hand what happened after the backup and is now lost: account deletions (the restored file brings those accounts back), moderation actions (resolved reports, suspensions) and anything users posted. A start from a corrupt file also loses pending account deletions, because they were stored in that file.
 
 ### Account deletion
-`POST /api/users/:id/delete-account` saves a pending entry first, removes every record that holds or names the user, then deletes the Firebase user. Unfinished deletions resume at startup and every 15 minutes. A finished deletion keeps only the uid for about 1 hour, so a Firebase token issued before the deletion cannot recreate the account. Open reports the user filed about others stay under an anonymous `deleted-<hex>` id without details.
+`POST /api/users/:id/delete-account` saves a pending entry first, removes every record that holds or names the user, then deletes the Firebase user. Unfinished deletions resume at startup and every 15 minutes. A finished deletion keeps only the uid for about 1 hour, so a Firebase token issued before the deletion cannot recreate the account. Open reports the user filed about others stay under an anonymous `deleted-<hex>` id without details. In the audit log, the user's own entries are deleted and admin entries by or about them get that same anonymous id.
+
+## Audit log
+A minimal record of security and moderation actions, stored in the database (`auditLog`). Each entry holds an id, a time, the action, the acting and target uids (or an anonymous `deleted-<hex>` id, or null) and a few whitelisted values. It never holds an IP, a user agent, an email, a name, report or suspension reason text, a token or a request body. Refused sign-ins are not logged.
+
+- Actions: `ack.age_confirmed`, `ack.privacy_accepted`, `auth.session_revoked` (a sign-in that logged out older sessions), `account.deletion_requested`, `account.deletion_completed`, `admin.report_resolved`, `admin.user_suspended`, `admin.user_unsuspended`.
+- Retention: 90 days, pruned at startup and every 24 hours. Backups add up to 30 days.
+- Caps: entries users cause themselves keep their newest 15,000; admin entries and completed deletions have their own cap of 20,000, so user activity cannot push them out.
+- Entries are rebuilt at startup with only the known fields; anything unrecognised is dropped.
+
+```bash
+# Newest first, 20 per page by default (limit 1 to 50); pass nextCursor as before= for the next page
+curl -s "$API/api/admin/audit?limit=50" -H "Authorization: Bearer $TOKEN"
+curl -s "$API/api/admin/audit?action=admin.user_suspended" -H "Authorization: Bearer $TOKEN"
+```
+An unknown `action` or invalid page parameters answer 400; a non-admin gets 403.
 
 ## Moderation
 There is no admin screen; admins use the API. An admin is a uid in `ADMIN_USER_IDS` that has signed in and confirmed 18+ in the app. The review target for an open report is 24 hours; nothing alerts on it, so check the queue daily.
@@ -178,7 +198,7 @@ There is no admin screen; admins use the API. An admin is a uid in `ADMIN_USER_I
 
 ### Suspensions
 - First suspension: 7 days. Any later one (voided ones do not count): permanent. `permanent: true` makes one permanent at once.
-- A suspended user cannot post, comment, send or accept partner requests, edit their profile or avatar, or report (403 `account_suspended` with `until`). They can still read, cheer, save, block, log out and delete their account. The app shows a banner on Home and Profile.
+- A suspended user cannot post, edit a post, comment, send or accept partner requests, edit their profile or avatar, or report (403 `account_suspended` with `until`). They can still read, cheer, save, block, log out and delete their account. The app shows a banner on Home and Profile.
 - Suspending someone already suspended answers 409 `already_suspended` with the current state, unless `permanent: true` escalates a temporary suspension. Admins cannot be suspended (403 `cannot_suspend_admin`).
 - Known limit: a suspended user can delete the account and register again.
 
@@ -201,7 +221,7 @@ A fresh password sign-in counts as a verified sign-in: if the account's stored s
 ```bash
 curl -s "$API/api/admin/reports?status=open" -H "Authorization: Bearer $TOKEN"
 ```
-Oldest first, at most 100 items, plus `total` and `overdueCount` (open reports older than 24 hours). Each item has `target` (the public view of the post, comment or profile; null once gone), `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount` and `autoHidden`. Use `?status=resolved` for the history (details are cleared on resolve).
+Oldest first, at most 100 items, plus `total` and `overdueCount` (open reports older than 24 hours). Each item has `target` (the public view of the post, comment or profile; null once gone), `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount` and `autoHidden`. Use `?status=resolved` for the history (details are cleared on resolve). Owners can edit a reported post (the image never changes): a post report then has `editedAfterReport: true`, `target` shows the current text, and `targetSnapshot` holds the content as it was when first edited after the report. The snapshot is deleted when the report is resolved.
 
 ### Resolve a report
 ```bash

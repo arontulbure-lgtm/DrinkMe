@@ -1,6 +1,6 @@
 ---
 name: drinkme-backend-api
-description: The DrinkMe Express backend - API endpoints, auth flow, data persistence, security measures and open security items. Use when a feature calls or changes the API, touches authentication, the sign-in and age gate, users, posts, comments, partners, blocks, reports, moderation (auto-hide, suspensions), notifications, account deletion, backups or Smart Bar data, or during any security review.
+description: The DrinkMe Express backend - API endpoints, auth flow, data persistence, security measures and open security items. Use when a feature calls or changes the API, touches authentication, the sign-in and age gate, users, posts (create, edit, categories, cheers, saves), comments, partners, blocks, reports, moderation (auto-hide, suspensions), the audit log, notifications, account deletion, backups or Smart Bar data, or during any security review.
 ---
 
 # DrinkMe backend (server/server.js)
@@ -43,7 +43,8 @@ Test-only overrides, honoured only with `NODE_ENV=test`: `IMAGE_STORAGE_MAX_BYTE
 - All data lives in `DB_FILE` (default `server/data/db.json`), loaded at start and written after every mutation. Reads write nothing.
 - **`DB_FILE` needs its own directory.** Temp files (`.tmp-*`), backups and the backup purge all work in that directory and match on the database's file name. Do not keep other copies of the database there.
 - Saves are atomic: temp file (mode 0600), fsync, rename. A failed save returns 503 and keeps the previous file.
-- Rollback after a failed save: creates (post, comment, Smart Bar item, avatar, report, partner request), profile edits, acknowledgements, partner and block changes, post and comment deletions and moderation actions are undone. Not undone: cheer and save toggles, marking notifications read, deleting a Smart Bar item, and a new user created at sign-in (no token is issued; a retry reuses the record).
+- Windows `EPERM`: the rename (on `EPERM`, `EBUSY`, `EACCES`) and the startup read (those plus `EMFILE`) are retried up to 5 times with waits of 25, 50, 100, 200 and 400 ms (about 0.8 s at most, failure path only), with one log line naming the action, the count and the codes, never a path or message. A save still failing after that returns 503 as above.
+- Rollback after a failed save: creates (post, comment, Smart Bar item, avatar, report, partner request), post edits (with their report snapshots), cheers and saves (set, count and the cheer notification), profile edits, acknowledgements, audit entries, partner and block changes, post and comment deletions and moderation actions are undone. Not undone: marking notifications read, deleting a Smart Bar item, and a new user created at sign-in (no token is issued; a retry reuses the record). A `sessionGen` bump and its `auth.session_revoked` audit entry are kept on purpose (see Auth flow).
 - Loading: no file means an empty start (production needs `ALLOW_EMPTY_DB=true`). Invalid JSON or an invalid shape saves a verified copy to `<DB_FILE>.corrupt-<timestamp>`, then starts empty, or exits in production unless `ALLOW_EMPTY_DB=true`. Any other load failure exits and writes nothing.
 - Schema version 2: text is stored plain. A file without `dbSchemaVersion` is backed up to `<DB_FILE>.pre-migration-<timestamp>`, decoded once from the old HTML-escaped form and saved (`[db] Migrated to schema version 2`). A failed backup or decode stops startup with the file unchanged. Running older code on a migrated file and then newer code again can double-decode.
 - No seed data (`DEFAULT_USERS = []`, `DEFAULT_DRINKS = []`). New users start with empty city, bio and Smart Bar.
@@ -88,6 +89,17 @@ Owner decision: nothing is readable without signing in, and nothing but the firs
 - Defence in depth that stays: a post counts as alcoholic unless `isAlcoholic === false`; `canViewDrink` still checks the age gate, blocks and the hide after reports; `POST /api/drinks` refuses an alcoholic post from an unconfirmed user; notifications naming an alcoholic post show neutral text to an unconfirmed reader; AI recipe routes give unconfirmed users mocktails only.
 - `ageConfirmed` is owner-only (`toOwnerUser`): the client uses its presence to prove that a stored JWT is the owner's.
 
+## Audit log (T6-1, SEC-H)
+- `auditLog` in the database: `{ id, at, action, actorId, targetId, meta? }`. Ids are uids, a `deleted-<hex>` id or null. Never stored: IP, user agent, email, names, report or suspension reason text, tokens or request bodies. Refused sign-ins are not logged.
+- 8 actions (`AUDIT_META_KEYS` lists the only meta keys each may keep): `ack.age_confirmed`, `ack.privacy_accepted` (`version`), `auth.session_revoked` (a `sessionGen` bump), `account.deletion_requested`, `account.deletion_completed`, `admin.report_resolved` (`reportId`, `action`, `resolvedCount`), `admin.user_suspended` (`permanent`), `admin.user_unsuspended` (`void`). `appendAudit` throws on any other action.
+- Written in the same save as its action and undone with it when that save fails. Allowed while the growth guard blocks writes, because both budgets are capped.
+- Retention 90 days (`AUDIT_RETENTION_DAYS`), pruned at load and by the 24-hour purge timer; backups add up to 30 days.
+- Two budgets, so users cannot push moderation records out: the user's own actions (`AUDIT_SELF_ACTIONS`: the two acknowledgements, `auth.session_revoked`, `account.deletion_requested`) keep their newest 15,000 (`AUDIT_USER_MAX_ENTRIES`) among themselves; admin entries and completed deletions have a separate safety cap of 20,000 (`AUDIT_SYSTEM_MAX_ENTRIES`). Eviction is undone with a failed save.
+- At load every entry is rebuilt from the whitelist (known fields, allowed meta keys with plain values); an entry with no whole-number id, an unknown action or a non-string id is dropped.
+- Account deletion: the user's own entries are deleted (data minimisation); admin entries by or about them get the same `deleted-<hex>` id as their kept open reports. That id is made once and stored on the pending deletion entry, so a retried cascade keeps reports and audit entries matching.
+- Read: `GET /api/admin/audit` (see Endpoints). All access goes through the helpers (`appendAudit`, `pruneAuditLog`, `anonymizeAuditForUser`, `listAuditEntries`) so the log can move to a real database.
+- Cost: at the full cap the log adds about 3 to 4 MB to every save (one more reason for DATA-1).
+
 ## Moderation decisions (owner decisions of 2026-11-10)
 Auto-hide after reports:
 - A post, comment or profile with at least 3 (`AUTO_HIDE_REPORTER_THRESHOLD`) distinct counting reporters among its open reports is hidden from everyone but its owner and the admins, until an admin resolves the reports (a dismiss also unhides). It is derived from open reports, never stored.
@@ -101,7 +113,7 @@ Suspensions:
 - A suspension in force gives 409 `already_suspended` (with the current state) unless `permanent: true` escalates a temporary one, so a double tap changes nothing.
 - `POST /api/admin/users/:id/unsuspend` ends it; `{ void: true }` marks it a mistake, kept in the history but not counted towards "a repeat is permanent". Nothing in force: 200 with the unchanged state.
 - Admins cannot be suspended (403 `cannot_suspend_admin`). Unknown or deleted user: 404.
-- A suspended user gets 403 `account_suspended` with `until` (null when permanent) on: `POST /api/drinks`, `POST /api/drinks/:id/comments`, `POST /api/drink-partners/:targetId`, `POST /api/drink-partners/requests/:fromId/accept`, `PUT /api/users/:id`, `POST /api/users/:id/avatar`, `POST /api/reports`. Reading, cheers, saves, blocks, removals, Smart Bar, notifications, logout and account deletion still work.
+- A suspended user gets 403 `account_suspended` with `until` (null when permanent) on: `POST /api/drinks`, `PUT /api/drinks/:id`, `POST /api/drinks/:id/comments`, `POST /api/drink-partners/:targetId`, `POST /api/drink-partners/requests/:fromId/accept`, `PUT /api/users/:id`, `POST /api/users/:id/avatar`, `POST /api/reports`. Reading, cheers, saves, blocks, removals, Smart Bar, notifications, logout and account deletion still work.
 - The owner's profile carries `suspendedUntil` and `suspendedPermanently` while suspended. The history (`user.suspensions`) keeps only dates, the permanent and voided flags, the reason (up to 300 characters; on a resolve, `report <id>: <reason code>`) and admin ids; an admin's id is removed from others' histories when the admin's account is deleted.
 - Expiry is read from the date; nothing runs when it ends.
 
@@ -132,27 +144,44 @@ Partners (status values: `none`, `requested`, `incoming`, `partner`; actions ans
 - `DELETE /api/drink-partners/:targetId` (auth; removes a partner or cancels the caller's request, 204. Optional `?expect=partner|request`: 409 `partner_state_changed` with the current status if the button was stale)
 - `GET /api/friends/count` (auth)
 Posts:
-- `GET /api/drinks` (paged; `?q=` text search, `?city=`, `?alcoholic=false`, `?scope=discover` (auth; excludes own and partners' posts), `?sort=trending` (top 20 by cheers, one page, no `before`))
+- `GET /api/drinks` (paged; `?q=` text search, `?city=`, `?alcoholic=false`, `?category=` (one of the 8 categories; applied after visibility and before ranking and paging; works with discover and trending; `alcoholic=false` with an alcoholic category is 400), `?scope=discover` (auth; excludes own and partners' posts), `?sort=trending` (top 20 by cheers, one page, no `before`))
 - `GET /api/drinks/partners` (auth; paged; own and partners' posts)
 - `GET /api/drinks/user/:userId` (paged; also returns `total`)
 - `GET /api/drinks/:id` (`hiddenPendingReview: true` on a hidden post, which only its owner and admins receive)
-- `POST /api/drinks` (auth + not suspended; 201)
+- `POST /api/drinks` (auth + not suspended; 201; optional `category`, see Categories; `isAlcoholic` must be a boolean when sent, missing means alcoholic)
+- `PUT /api/drinks/:id` (auth + not suspended; edit own post, see Edit post)
 - `DELETE /api/drinks/:id` (auth; owner only, 403 otherwise; 204; removes its comments, cheers, saves and image; does not refund daily limits)
-- `POST /api/drinks/:id/like` (auth, toggle) · `POST /api/drinks/:id/save` (auth, toggle)
+- `POST /api/drinks/:id/like` (auth; body `{ cheered: boolean }` sets the state, idempotent; no body or no field toggles, for older apps; any other value 400; answers `{ cheered, cheersCount }`) · `POST /api/drinks/:id/save` (auth; same with `{ saved }`, answers `{ saved }`). Asking for the state already held saves nothing. Turning one on checks the growth guard. A failed save rolls back the set, the count and the notification. One cheer notification per cheerer and post while the earlier one is kept (7 days, read or not), so cycling a cheer cannot flood the owner
 - `GET /api/drinks/:id/comments` (paged; leaves out hidden comments except for their author and admins) · `POST /api/drinks/:id/comments` (auth + not suspended; 201)
 - `DELETE /api/drinks/:id/comments/:commentId` (auth; the comment's author or the post's owner, also for a hidden comment; 204)
 Blocks: `GET /api/blocks` (auth; the caller's own blocks only) · `POST /api/blocks/:targetId` (auth; `{ blocked: true }`; also ends any partnership and requests, which do not come back on unblock; 429 `block_limit` at 200) · `DELETE /api/blocks/:targetId` (auth; 204)
 Reports: `POST /api/reports` (auth + not suspended; `{ targetType: 'drink'|'comment'|'user', targetId, reason, details? }`, reasons `spam`, `harassment`, `underage`, `dangerous_drinking`, `mislabeled_alcohol`, `other`, details up to 300 characters; 201 `{ id }`, or 200 with the existing id for a repeat while open; 404 if not visible; 400 for own content)
-Admin (auth + uid in `ADMIN_USER_IDS`, 403 otherwise; 18+ confirmation needed too; API only, no screen; review target 24 hours, nothing alerts on it):
+Admin (auth + uid in `ADMIN_USER_IDS`, 403 otherwise; 18+ confirmation needed too; API only, no screen; review target 24 hours, nothing alerts on it). Post report items also carry `editedAfterReport` (the post was edited after this report), the current `category`, `rating` and `editedAt` in `target`, and `targetSnapshot` (the content as reported, from the first edit after the report) when present:
 - `GET /api/admin/reports?status=open|resolved` (oldest first, at most 100 items; returns `{ items, total, overdueCount }`; `overdueCount` counts open reports older than 24 h whichever status is listed. Each item adds `target` (public view, null once gone), `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount`, `autoHidden`)
 - `POST /api/admin/reports/:id/resolve { action: 'dismiss'|'remove_content'|'clear_profile', suspend?: boolean, permanent?: boolean }` (resolves every open report on the same target; `clear_profile` only for users, `remove_content` only for posts and comments; 409 if already resolved. `suspend: true` suspends the content's owner, checked before anything changes: 403 `cannot_suspend_admin`, 409 `suspend_target_gone` if the content or owner is gone. The answer adds `suspension` = the suspension result plus `applied`; an owner already suspended is not suspended again unless `permanent: true`, and gets `applied: false, code: 'already_suspended'` while the report is still resolved)
 - `POST /api/admin/users/:id/suspend { reason?, permanent? }` (reason up to 300 characters; answers `{ userId, suspended, suspendedUntil, suspendedPermanently, suspensionCount }`; 409 `already_suspended` with that state; 403 `cannot_suspend_admin`; 404 unknown user; 400 on wrong types)
 - `POST /api/admin/users/:id/unsuspend { void? }` (same answer shape; nothing in force changes nothing)
+- `GET /api/admin/audit?action=&limit=&before=` (newest first, paged `{ items, nextCursor }`; `action` must be one of the 8 audit actions, 400 otherwise; entries hold ids only)
 Stories: `GET /api/stories` (always empty)
 Notifications: `GET /api/notifications` (auth; returns `notifications` and `unreadCount`) · `POST /api/notifications/read` (auth; marks all read)
+- Each item of type `cheer`, `comment`, `partner` or `partner_request` with an actor carries `params`, worked out on every read and never stored: `actorName` (the actor's current name; "Someone" when the entry was made while the actor was hidden, or the account is gone or deleting), `drinkName` (only for the reader's own post that still exists and the reader may see, under its current name; otherwise null), and for `partner` `variant: 'added' | 'accepted'`. Other entries get `params: null` and the app shows the stored English `message`, which stays for older apps. An unconfirmed reader of an alcoholic-post notification gets the neutral text with `actorName: 'Someone'` and `drinkName: null`.
 Smart Bar: `GET|POST /api/smart-bar` (auth) · `DELETE /api/smart-bar/:itemId` (auth)
 AI (auth; off by default): `POST /api/smart-bar/generate-recipes` · `POST /api/detect-product` · `POST /api/generate-recipes`
-These do not exist: editing a post, editing a Smart Bar item, `PUT /api/drinks/:id`, `DELETE /api/users/:id`, any `/api/notifications/count` or `read-all` route.
+These do not exist: editing a Smart Bar item, changing a post's image, `DELETE /api/users/:id`, any `/api/notifications/count` or `read-all` route.
+
+Route-coverage guard: `server/test/helpers/routes.js` holds `ROUTE_MANIFEST`: every route with its gate (`public`, `own-before-age`, `adult`), its `suspended` and `admin` flags and the test files that exercise it. `route-coverage.test.js` reads server.js and fails if a registered route is missing from the manifest (or listed but gone), if a route is registered with a non-literal path, `app.all`/`app.route` or an `express.Router`, or if the public or before-18+ lists change. `route-gates.test.js` checks every listed route against a running server: 401 logged out, 403 `age_required` unconfirmed, 403 `account_suspended` exactly where marked, 403 for non-admins on admin routes, and malformed ids. **Every new route must be added there.**
+
+### Categories
+- `DRINK_CATEGORIES` in server.js: alcoholic `cocktail`, `wine`, `beer`, `spirits`; non-alcoholic `mocktail`, `coffee`, `tea`, `other`. It must equal the lists in `src/types/api.ts` (`categories.test.js` checks this).
+- Stored as `tags: [category]`; no category is `tags: []`. The category must match the post's alcoholic state (missing `isAlcoholic` = alcoholic) or the request gets 400. Every route that sets a category goes through `parseDrinkCategory`.
+- A stored post matches a filter only if its alcoholic state agrees too, so an inconsistent record never shows under the wrong chip. Posts without a category show only under All (and Non-alcoholic when non-alcoholic).
+
+### Edit post (`PUT /api/drinks/:id`)
+- Order of checks: gate, requireAuth, `refuseIfSuspended` (403), then the post: missing 404; another user's post 404 if blocked or hidden, else 403; the owner's own auto-hidden post 409 `hidden_pending_review`.
+- Body: any of `name`, `description`, `rating` (number 0 to 5), `location` (null or '' clears it), `isAlcoholic` (boolean), `category` (null clears it). Fields left out stay as stored. `imageData` gives 400 (the image cannot change); no editable field gives 400. Text goes through `sanitizeText` / `sanitizeOptional` with the create limits; an empty name or description is 400.
+- The category is checked against the flag the post will have after the edit. A flag change that leaves the stored category on the wrong side, without a new `category`, gives 400 `category_required`.
+- No change: 200 with the post, no save and no new `editedAt`. Otherwise `editedAt` is set; the growth guard applies only when the record grows (507). No daily cap and no limit event; the mutation limiter applies. A failed save restores every field and removes the snapshots it added.
+- No edit history (GDPR-minimal). Moderation evidence instead: the first edit after an open report stores the content as reported on that report as `targetSnapshot`; a second edit never overwrites it. It is removed when the report is resolved or by the account deletion cascade. Owners may edit reported posts below the hide threshold, because refusing would tell them they were reported.
 
 ## Account deletion
 - `POST /api/users/:id/delete-account` needs the JWT, ownership and a fresh Firebase ID token for the same uid, not revoked, issued in the last 5 minutes; password accounts must also have signed in within 5 minutes (60 seconds of clock skew allowed). 5 attempts / 15 min per account. Works when storage is full.
@@ -177,7 +206,8 @@ These do not exist: editing a post, editing a Smart Bar item, `PUT /api/drinks/:
 Errors are `{ error, code? }`. Only the app's own messages reach clients; other failures get a generic message.
 | Status | `code` | Meaning |
 |---|---|---|
-| 400 | none | Invalid input, page parameters or filter |
+| 400 | none | Invalid input, page parameters, filter or category |
+| 400 | `category_required` | Edit post: the flag change leaves the stored category on the wrong side |
 | 401 | `reauth_required` | Account deletion needs a fresh sign-in. Other 401s have no code (no valid JWT, including a JWT from an older session generation) |
 | 403 | `age_required` | The caller has not confirmed 18+ (every route but the exempt ones), or an alcoholic post for an unconfirmed viewer |
 | 403 | `account_suspended` | The caller is suspended; body has `until` (null when permanent) |
@@ -187,6 +217,7 @@ Errors are `{ error, code? }`. Only the app's own messages reach clients; other 
 | 403 | `email_not_verified`, `email_already_verified` | `REQUIRE_VERIFIED_EMAIL` paths (which can also answer `sign_in_again`) |
 | 404 | none | Missing, deleted, hidden by a block, or hidden after reports |
 | 409 | `partner_state_changed` | Stale partner button; the body carries the current `status` |
+| 409 | `hidden_pending_review` | Edit of the owner's own post while it is hidden after reports |
 | 409 | `already_suspended` | Suspend while one is in force, without `permanent: true` to escalate; body carries the current state |
 | 409 | `suspend_target_gone` | Resolve with `suspend: true` on content or an owner that no longer exists |
 | 409 | none | Report already resolved |
@@ -220,6 +251,8 @@ The server-side age gate now covers AI recipes. Do not set `AI_ENABLED=true` whe
 - Input sanitization (SEC-A) with validator: `sanitizeText()` / `sanitizeOptional()` on posts, profile updates, comments, reports and Smart Bar items. Any new text input must go through these. They strip control characters (newlines kept, tabs become spaces), C1 controls and bidi overrides, trim, and cut to the length limit without splitting an emoji. **Text is stored plain, not HTML-escaped,** because React Native `<Text>` does not parse HTML. Any web client must encode on output.
 - JWTs pinned to HS256; helmet(); CORS restricted via `CORS_ALLOWED_ORIGINS` in production.
 - Limits and image checks under Limits above.
+- Audit log (SEC-H) for acknowledgements, session revocations, account deletion and admin actions, without IP or free text (see Audit log).
+- Route-coverage guard: every route is in `ROUTE_MANIFEST` and its gates are tested (see Endpoints).
 - Keep the server clock accurate (NTP): account deletion and the `REQUIRE_VERIFIED_EMAIL` sign-in compare Firebase `iat` and `auth_time` with it, allowing 60 seconds of skew.
 
 ## Open security items (from SECURITY.md)
@@ -233,14 +266,19 @@ The server-side age gate now covers AI recipes. Do not set `AI_ENABLED=true` whe
 - The auth floor is password-only: check on the real Firebase project before enabling more sign-in providers.
 - Restoring an older `db.json` revives sessions logged out since the backup; rotate `JWT_SECRET` after a restore until a fix exists.
 - 3 colluding accounts that are 48 hours old and accepted the notice can still hide content until an admin reviews it.
-- Later: refresh tokens, audit log, Firebase App Check.
+- A password reset does not end the 30-day server JWT, and reset is the recovery path users reach for after a compromise. Fix when approved: on sign-in, `getUser(uid)` and bump `sessionGen` when `tokensValidAfterTime` is newer than the stored value.
+- Firebase Console (not code): email enumeration protection, a password policy with enforcement, restricting the Firebase web API key, and App Check before the public launch. The app's password-reset cooldown is not a security control.
+- Sign-up still says when an email is taken (Firebase does not hide it; accepted).
+- Later: refresh tokens, Firebase App Check.
 
 ## Rules for every backend change
 1. New routes sit behind `requireSignedInAdult` (do not add to its exemption lists without the user's OK). New routes that change data use requireAuth, an ownership check where relevant, `refuseIfSuspended` if they create content or contact other users, sanitization, and the mutation rate limiter. They save through `saveDbOrRespond`, and roll back their change when it fails.
 2. New content that counts against a daily limit records a limit event; new growth checks `isDbGrowthBlocked()`. Removals stay open when storage is full.
 3. New read routes apply `canViewDrink` (age gate, blocks, hide after reports), `isCommentHiddenFrom` / `toPublicUser(user, viewerId)` for comments and profiles, and `isLiveAccount`, and return `{ items, nextCursor }` if they list records.
-4. New stored data about a user must also be removed by `deleteUserDataCascade`.
+4. New stored data about a user must also be removed by `deleteUserDataCascade` (as the audit log is: own entries deleted, admin entries anonymised).
 5. Update the shared types in `src/types/api.ts` and call the route through `apiFetch` on the client. If the change alters who can see what, update the privacy notice text and version.
 6. Never log tokens, secrets or full request bodies with user data.
 7. Never read, print or modify `server/.env`, `server/serviceAccount.json` or anything in `server/data/`.
-8. Write tests in `server/test/` with node:test, `fetch` and `test/helpers/harness.js`. Run them with `npm test` in `server/`: about 1037 tests, about 12 minutes, port 5055 and a temp database, so only one run at a time.
+8. Write tests in `server/test/` with node:test, `fetch` and `test/helpers/harness.js`. Run them with `npm test` in `server/`: over 1165 tests, about 14 minutes, port 5055 and a temp database, so only one run at a time.
+9. Add every new route to `ROUTE_MANIFEST` in `server/test/helpers/routes.js` with its gate, flags and test files, or `route-coverage.test.js` fails. Never widen the `public` or `own-before-age` lists without the user's OK.
+10. A new security or moderation action that should be audited gets an action in `AUDIT_META_KEYS` with id-like meta only, written in the same save as the action and undone with it.
