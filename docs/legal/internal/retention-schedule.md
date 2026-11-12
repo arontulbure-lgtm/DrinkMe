@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.1 – 2026-11-12 (session-security, audit and `nameReservedAtSignIn` rows 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Retention schedule (internal)
 
@@ -16,8 +16,10 @@ Every period below is enforced by code unless marked **operational** (someone mu
 | Reporter uid on a resolved report | 30 days after resolution | Removed | Code (`RESOLVED_REPORTER_RETENTION_MS`) |
 | Rest of a resolved report (target, reason code, action, admin uid, dates) | **No limit defined** | — | **Gap LC-16**: proposed 12 months, then delete |
 | Open reports filed by a deleted user | Until resolved; kept under `deleted-<hex>`, no details | Resolve | Code |
+| Session-security fields `tokensValidAfterSeen`, `firebaseSessionEndedReason` (`data-inventory.md` §5) | Life of the account (`firebaseSessionEndedReason` is cleared earlier, at the next good Firebase lookup) | Account deletion cascade | Code |
+| `nameReservedAtSignIn` marker (yes/no; a Google/Apple name was refused as reserved at sign-in; holds no name) (`data-inventory.md` §5a) | Until the next successful profile save, or account deletion | Deleted by `PUT /api/users/:id`; account deletion cascade | Code |
 | Suspension history | Life of the account (needed for "a repeat is permanent") | Account deletion | Code. Decision D-09 on keeping something after deletion to stop ban evasion |
-| Audit log | 90 days (caps 15,000 user / 20,000 admin entries) | Pruned at start and every 24 h | Code (`AUDIT_RETENTION_DAYS`) |
+| Audit log (incl. `auth.session_revoked` with reason `tokens_revoked` / `account_disabled` / `account_gone`) | 90 days (caps 15,000 user / 20,000 admin entries); a user's own entries, including `auth.session_revoked`, are deleted with the account; at most one `auth.session_revoked` entry per account and reason per 24 hours | Pruned at start and every 24 h | Code (`AUDIT_RETENTION_DAYS`, `AUDIT_SELF_ACTIONS`, `appendSessionRevokedAudit`) |
 | Deletion tombstone (uid only) | About 1 hour | Pruned within the next 15-minute run | Code |
 | Scheduled backups (`npm run backup`) | Daily 7 days, weekly 28 days | Pruned by the script after a successful run | Code + **operational** (must run daily) |
 | In-server backups (`.corrupt-*`, `.pre-migration-*`) | 21 days; 7-day recovery hold after data loss; hard ceiling 30 days | Purge timer | Code |

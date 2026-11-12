@@ -1,10 +1,10 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Brand Partner Terms
 
-Version 0.1 · Effective date: [to be set at signature] · Between Tulbure Aron PFA ("DrinkMe") and the brand named in the partner form ("Partner").
+Version 0.2 · Effective date: [to be set at signature] · Between Tulbure Aron PFA ("DrinkMe") and the brand named in the partner form ("Partner").
 
-These terms apply when the official DrinkMe account publishes content created with or about a Partner's drinks (for example recipes). The official account is being set up now (official badge, reserved name, moderation by admins).
+These terms apply when the official DrinkMe account publishes content created with or about a Partner's drinks (for example recipes). The official account is run by DrinkMe and shown with an "Official" badge; the badge identifies DrinkMe as the publisher and is **not** the commercial-communication label, which every Partner post must also carry (see below). Posts on the official account are not hidden automatically by user reports, but DrinkMe's moderators review reports about them under the same rules as any other content and may remove them.
 
 ## 1. The collaboration
 - Free of charge unless a separate written order sets a fee. Each publication is agreed by email (the "Brief": product, recipe, photos, publication date, markets).

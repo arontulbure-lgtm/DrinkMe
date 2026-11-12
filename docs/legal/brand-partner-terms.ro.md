@@ -1,11 +1,11 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `brand-partner-terms.md`.
+DRAFT v0.2 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2 – 2026-11-13 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `brand-partner-terms.md`.
 
 # Termeni pentru partenerii de brand
 
-Versiunea 0.1 · Data intrării în vigoare: [la semnare] · Între Tulbure Aron PFA („DrinkMe”) și brandul menționat în formularul de parteneriat („Partenerul”).
+Versiunea 0.2 · Data intrării în vigoare: [la semnare] · Între Tulbure Aron PFA („DrinkMe”) și brandul menționat în formularul de parteneriat („Partenerul”).
 
-Acești termeni se aplică atunci când contul oficial DrinkMe publică conținut realizat împreună cu sau despre băuturile unui Partener (de exemplu rețete). Contul oficial este în curs de configurare (insignă oficială, nume rezervat, moderare de către administratori).
+Acești termeni se aplică atunci când contul oficial DrinkMe publică conținut realizat împreună cu sau despre băuturile unui Partener (de exemplu rețete). Contul oficial este administrat de DrinkMe și afișat cu insigna „Oficial”; insigna arată că DrinkMe este cel care publică și **nu** înlocuiește marcajul de comunicare comercială, pe care fiecare postare a Partenerului trebuie să îl poarte (vezi mai jos). Postările contului oficial nu sunt ascunse automat prin raportările utilizatorilor, dar moderatorii DrinkMe verifică raportările despre ele după aceleași reguli ca pentru orice alt conținut și le pot elimina.
 
 ## 1. Colaborarea
 - Gratuită, dacă o comandă scrisă separată nu stabilește o plată. Fiecare publicare se agreează prin email („Brief-ul”: produs, rețetă, fotografii, data publicării, piețe).

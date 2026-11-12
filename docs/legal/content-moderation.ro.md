@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `content-moderation.md`.
+DRAFT v0.3 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.3 – 2026-11-13 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `content-moderation.md`.
 
 # Politica de moderare a conținutului (notificare și acțiune)
 
-Versiunea 0.1 · Data intrării în vigoare: [se stabilește la publicare]
+Versiunea 0.3 · Data intrării în vigoare: [se stabilește la publicare]
 
 Această politică explică modul în care DrinkMe tratează raportările, ce se întâmplă cu conținutul și conturile raportate și cum poți cere reanalizarea. Ea pune în aplicare Regulamentul privind serviciile digitale (Regulamentul (UE) 2022/2065, „DSA”) pentru o platformă online stabilită în România și, dacă DrinkMe este oferit în Regatul Unit, Online Safety Act 2023.
 
@@ -20,7 +20,9 @@ Această politică explică modul în care DrinkMe tratează raportările, ce se
 2. ✅ **Ascundere automată:** când trei utilizatori diferiți, cu conturi de cel puțin 48 de ore care au acceptat notificarea de confidențialitate, raportează același element, acesta este ascuns pentru toți, cu excepția autorului și a moderatorilor, până când un moderator îl verifică. Autorul vede o notificare în aplicație. Acesta este singurul pas automat; nu șterge nimic.
 3. ✅ Un moderator (o persoană) decide: **respinge** raportarea (conținutul rămâne; dacă era ascuns, reapare), **elimină** postarea sau comentariul ori **golește** un profil (nume, descriere, fotografie) și, opțional, **suspendă** autorul.
 4. ✅ Dacă autorul editează o postare raportată, moderatorii văd în continuare versiunea raportată.
-5. 🛠 Conținutul contului oficial DrinkMe nu este ascuns automat prin raportări (pentru a preveni abuzurile), dar moderatorii verifică raportările despre el ca pe oricare altele.
+5. ✅ **Contul oficial DrinkMe** (contul administrat chiar de DrinkMe, marcat cu insigna „Oficial”) este tratat diferit într-o singură privință: postările, comentariile și profilul său **nu sunt ascunse automat** prin raportări, pentru ca un grup de persoane care raportează să nu poată scoate din funcțiune contul propriu al serviciului. În rest, totul este la fel. Raportările despre el sunt acceptate, intră în aceeași coadă (marcate ca privind contul oficial), sunt verificate după aceleași reguli și aceeași lege, cu aceeași țintă de 24 de ore, iar moderatorii îi pot elimina conținutul, îi pot goli profilul sau îl pot suspenda ca pe orice alt cont. Cât timp raportările sunt verificate, conținutul rămâne vizibil.
+6. DrinkMe publică singur conținutul contului oficial și răspunde pentru el ca autor. DrinkMe are în prezent un singur operator, așa că persoana care administrează contul oficial poate fi și cea care verifică raportările despre el. Dacă nu ești de acord cu rezultatul, poți cere reanalizarea (secțiunea 5) sau te poți plânge la ANCOM.
+7. ✅ **Nume rezervate.** Numele de profil care conțin „DrinkMe” (în orice scriere sau formă asemănătoare) sunt rezervate contului oficial, iar aplicația le refuză pentru toți ceilalți, împreună cu numele care conțin „Official” / „Oficial” sau o bifă, care ar putea imita insigna (vezi Regulile comunității §4). Este o verificare automată doar a numelui (nu a descrierii, orașului sau fotografiei), nu elimină nimic deja publicat, iar mesajul afișat explică motivul; un nume din Google sau Apple refuzat astfel nu este stocat. Verificarea nu poate prinde orice variantă: numele care trec de ea pot fi raportate în continuare ca uzurpare a identității. Numele salvate înainte de această regulă nu sunt schimbate automat; pot fi raportate ca uzurpare a identității, iar moderatorii le pot șterge.
 
 ## 3. Suspendări și recidivă
 - ✅ Prima suspendare: 7 zile. Orice suspendare ulterioară: definitivă. Încălcările grave (de exemplu conținut sexual cu minori, amenințări credibile, vânzare de droguri) pot duce direct la suspendare definitivă.
@@ -43,10 +45,10 @@ Când îți eliminăm sau ascundem conținutul ori îți suspendăm contul, ai d
 Dăm curs ordinelor autorităților judiciare sau administrative împotriva conținutului ilegal și informăm utilizatorul vizat, dacă ordinul nu prevede altfel (art. 9–10 DSA). Dacă aflăm de o amenințare la adresa vieții sau siguranței cuiva, informăm autoritățile competente (art. 18 DSA).
 
 ## 7. Transparență
-Micro- și întreprinderile mici sunt scutite de obligația de raportare privind transparența (art. 15 alin. (2) DSA). Păstrăm statistici interne (număr de raportări pe motiv, decizii, timp până la decizie) și vom publica un rezumat anual când nu vom mai fi scutiți sau mai devreme, ca bună practică.
+Micro- și întreprinderile mici sunt scutite de obligația de raportare privind transparența (art. 15 alin. (2) DSA). Păstrăm statistici interne (număr de raportări pe motiv, decizii, timp până la decizie, cu raportările despre contul oficial numărate separat) și vom publica un rezumat anual când nu vom mai fi scutiți sau mai devreme, ca bună practică.
 
 ## 8. Regatul Unit
 Dacă DrinkMe este oferit în Regatul Unit: utilizatorii de acolo pot raporta conținut ilegal și se pot plânge de deciziile noastre prin aceleași canale; păstrăm evidența evaluărilor de risc (Online Safety Act 2023 art. 9, 20–21 – DE VERIFICAT).
 
 ---
-Surse verificate la 2026-11-12: scutirea din art. 19 DSA (rezumate secundare ale textului EUR-Lex: springlex.eu, prighter.com); Legea 50/2024 care desemnează ANCOM drept Coordonator al serviciilor digitale (ANCOM; Mondaq).
+Surse verificate la 2026-11-12: scutirea din art. 19 DSA (rezumate secundare ale textului EUR-Lex: springlex.eu, prighter.com); Legea 50/2024 care desemnează ANCOM drept Coordonator al serviciilor digitale (ANCOM; Mondaq). Verificat la 2026-11-13: art. 14 alin. (1) și (4) și art. 17 alin. (1) DSA (EUR-Lex, CELEX 32022R2065).

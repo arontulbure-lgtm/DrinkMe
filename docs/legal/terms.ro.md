@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `terms.md` (versiunea în engleză prevalează până la revizuire).
+DRAFT v0.3 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.3 – 2026-11-13 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `terms.md` (versiunea în engleză prevalează până la revizuire).
 
 # Termeni și condiții DrinkMe
 
-Versiunea 0.1 · Data intrării în vigoare: [se stabilește la publicare] · Versiunea termenilor pentru acceptarea în aplicație: `TERMS_VERSION = 1` (planificat, LC-03)
+Versiunea 0.3 · Data intrării în vigoare: [se stabilește la publicare] · Versiunea termenilor pentru acceptarea în aplicație: `TERMS_VERSION = 1` (planificat, LC-03)
 
 ## 1. Cine suntem
 DrinkMe este operat de **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, Ap. 5, Sector 1, București, România, CUI `[DE COMPLETAT DE JOHN]`, nr. Registrul Comerțului `[DE COMPLETAT DE JOHN]` („noi”). Contact: **drinkmesocialapp@gmail.com**. Vezi și pagina Informații legale.
@@ -19,7 +19,7 @@ DrinkMe este o aplicație socială gratuită pentru descoperirea băuturilor, al
 - O persoană, un cont. Păstrează-ți datele de conectare în siguranță și anunță-ne imediat dacă suspectezi o utilizare abuzivă.
 
 ## 4. Contul tău
-Te poți conecta cu email și parolă, cu Google sau (pe iPhone) cu Apple. Îți poți reseta parola uitată din ecranul de conectare. **Introducem o modificare prin care resetarea parolei închide și sesiunile DrinkMe existente pe alte dispozitive** (în curs de implementare). Îți poți șterge contul oricând din aplicație (Editează profilul → Șterge contul); vezi pagina Ștergerea contului.
+Te poți conecta cu email și parolă, cu Google sau (pe iPhone) cu Apple. Îți poți reseta parola uitată din ecranul de conectare. **După resetarea sau schimbarea parolei, sesiunile DrinkMe mai vechi de pe alte dispozitive nu mai funcționează de la următoarea ta conectare în DrinkMe** – nu chiar din momentul resetării. Așadar, dacă bănuiești că altcineva are acces la contul tău, resetează-ți parola și apoi conectează-te din nou imediat. La fel se întâmplă dacă contul tău de conectare este dezactivat sau eliminat. Fiecare conectare este verificată la furnizorul nostru de autentificare (Google Firebase); dacă verificarea nu este posibilă, conectarea este refuzată pe moment și poți încerca din nou mai târziu. Îți poți șterge contul oricând din aplicație (Editează profilul → Șterge contul); vezi pagina Ștergerea contului.
 
 ## 5. Conținutul tău
 - Rămâi proprietarul a ceea ce publici (fotografii, text, note, comentarii).
@@ -29,14 +29,14 @@ Te poți conecta cu email și parolă, cu Google sau (pe iPhone) cu Apple. Îți
 - Îți poți edita postările (cu excepția fotografiei). Dacă o postare a fost raportată, moderatorii noștri văd în continuare versiunea raportată până o verifică.
 
 ## 6. Reguli
-Trebuie să respecți Regulile comunității. Pe scurt: fără conținut cu minori și alcool; fără încurajarea consumului excesiv, a jocurilor cu băutură sau a condusului după consum; fără vânzare de alcool sau de orice lucru ilegal; fără hărțuire, ură sau amenințări; fără conținut ilegal; fără spam; fără uzurparea identității (doar contul oficial DrinkMe poate folosi numele și marca DrinkMe); fără încălcarea drepturilor altora; fără încercări de a defecta, supraîncărca sau extrage automat date din serviciu. Aplicăm limite (de exemplu un număr de postări, comentarii și raportări pe zi) pentru siguranța DrinkMe.
+Trebuie să respecți Regulile comunității. Pe scurt: fără conținut cu minori și alcool; fără încurajarea consumului excesiv, a jocurilor cu băutură sau a condusului după consum; fără vânzare de alcool sau de orice lucru ilegal; fără hărțuire, ură sau amenințări; fără conținut ilegal; fără spam; fără uzurparea identității (doar contul oficial DrinkMe, afișat cu insigna „Oficial”, poate folosi numele și marca DrinkMe, iar numele de profil care conțin „DrinkMe” îi sunt rezervate); fără încălcarea drepturilor altora; fără încercări de a defecta, supraîncărca sau extrage automat date din serviciu. Aplicăm limite (de exemplu un număr de postări, comentarii și raportări pe zi) pentru siguranța DrinkMe.
 
 ## 7. Avertisment privind alcoolul
-Conținutul de pe DrinkMe este publicat de utilizatori, cu scop informativ și de divertisment. Nu reprezintă un sfat. Consumă întotdeauna responsabil și legal, nu conduce niciodată după ce ai băut și nu presa pe nimeni să bea. Rețetele și notele sunt opinii; verifică ingredientele pentru alergii. Ești responsabil pentru propriul consum.
+Conținutul de pe DrinkMe este publicat de utilizatori și de contul oficial DrinkMe, cu scop informativ și de divertisment. Nu reprezintă un sfat. Noi răspundem pentru ce publică contul oficial; utilizatorii răspund pentru ce publică ei. Consumă întotdeauna responsabil și legal, nu conduce niciodată după ce ai băut și nu presa pe nimeni să bea. Rețetele și notele sunt opinii; verifică ingredientele pentru alergii. Ești responsabil pentru propriul consum.
 
 ## 8. Moderare, suspendare și încetare
 - Oricine este conectat poate raporta o postare, un comentariu sau un profil (motive: spam, hărțuire, minori, consum periculos, alcool etichetat greșit, altul) și poate bloca alți utilizatori.
-- Când trei utilizatori diferiți eligibili raportează același element, acesta este **ascuns automat** pentru ceilalți până când un moderator îl verifică. Acesta este singurul pas automat; moderatorii iau toate deciziile de eliminare și suspendare.
+- Când trei utilizatori diferiți eligibili raportează același element, acesta este **ascuns automat** pentru ceilalți până când un moderator îl verifică. Acesta este singurul pas automat; moderatorii iau toate deciziile de eliminare și suspendare. Conținutul contului oficial DrinkMe nu este ascuns automat, dar raportările despre el sunt verificate după aceleași reguli iar conținutul său poate fi eliminat și contul suspendat ca oricare altul (Politica de moderare a conținutului §2).
 - Putem elimina conținut sau suspenda conturi care încalcă acești Termeni sau legea. **Prima suspendare durează 7 zile; o nouă suspendare este definitivă.** Cazurile grave pot duce direct la suspendare definitivă. Un utilizator suspendat poate în continuare să citească, să dea noroc, să salveze, să blocheze, să se deconecteze și să își șteargă contul, dar nu poate publica, comenta, edita profilul, trimite sau accepta cereri de parteneriat ori raporta.
 - Îți vom spune ce am decis și de ce (expunerea motivelor) și cum poți cere reanalizarea, conform Politicii de moderare a conținutului. Poți cere reanalizarea scriind la drinkmesocialapp@gmail.com în termen de 6 luni. (Notificarea deciziilor în aplicație este în dezvoltare – LC-06; până atunci o trimitem prin email când te putem contacta.)
 - Poți renunța oricând la DrinkMe ștergându-ți contul. Putem încheia serviciul sau accesul tău cu un preaviz rezonabil, ori imediat pentru încălcări grave sau repetate.

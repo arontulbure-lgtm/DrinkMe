@@ -1,8 +1,8 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.3 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Content Moderation Policy (notice and action)
 
-Version 0.1 · Effective date: [to be set at publication]
+Version 0.3 · Effective date: [to be set at publication]
 
 This policy explains how DrinkMe handles reports, what happens to reported content and accounts, and how to ask for a review. It implements the Digital Services Act (Regulation (EU) 2022/2065, "DSA") for an online platform established in Romania and, if DrinkMe is offered in the UK, the Online Safety Act 2023.
 
@@ -19,7 +19,9 @@ This policy explains how DrinkMe handles reports, what happens to reported conte
 2. ✅ **Automatic hiding:** when three different users whose accounts are at least 48 hours old and have accepted the privacy notice report the same item, it is hidden from everyone except its owner and moderators until a moderator reviews it. The owner sees a notice in the app. This is the only automated step; it does not delete anything.
 3. ✅ A moderator (a person) decides: **dismiss** (content stays; if hidden it reappears), **remove** the post or comment, or **clear** a profile (name, bio, photo), and optionally **suspend** the owner.
 4. ✅ If the owner edits a reported post, moderators still see the version that was reported.
-5. 🛠 Content from the official DrinkMe account is not hidden automatically by reports (to prevent abuse), but moderators review reports about it like any other.
+5. ✅ **The official DrinkMe account** (the account run by DrinkMe itself, marked with an "Official" badge) is treated differently in one way only: its posts, comments and profile are **not hidden automatically** by reports, so that a group of reporters cannot take the service's own account offline. Everything else is the same. Reports about it are accepted, put in the same queue (marked as concerning the official account), checked against the same rules and law, with the same 24-hour target, and moderators can remove its content, clear its profile or suspend it like any other account. While the reports are reviewed, the content stays visible.
+6. DrinkMe publishes the official account's content itself and is responsible for it as its author. DrinkMe currently has one operator, so the person who runs the official account may also review reports about it. If you disagree with the outcome you can ask for a review (section 5) or complain to ANCOM.
+7. ✅ **Reserved names.** Profile names that contain "DrinkMe" (in any spelling or look-alike form) are reserved for the official account, and the app refuses them for everyone else, together with names that contain "Official" / "Oficial" or a check mark, which could imitate the badge (see the Community Guidelines §4). This is an automated check on the name only (not on bios, cities or photos), it removes nothing already published, and the message shown says why; a name from Google or Apple refused this way is not stored. The check is best effort: names that get past it can still be reported as impersonation. Names saved before this rule are not changed automatically; they can be reported as impersonation and moderators can clear them.
 
 ## 3. Suspensions and repeat offenders
 - ✅ First suspension: 7 days. Any later suspension: permanent. Serious breaches (e.g. sexual content involving minors, credible threats, selling drugs) can lead to a permanent suspension at once.
@@ -42,10 +44,10 @@ When we remove or hide your content or suspend your account, you are entitled to
 We act on orders from judicial or administrative authorities against illegal content and tell the user concerned unless the order says otherwise (DSA Arts. 9–10). If we learn of a threat to someone's life or safety, we inform the competent authorities (DSA Art. 18).
 
 ## 7. Transparency
-Micro and small enterprises are exempt from the DSA transparency reporting duty (Art. 15(2)). We keep internal statistics (number of reports by reason, decisions, time to decision) and will publish a yearly summary when we are no longer exempt or earlier as good practice.
+Micro and small enterprises are exempt from the DSA transparency reporting duty (Art. 15(2)). We keep internal statistics (number of reports by reason, decisions, time to decision, with reports about the official account counted separately) and will publish a yearly summary when we are no longer exempt or earlier as good practice.
 
 ## 8. United Kingdom
 If DrinkMe is offered in the UK: UK users can report illegal content and complain about our decisions through the same channels; we keep records of our risk assessments (Online Safety Act 2023 ss. 9, 20–21 – VERIFY).
 
 ---
-Sources checked 2026-11-12: DSA Art. 19 exemption (EUR-Lex text via secondary summaries: springlex.eu, prighter.com); Romanian Law 50/2024 designating ANCOM as Digital Services Coordinator (ANCOM; Mondaq). Code facts: `server/server.js` (`REPORT_REASONS`, `AUTO_HIDE_REPORTER_THRESHOLD`, `SUSPENSION_FIRST_DURATION_MS`), `server/README.md` "Moderation".
+Sources checked 2026-11-12: DSA Art. 19 exemption (EUR-Lex text via secondary summaries: springlex.eu, prighter.com); Romanian Law 50/2024 designating ANCOM as Digital Services Coordinator (ANCOM; Mondaq). Checked 2026-11-13: DSA Art. 14(1) (terms must describe content moderation measures and tools, incl. automated ones), Art. 14(4) (diligent, objective, proportionate enforcement), Art. 17(1) (statement of reasons) – EUR-Lex CELEX 32022R2065. Code facts: `server/server.js` (`REPORT_REASONS`, `AUTO_HIDE_REPORTER_THRESHOLD`, `SUSPENSION_FIRST_DURATION_MS`; official account: `isTargetAutoHidden` `:1824-1826`, `targetOfficial` `:4378`, reserved-name check `isReservedDisplayName` `:1184` (fold `:1085-1180`, check marks `:1121`, "official"/"oficial" `:1168`), `name_reserved` `:3148-3151`, provider name dropped at sign-in `:1217-1231`, `OFFICIAL_USER_IDS` `:4203-4205`; working tree read 2026-11-13, uncommitted), `server/README.md` "Moderation" and "Official account".

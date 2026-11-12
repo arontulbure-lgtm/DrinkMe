@@ -1,8 +1,8 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.3 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # DrinkMe Terms and Conditions
 
-Version 0.1 · Effective date: [to be set at publication] · Terms version for in-app acceptance: `TERMS_VERSION = 1` (planned, LC-03)
+Version 0.3 · Effective date: [to be set at publication] · Terms version for in-app acceptance: `TERMS_VERSION = 1` (planned, LC-03)
 
 ## 1. Who we are
 DrinkMe is operated by **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, Ap. 5, Sector 1, Bucharest, Romania, tax id (CUI) `[TO FILL BY JOHN]`, Trade Register no. `[TO FILL BY JOHN]` ("we", "us"). Contact: **drinkmesocialapp@gmail.com**. See also our Imprint.
@@ -18,7 +18,7 @@ DrinkMe is a free social app for discovering drinks, alcoholic and non-alcoholic
 - One person, one account. Keep your sign-in details secure; tell us at once if you suspect misuse.
 
 ## 4. Your account
-You can sign in with email and password, Google or (on iPhone) Apple. You can reset a forgotten password from the sign-in screen. **We are introducing a change so that a password reset also signs out existing DrinkMe sessions on other devices** (being implemented). You can delete your account at any time in the app (Edit Profile → Delete account); see our Account Deletion page.
+You can sign in with email and password, Google or (on iPhone) Apple. You can reset a forgotten password from the sign-in screen. **After a password reset or change, your older DrinkMe sessions on other devices stop working the next time you sign in to DrinkMe** – not at the moment of the reset itself. So if you think someone else has access to your account, reset your password and then sign in again straight away. The same happens if your sign-in account is disabled or removed. Every sign-in is checked with our sign-in provider (Google Firebase); if that check is not possible, sign-in is refused for the moment and you can try again later. You can delete your account at any time in the app (Edit Profile → Delete account); see our Account Deletion page.
 
 ## 5. Your content
 - You keep ownership of what you post (photos, text, ratings, comments).
@@ -28,14 +28,14 @@ You can sign in with email and password, Google or (on iPhone) Apple. You can re
 - You can edit your posts (except the photo). If a post has been reported, our moderators can still see the version that was reported until they review it.
 
 ## 6. Rules
-You must follow the Community Guidelines. In short: no content involving minors and alcohol; no encouragement of excessive drinking, drinking games or drink-driving; no selling of alcohol or anything illegal; no harassment, hate or threats; no illegal content; no spam; no impersonation (only the official DrinkMe account may use the DrinkMe name and brand); no infringement of others' rights; no attempts to break, overload or scrape the service. We apply limits (for example a number of posts, comments and reports per day) to keep DrinkMe safe.
+You must follow the Community Guidelines. In short: no content involving minors and alcohol; no encouragement of excessive drinking, drinking games or drink-driving; no selling of alcohol or anything illegal; no harassment, hate or threats; no illegal content; no spam; no impersonation (only the official DrinkMe account, shown with an "Official" badge, may use the DrinkMe name and brand, and profile names containing "DrinkMe" are reserved for it); no infringement of others' rights; no attempts to break, overload or scrape the service. We apply limits (for example a number of posts, comments and reports per day) to keep DrinkMe safe.
 
 ## 7. Alcohol disclaimer
-Content on DrinkMe is posted by users for information and enjoyment. It is not advice. Always drink responsibly and legally, never drink and drive, and never pressure anyone to drink. Recipes and ratings are opinions; check ingredients for allergies. You are responsible for your own consumption.
+Content on DrinkMe is posted by users, and by the official DrinkMe account, for information and enjoyment. It is not advice. We are responsible for what the official account publishes; users are responsible for what they publish. Always drink responsibly and legally, never drink and drive, and never pressure anyone to drink. Recipes and ratings are opinions; check ingredients for allergies. You are responsible for your own consumption.
 
 ## 8. Moderation, suspension and termination
 - Anyone signed in can report a post, comment or profile (reasons: spam, harassment, underage, dangerous drinking, mislabelled alcohol, other) and block other users.
-- When three different eligible users report the same item, it is **automatically hidden** from others until a moderator reviews it. This is the only automated step; moderators make every removal and suspension decision.
+- When three different eligible users report the same item, it is **automatically hidden** from others until a moderator reviews it. This is the only automated step; moderators make every removal and suspension decision. Content of the official DrinkMe account is not hidden automatically, but reports about it are reviewed under the same rules and its content can be removed and the account suspended like any other (Content Moderation Policy §2).
 - We can remove content or suspend accounts that break these Terms or the law. A **first suspension lasts 7 days; a further suspension is permanent**. Serious cases can be permanent at once. A suspended user can still read, give cheers, save, block, log out and delete the account, but cannot post, comment, edit their profile, send or accept partner requests, or report.
 - We will tell you what we decided and why (statement of reasons) and how to ask us to review it, as set out in the Content Moderation Policy. You can ask for a review by writing to drinkmesocialapp@gmail.com within 6 months. (The in-app notice of decisions is being built – LC-06; until then we send it by email when we can reach you.)
 - You can stop using DrinkMe at any time by deleting your account. We may end the service or your access with reasonable notice, or at once for serious or repeated breaches.

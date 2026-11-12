@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `privacy-policy.md`.
+DRAFT v0.2.1 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2.1 – 2026-11-13 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `privacy-policy.md`.
 
 # Politica de confidențialitate DrinkMe
 
-Versiunea 0.1 · Data intrării în vigoare: [se stabilește la publicare] · Corespunde notificării de confidențialitate din aplicație, versiunea 2 (`PRIVACY_NOTICE_VERSION = 2`)
+Versiunea 0.2.1 · Data intrării în vigoare: [se stabilește la publicare] · Corespunde notificării de confidențialitate din aplicație, versiunea 2 (`PRIVACY_NOTICE_VERSION = 2`)
 
 Această politică se aplică la nivel mondial. Anexele regionale adaugă drepturi și detalii pentru: UE/SEE și Regatul Unit (`privacy-eu-uk.ro.md`), Statele Unite (`privacy-us.ro.md`), Asia-Pacific (`privacy-apac.ro.md`) și Brazilia, Canada și Elveția (`privacy-other.ro.md`).
 
@@ -22,7 +22,8 @@ Operatorul este **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, Ap. 5, 
 | Smart Bar: lista ta privată de băuturi de acasă | De la tine |
 | Raportările trimise de tine (motiv și detalii opționale) și evidențele de moderare privind contul tău (conținut ascuns, suspendări cu datele și motivele lor) | De la tine, de la alți utilizatori, de la moderatori |
 | Notificări în aplicație (cine a dat noroc, a comentat sau a trimis o cerere de parteneriat) | Generate de aplicație |
-| Jurnal de securitate: o evidență minimă a acțiunilor precum confirmarea vârstei, acceptarea notificării, deconectarea sesiunilor mai vechi, ștergerea contului și deciziile de moderare – doar identificatori și ore, fără nume, emailuri sau mesaje | Generat de aplicație |
+| Securitatea sesiunii: momentul în care Google a raportat ultima dată că sesiunile tale de conectare au fost încheiate (de exemplu după resetarea parolei) și, dacă s-a întâmplat, faptul că contul tău de conectare a fost dezactivat sau eliminat | Google, prin Firebase Authentication |
+| Jurnal de securitate: o evidență minimă a acțiunilor precum confirmarea vârstei, acceptarea notificării, deconectarea sesiunilor mai vechi (cu motivul: resetarea parolei, cont dezactivat sau cont eliminat), ștergerea contului și deciziile de moderare – doar identificatori și ore, fără nume, emailuri sau mesaje | Generat de aplicație |
 | Date tehnice: adresa IP, tipul dispozitivului/browserului și pagina cerută, în jurnalele de cereri ale serverului; contoare pentru limitarea cererilor | Dispozitivul tău |
 **Nu** colectăm locația ta exactă, contactele, data nașterii sau date de plată și nu folosim instrumente de urmărire pentru publicitate sau statistici.
 
@@ -48,7 +49,7 @@ Temeiurile juridice pentru utilizatorii din UE/Regatul Unit sunt în `privacy-eu
 - Conținutul raportat de mai multe persoane este ascuns pentru ceilalți până când un moderator îl verifică.
 
 ## 5. Furnizori de servicii și alți destinatari
-- **Google (Firebase Authentication)** – conectare și trimiterea emailurilor de verificare și resetare a parolei.
+- **Google (Firebase Authentication)** – conectare, trimiterea emailurilor de verificare și resetare a parolei și o verificare, la fiecare conectare, că contul tău de conectare este încă activ și dacă sesiunile tale au fost încheiate (de exemplu prin resetarea parolei).
 - **Google Maps Platform** – când cauți un loc, telefonul tău trimite textul căutării direct la Google.
 - **Google** – dacă fotografia de profil provine din contul tău Google, telefoanele altor utilizatori o încarcă de la Google.
 - **Apple** – Sign in with Apple pe iPhone.
@@ -65,7 +66,7 @@ Google și unii furnizori prelucrează date în afara țării tale, inclusiv în
 - Contul și conținutul: până le ștergi sau până îți ștergi contul.
 - Notificări: 7 zile. Cereri de parteneriat în așteptare: 90 de zile. Contoarele de limitare: 24 de ore.
 - Detaliile raportărilor: până când un moderator rezolvă raportarea; identificatorul celui care a raportat este eliminat la 30 de zile după rezolvare. Raportările deschise trimise de tine rămân, fără numele sau detaliile tale, după ștergerea contului, până sunt verificate.
-- Istoricul suspendărilor: cât timp există contul.
+- Istoricul suspendărilor și valorile de securitate a sesiunii: cât timp există contul.
 - Jurnalul de securitate: aproximativ 90 de zile. După ștergerea contului, înregistrările de moderare despre tine se păstrează doar sub un identificator anonim.
 - Backup-uri: un cont șters este eliminat din backup-urile noastre în cel mult 30 de zile.
 - Jurnalele de cereri ale serverului: [perioadă de stabilit cu furnizorul de găzduire, cel mult 30 de zile – LC-15].
@@ -80,7 +81,7 @@ Google și unii furnizori prelucrează date în afara țării tale, inclusiv în
 DrinkMe nu este pentru persoane sub 18 ani sau sub vârsta legală pentru consumul de alcool din țara lor. Dacă crezi că un minor folosește DrinkMe, raportează profilul sau scrie-ne; vom șterge contul.
 
 ## 11. Securitate
-Conexiunile criptate (HTTPS) sunt obligatorii la lansare; tokenurile de conectare sunt verificate pe server; accesul la date urmează reguli stricte; moderatorii văd doar ce le este necesar; backup-urile sunt limitate la 30 de zile. Niciun sistem nu este perfect sigur; vom informa utilizatorii și autoritățile despre o încălcare a securității datelor acolo unde legea o cere.
+Conexiunile criptate (HTTPS) sunt obligatorii la lansare; tokenurile de conectare sunt verificate pe server; după resetarea sau schimbarea parolei ori dacă contul tău de conectare este dezactivat sau eliminat, sesiunile DrinkMe mai vechi nu mai funcționează de la următoarea ta conectare (așadar, după o resetare, conectează-te din nou imediat); dacă verificarea conectării la Google nu este posibilă, refuzăm conectarea în loc să sărim peste verificare; accesul la date urmează reguli stricte; moderatorii văd doar ce le este necesar; backup-urile sunt limitate la 30 de zile. Niciun sistem nu este perfect sigur; vom informa utilizatorii și autoritățile despre o încălcare a securității datelor acolo unde legea o cere.
 
 ## 12. Date pe telefonul tău
 Vezi Notificarea privind stocarea pe dispozitiv: păstrăm pe telefon sesiunea de conectare și limba aleasă; fără urmărire.
@@ -92,4 +93,4 @@ Dacă modificăm această politică într-un mod important, te vom anunța în a
 drinkmesocialapp@gmail.com. Poți depune și o plângere la o autoritate de protecție a datelor (vezi anexa; în România: ANSPDCP).
 
 ---
-Faptele din această politică provin din cod (vezi `internal/data-inventory.md`, cu fișier și linie). În curs de implementare la 2026-11-12: resetarea parolei închide sesiunile de pe server; un cont oficial DrinkMe cu insigna „Oficial”.
+Faptele din această politică provin din cod (vezi `internal/data-inventory.md`, cu fișier și linie). Verificat la 2026-11-13: contul oficial DrinkMe (insigna „Oficial”, nume rezervate) nu adaugă date personale, scopuri sau destinatari noi. Un nume din Google sau Apple pe care aplicația îl refuză ca rezervat nu este stocat; până la următoarea salvare a profilului, contul păstrează doar un indicator da/nu că s-a întâmplat acest lucru, pentru ca aplicația să îl poată explica (acoperit de rândul „Cont” din §2).
