@@ -432,7 +432,7 @@ describe('client source', () => {
     assert.deepEqual(lines, [
       'profileData.email ?? firebaseUser?.email ?? `user+${viewedUserId}@drinkme.app`',
       '}, [firebaseUser?.email, isSelf, profileData, setProfile, viewedUserId]);',
-      "return source?.email || firebaseUser?.email || 'User';",
+      "return source?.email || firebaseUser?.email || t('common.unknownUser');",
       '}, [firebaseUser?.email, isSelf, profile, profileData, t]);',
       '<Text style={styles.email}>{profileData?.email || profile?.email || firebaseUser?.email}</Text>',
     ]);
