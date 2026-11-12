@@ -3,6 +3,17 @@
 Branch: `auto/run-2026-10-30` (committed in logical chunks on this branch; never pushed, never on main; review with `git log main..` and `git diff main`).
 
 ## Summary for John
+### Session 4 (2026-11-12 to 2026-11-13): your instructions 0 to 8, done
+- **Checks:** server tests 1225 of 1225 (full run on the final code); `npm run check` 0 errors, 0 warnings. Nothing pushed, nothing on main.
+- **0. Setup (6a45f11):** `git commit` and `git add` allowed in `.claude/settings.json` (`git push` still asks); legal-compliance agent and skill moved into `.claude/`, `_claude/` deleted; CLAUDE.md team table and pipeline now call for a legal review on personal data, user content, age, brand content or a new market.
+- **1. Password reset ends server sessions (0844255, plus 21a0597):** one Firebase `getUser` per sign-in. Tokens from before the reset are refused, and the owner's next sign-in ends every older session. Disabling or deleting the user in the Firebase Console ends them too. If Firebase can't be reached, sign-in fails closed (503) rather than letting it through. Also covered: the first sign-in after deploy, concurrent sign-ins and failed saves. The app retries once with a fresh token, and the reset message now says "sign in again here to sign out other devices". At most one audit entry per account and reason per 24 h. Reviews: one BLOCKER (a flaky test), fixed; security re-review clean.
+- **2. (e90693b):** `@types/react-native` uninstalled; `AgeGateBanner.tsx` and `AUTONOMOUS_RUN_TIER2_SPEC.md` deleted. Pins unchanged.
+- **3 to 6:** logged under Backlog (jest-expo after device tests; ban evasion post-launch; no majors: Expo SDK 54, Firebase 12; earlier lead decisions kept).
+- **7. Official account (21a0597):** `OFFICIAL_USER_IDS` (like `ADMIN_USER_IDS`); `official` in every user view and an Official/Oficial badge (accessible) on posts, comments, profile, Explore, partners, blocked users. For non-official users the server refuses "DrinkMe" and look-alikes (Cyrillic, IPA, Cherokee, digits, flag letters, wildcards), "Official"/"Oficial" and check marks with 400 `name_reserved`. A provider name that breaks the rule is dropped at sign-in, and the app explains why. Rule decision: "Drink Meister" is refused too (broad rule kept). Official content is never auto-hidden but is still reported, queued (`targetOfficial`), removable and suspendable. Startup warnings: official uid that is also an admin, or official ids in dev auth mode. No account was created. **Your setup:** sign up with drinkmesocialapp@gmail.com, confirm 18+, accept the notice, skip the name, put the Firebase uid in `OFFICIAL_USER_IDS` in `server/.env`, restart, then set the name "DrinkMe" in Edit Profile. Never also put that uid in `ADMIN_USER_IDS` (it could no longer be suspended).
+- **8. Legal (0938280, 884fc61, 3de4e85):** `docs/legal/`: 14 user-facing drafts in EN + RO, 10 internal GDPR records, `compliance-matrix.md` (LC-01 to LC-34), `OPEN_DECISIONS.md` (D-01 to D-20), CHANGELOG. All drafts need a lawyer (D-01). **Plan, not built:** `docs/legal/CODE_GAPS_PLAN.md`, 26 tasks. Phase 0 (start anytime): legal links, contact, removing the misleading Explore "partners discount" card, Places attribution, logs without IP. Phase 1: terms acceptance with `TERMS_VERSION`, and the per-country neutral age gate (US 21, JP 20, KR 19, ...; a country is stored, never a birth date). Then brand labels, DSA statements of reasons, retention and export.
+- **Needs you before Phase 1:** D-06 (where the legal pages are hosted), D-02/03/04 (excluded countries; Qatar is listed both as 21 and excluded), N-1 (re-gate existing 18+ users), N-3 (an under-age answer locks the device only), D-12, D-14, D-20 (who reviews reports about the official account). Full list in the plan.
+- **Operational (LC-34):** before the official account posts: check the startup log for `[official]` warnings and for old names that use the brand, and clear those profiles. No brand-partner post before the "Paid partnership" label (T-13/T-14).
+- **Still untested on a device or real Firebase:** everything above, the password reset path especially (check that `tokensValidAfterTime` moves on a real reset).
 **Status: finished on 2026-11-12. Your 2026-11-10 instructions (items 1 to 8) and the adopted Tier 3 to 6 plan (tasks A to N) are done and committed on `auto/run-2026-10-30`. Nothing pushed, nothing on main.** Earlier summaries (2026-11-10) are kept under "Final state" below.
 
 - **Checks on the final code:** server tests 1182 of 1182 (about 14.5 min; run before the last two small commits, which changed one notice sentence, two comments and lint-only code); `npm run check` (typecheck + lint) 0 errors, **0 warnings** (was 16).
@@ -270,6 +281,12 @@ Branch: `auto/run-2026-10-30` (committed in logical chunks on this branch; never
 - `git` and `node` are not on this session's PATH. Commands use `/c/Program Files/nodejs` and `/c/Program Files/Git/cmd`, added per command. System settings were not changed.
 
 ## Backlog (code only, in priority order)
+### Owner decisions of 2026-11-12 (session 4)
+- jest-expo: not now; keep the proposal (Tier 5) for after the device tests.
+- Ban evasion by re-registering: post-launch item (D-09 in docs/legal/OPEN_DECISIONS.md covers the legal side of a stored email hash).
+- No major upgrades: stay on Expo SDK 54 and Firebase 12.
+- Earlier lead decisions kept as they are.
+- Done this session: password reset ends sessions; @types/react-native removed; AgeGateBanner.tsx and the Tier 2 spec deleted; official account; legal set and the code-gaps plan (docs/legal/CODE_GAPS_PLAN.md, next work).
 ### Tiers 3 to 6: adopted plan (planner spec, approved by the lead on 2026-11-11)
 Developer tasks, one at a time; the full server suite after every server task:
 
