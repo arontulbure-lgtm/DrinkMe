@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Alert, Platform, ActivityIndicator,
+  StyleSheet, Alert, Platform, ActivityIndicator, AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,13 @@ import * as AuthSession from 'expo-auth-session';
 import { GoogleAuthProvider, OAuthProvider, AuthCredential } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
+import { getAuthErrorKey, getPasswordResetErrorKey, getSocialAuthErrorKey, isAuthCancellation } from '../lib/authErrors';
+import {
+  PASSWORD_RESET_COOLDOWN_MS,
+  getCooldownRemainingSeconds,
+  isValidEmailFormat,
+  normalizeEmail,
+} from '../lib/passwordReset';
 import Constants from 'expo-constants';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -23,6 +30,7 @@ const GOOGLE_DISCOVERY = {
 };
 
 // ── Email / password validators ───────────────────────────────────────────────
+// Both return a translation key (auth.validation.*) or null.
 const ALLOWED_EMAIL_DOMAINS = [
   'gmail.com', 'yahoo.com', 'yahoo.ro', 'yahoo.co.uk', 'yahoo.fr',
   'hotmail.com', 'hotmail.ro', 'hotmail.co.uk', 'outlook.com', 'outlook.ro',
@@ -37,24 +45,29 @@ function validateEmail(email: string): string | null {
   const lower = email.toLowerCase().trim();
   const atIdx = lower.lastIndexOf('@');
   if (atIdx < 1 || atIdx === lower.length - 1) {
-    return 'Please enter a valid email address.';
+    return 'auth.validation.emailInvalid';
   }
   const domain = lower.slice(atIdx + 1);
   if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
-    return 'Please use a personal email address (Gmail, Yahoo, Outlook, iCloud, etc.).';
+    return 'auth.validation.emailDomain';
   }
   return null;
 }
 
 function validatePassword(password: string): string | null {
-  if (password.length < 8) return 'Password must be at least 8 characters long.';
-  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter.';
-  if (!/[0-9]/.test(password)) return 'Password must contain at least one digit.';
+  if (password.length < 8) return 'auth.validation.passwordLength';
+  if (!/[A-Z]/.test(password)) return 'auth.validation.passwordUppercase';
+  if (!/[0-9]/.test(password)) return 'auth.validation.passwordDigit';
   if (!/[!@#$%^&*()\-_=+\[\]{};':",.<>/?`~\\|]/.test(password)) {
-    return 'Password must contain at least one special character (e.g. !@#$%).';
+    return 'auth.validation.passwordSpecial';
   }
   return null;
 }
+
+// ── Password reset cooldown ───────────────────────────────────────────────────
+// Module scope, so the cooldown survives re-renders and AuthScreen remounts (sign out, sign in
+// again). It resets on app restart, which is acceptable: Firebase rate-limits on its side too.
+let passwordResetCooldownUntil = 0;
 
 // ── Detect Expo Go ────────────────────────────────────────────────────────────
 // Google OAuth via browser redirect does not work in Expo Go because the
@@ -68,6 +81,7 @@ function GoogleAuthButton({ onCredential, disabled }: {
   disabled: boolean;
 }) {
   const [loading, setLoading] = useState(false);
+  const { t } = useLocalization();
   const webClientId = Constants.expoConfig?.extra?.googleWebClientId as string | undefined;
 
   const redirectUri = AuthSession.makeRedirectUri({ scheme: 'drinkme' });
@@ -86,6 +100,8 @@ function GoogleAuthButton({ onCredential, disabled }: {
 
   useEffect(() => {
     if (!response) return;
+    // Never show the raw OAuth error text: one neutral, translated message.
+    const showGoogleError = () => Alert.alert(t('auth.googleErrorTitle'), t('auth.errors.google'));
     if (response.type === 'success') {
       // Code + PKCE: exchange the code for tokens
       const { code } = response.params;
@@ -104,21 +120,24 @@ function GoogleAuthButton({ onCredential, disabled }: {
             const credential = GoogleAuthProvider.credential(null, accessToken);
             onCredential(credential);
           } else {
-            Alert.alert('Google Sign-In Error', 'No access token in response.');
+            showGoogleError();
           }
-        }).catch((err) => {
-          Alert.alert('Google Sign-In Error', err?.message ?? 'Token exchange failed');
+        }).catch(() => {
+          showGoogleError();
         }).finally(() => setLoading(false));
       } else {
-        Alert.alert('Google Sign-In Error', 'Missing code or verifier.');
+        showGoogleError();
         setLoading(false);
       }
     } else if (response.type === 'error') {
-      Alert.alert('Google Sign-In Error', response.error?.message ?? 'Unknown error');
+      showGoogleError();
       setLoading(false);
     } else {
+      // cancel / dismiss: the user closed the browser, nothing to show.
       setLoading(false);
     }
+    // Only a new response may run this: re-running it for the same response would exchange the code twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response]);
 
   // In Expo Go the redirect URI is exp:// which Google Cloud Console won't
@@ -128,7 +147,7 @@ function GoogleAuthButton({ onCredential, disabled }: {
       <TouchableOpacity style={[styles.socialButton, styles.socialButtonDisabled]} disabled>
         <Ionicons name="logo-google" size={20} color="#6B7280" />
         <Text style={[styles.socialButtonText, { color: '#6B7280' }]}>
-          Google Sign-In (not available in Expo Go)
+          {t('auth.googleUnavailableExpoGo')}
         </Text>
       </TouchableOpacity>
     );
@@ -139,12 +158,14 @@ function GoogleAuthButton({ onCredential, disabled }: {
       style={[styles.socialButton, (disabled || !request || loading) && styles.socialButtonDisabled]}
       onPress={() => { setLoading(true); promptAsync(); }}
       disabled={disabled || !request || loading}
+      accessibilityRole="button"
+      accessibilityLabel={t('auth.continueWithGoogle')}
     >
       {loading
         ? <ActivityIndicator color="#FFFFFF" size="small" />
         : <>
             <Ionicons name="logo-google" size={20} color="#FFFFFF" />
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
+            <Text style={styles.socialButtonText}>{t('auth.continueWithGoogle')}</Text>
           </>}
     </TouchableOpacity>
   );
@@ -157,15 +178,39 @@ export default function AuthScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSocialLoading, setIsSocialLoading] = useState(false);
-  const { signIn, signUp, signInWithSocial } = useAuth();
-  const { t } = useLocalization();
+  // Forgot password (sign-in mode only)
+  const [isResetMode, setIsResetMode] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [resetStatus, setResetStatus] = useState<{ key: string; tone: 'success' | 'error' } | null>(null);
+  const [resetCooldownUntil, setResetCooldownUntil] = useState(passwordResetCooldownUntil);
+  const [now, setNow] = useState(() => Date.now());
+  // Blocks a second tap in the same tick, before isSendingReset has re-rendered the button.
+  const resetInFlightRef = useRef(false);
+  const { signIn, signUp, signInWithSocial, sendPasswordReset } = useAuth();
+  const { t, locale } = useLocalization();
+
+  const resetCooldownSeconds = getCooldownRemainingSeconds(resetCooldownUntil, now);
+
+  // Ticks once a second while the cooldown runs, then stops.
+  useEffect(() => {
+    if (resetCooldownUntil <= Date.now()) return;
+    const timer = setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= resetCooldownUntil) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetCooldownUntil]);
 
   const handleSocialCredential = async (credential: AuthCredential) => {
     setIsSocialLoading(true);
     try {
       await signInWithSocial(credential);
-    } catch (e: any) {
-      Alert.alert('Sign-In Error', e.message);
+    } catch (e: unknown) {
+      if (!isAuthCancellation(e)) {
+        // handleSocialCredential serves the Google button only; Apple has its own handler below.
+        Alert.alert(t('auth.signInErrorTitle'), t(getSocialAuthErrorKey(e, 'google')));
+      }
     } finally {
       setIsSocialLoading(false);
     }
@@ -185,9 +230,9 @@ export default function AuthScreen() {
       const provider = new OAuthProvider('apple.com');
       const credential = provider.credential({ idToken: identityToken });
       await signInWithSocial(credential);
-    } catch (e: any) {
-      if (e.code !== 'ERR_REQUEST_CANCELED') {
-        Alert.alert('Apple Sign-In Error', e.message);
+    } catch (e: unknown) {
+      if (!isAuthCancellation(e)) {
+        Alert.alert(t('auth.appleErrorTitle'), t(getSocialAuthErrorKey(e, 'apple')));
       }
     } finally {
       setIsSocialLoading(false);
@@ -203,12 +248,12 @@ export default function AuthScreen() {
     if (isSignUp) {
       const emailError = validateEmail(email);
       if (emailError) {
-        Alert.alert('Invalid Email', emailError);
+        Alert.alert(t('auth.invalidEmailTitle'), t(emailError));
         return;
       }
       const passwordError = validatePassword(password);
       if (passwordError) {
-        Alert.alert('Invalid Password', passwordError);
+        Alert.alert(t('auth.invalidPasswordTitle'), t(passwordError));
         return;
       }
     }
@@ -220,95 +265,226 @@ export default function AuthScreen() {
       } else {
         await signIn(email, password);
       }
-    } catch (error: any) {
-      Alert.alert('Authentication Error', error.message);
+    } catch (error: unknown) {
+      Alert.alert(t('auth.errorTitle'), t(getAuthErrorKey(error)));
     } finally {
       setIsLoading(false);
     }
   };
 
+  const openResetMode = () => {
+    setResetStatus(null);
+    setIsResetMode(true);
+  };
+
+  const closeResetMode = () => {
+    setResetStatus(null);
+    setIsResetMode(false);
+  };
+
+  const handleSendReset = async () => {
+    if (resetInFlightRef.current || getCooldownRemainingSeconds(passwordResetCooldownUntil, Date.now()) > 0) return;
+    const resetEmail = normalizeEmail(email);
+    if (!isValidEmailFormat(resetEmail)) {
+      setResetStatus({ key: 'auth.errors.invalidEmail', tone: 'error' });
+      AccessibilityInfo.announceForAccessibility(t('auth.errors.invalidEmail'));
+      return;
+    }
+
+    resetInFlightRef.current = true;
+    setIsSendingReset(true);
+    setResetStatus(null);
+    let errorKey: string | null = null;
+    try {
+      await sendPasswordReset(resetEmail, locale);
+    } catch (error: unknown) {
+      // auth/user-not-found maps to null: the same confirmation as a real send.
+      errorKey = getPasswordResetErrorKey(error);
+    } finally {
+      resetInFlightRef.current = false;
+      setIsSendingReset(false);
+    }
+
+    // Every outcome starts the cooldown except the two where nothing can have been sent: an invalid
+    // email and no network. A timeout or unknown failure may still have sent an email.
+    if (errorKey !== 'auth.errors.invalidEmail' && errorKey !== 'auth.errors.network') {
+      const started = Date.now();
+      passwordResetCooldownUntil = started + PASSWORD_RESET_COOLDOWN_MS;
+      setNow(started);
+      setResetCooldownUntil(passwordResetCooldownUntil);
+    }
+    const statusKey = errorKey ?? 'auth.forgot.sent';
+    setResetStatus({ key: statusKey, tone: errorKey === null ? 'success' : 'error' });
+    AccessibilityInfo.announceForAccessibility(t(statusKey));
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    // An old error no longer applies to the edited address; the confirmation stays.
+    if (resetStatus?.tone === 'error') setResetStatus(null);
+  };
+
+  const isResetButtonDisabled = isSendingReset || resetCooldownSeconds > 0;
+  const resetButtonLabel = resetCooldownSeconds > 0
+    ? t('auth.forgot.resendIn', { seconds: resetCooldownSeconds })
+    : t('auth.forgot.send');
+
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.logo}>DrinkMe</Text>
+        <Text style={styles.logo}>{t('auth.title')}</Text>
         <Text style={styles.subtitle}>
-          {isSignUp ? t('auth.subtitleSignUp') : t('auth.subtitleSignIn')}
+          {isResetMode
+            ? t('auth.forgot.title')
+            : isSignUp ? t('auth.subtitleSignUp') : t('auth.subtitleSignIn')}
         </Text>
 
-        {/* Social buttons */}
-        <View style={styles.socialContainer}>
-          {/* Google — all platforms */}
-          <GoogleAuthButton
-            onCredential={handleSocialCredential}
-            disabled={isSocialLoading}
-          />
+        {!isResetMode && (
+          <>
+            {/* Social buttons */}
+            <View style={styles.socialContainer}>
+              {/* Google — all platforms */}
+              <GoogleAuthButton
+                onCredential={handleSocialCredential}
+                disabled={isSocialLoading}
+              />
 
-          {/* Apple — iOS only, native Apple-styled button (required by Apple HIG) */}
-          {Platform.OS === 'ios' && (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
-              cornerRadius={8}
-              style={styles.appleButton}
-              onPress={handleAppleSignIn}
-            />
-          )}
-        </View>
+              {/* Apple — iOS only, native Apple-styled button (required by Apple HIG).
+                  Its label is drawn by iOS in the device language, not by t(). */}
+              {Platform.OS === 'ios' && (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+                  cornerRadius={8}
+                  style={styles.appleButton}
+                  onPress={handleAppleSignIn}
+                />
+              )}
+            </View>
 
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>sau</Text>
-          <View style={styles.dividerLine} />
-        </View>
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>{t('auth.or')}</Text>
+              <View style={styles.dividerLine} />
+            </View>
+          </>
+        )}
 
         {/* Email / Password */}
         <View style={styles.form}>
+          {isResetMode && <Text style={styles.resetHint}>{t('auth.forgot.hint')}</Text>}
+
           <TextInput
             style={styles.input}
             placeholder={t('auth.emailPlaceholder')}
             placeholderTextColor="#6B7280"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={handleEmailChange}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder={t('auth.passwordPlaceholder')}
-            placeholderTextColor="#6B7280"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
+            returnKeyType={isResetMode ? 'send' : 'default'}
+            onSubmitEditing={isResetMode ? handleSendReset : undefined}
+            accessibilityLabel={t('auth.emailPlaceholder')}
           />
 
-          {/* Password hint shown only during sign-up */}
-          {isSignUp && (
-            <Text style={styles.passwordHint}>
-              Min. 8 characters, one uppercase letter, one digit, one special character.
-            </Text>
+          {isResetMode ? (
+            <>
+              <TouchableOpacity
+                style={[styles.button, isResetButtonDisabled && styles.buttonDisabled]}
+                onPress={handleSendReset}
+                disabled={isResetButtonDisabled}
+                accessibilityRole="button"
+                accessibilityLabel={t('auth.forgot.send')}
+                accessibilityHint={resetCooldownSeconds > 0 ? resetButtonLabel : undefined}
+                accessibilityState={{ disabled: isResetButtonDisabled, busy: isSendingReset }}
+              >
+                {isSendingReset
+                  ? <ActivityIndicator color="#FFFFFF" size="small" />
+                  : <Text style={styles.buttonText}>{resetButtonLabel}</Text>}
+              </TouchableOpacity>
+
+              {resetStatus && (
+                <Text
+                  style={[styles.resetStatus, resetStatus.tone === 'error' && styles.resetStatusError]}
+                  accessibilityLiveRegion="polite"
+                >
+                  {t(resetStatus.key)}
+                </Text>
+              )}
+
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={closeResetMode}
+                accessibilityRole="button"
+                accessibilityLabel={t('auth.forgot.back')}
+              >
+                <Text style={styles.linkText}>{t('auth.forgot.back')}</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder={t('auth.passwordPlaceholder')}
+                placeholderTextColor="#6B7280"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel={t('auth.passwordPlaceholder')}
+              />
+
+              {/* Password hint shown only during sign-up */}
+              {isSignUp && (
+                <Text style={styles.passwordHint}>
+                  {t('auth.passwordHint')}
+                </Text>
+              )}
+
+              {/* Forgot password shown only during sign-in */}
+              {!isSignUp && (
+                <TouchableOpacity
+                  style={styles.forgotButton}
+                  onPress={openResetMode}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('auth.forgot.link')}
+                >
+                  <Text style={styles.linkText}>{t('auth.forgot.link')}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.button, isLoading && styles.buttonDisabled]}
+                onPress={handleEmailAuth}
+                disabled={isLoading}
+                accessibilityRole="button"
+                accessibilityLabel={isSignUp ? t('auth.signUp') : t('auth.signIn')}
+                accessibilityState={{ disabled: isLoading, busy: isLoading }}
+              >
+                {isLoading
+                  ? <ActivityIndicator color="#FFFFFF" size="small" />
+                  : <Text style={styles.buttonText}>
+                      {isSignUp ? t('auth.signUp') : t('auth.signIn')}
+                    </Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={() => setIsSignUp(!isSignUp)}
+                accessibilityRole="button"
+                accessibilityLabel={isSignUp ? t('auth.toggleToSignIn') : t('auth.toggleToSignUp')}
+              >
+                <Text style={styles.linkText}>
+                  {isSignUp ? t('auth.toggleToSignIn') : t('auth.toggleToSignUp')}
+                </Text>
+              </TouchableOpacity>
+            </>
           )}
-
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleEmailAuth}
-            disabled={isLoading}
-          >
-            {isLoading
-              ? <ActivityIndicator color="#FFFFFF" size="small" />
-              : <Text style={styles.buttonText}>
-                  {isSignUp ? t('auth.signUp') : t('auth.signIn')}
-                </Text>}
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.linkButton} onPress={() => setIsSignUp(!isSignUp)}>
-            <Text style={styles.linkText}>
-              {isSignUp ? t('auth.toggleToSignIn') : t('auth.toggleToSignUp')}
-            </Text>
-          </TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>
@@ -356,6 +532,13 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.5 },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  linkButton: { alignItems: 'center', marginTop: 16 },
+  linkButton: { alignItems: 'center', marginTop: 16, minHeight: 44, justifyContent: 'center' },
   linkText: { color: '#8B5FBF', fontSize: 14 },
+  forgotButton: {
+    alignSelf: 'flex-end', marginTop: -8,
+    minHeight: 44, justifyContent: 'center', paddingHorizontal: 4,
+  },
+  resetHint: { color: '#9CA3AF', fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  resetStatus: { color: '#FFFFFF', fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  resetStatusError: { color: '#EF4444' },
 });

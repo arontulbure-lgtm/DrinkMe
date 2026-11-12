@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInWithCredential, AuthCredential, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInWithCredential, AuthCredential, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { ApiError, DeletionOutcomeUnknownError, apiFetch, getApiToken, getSessionErrorKey, setApiToken, setStaleTokenHandler } from '../lib/api';
 import { resetDrinkToggles } from '../lib/drinkToggleChains';
@@ -27,6 +27,8 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signInWithSocial: (credential: AuthCredential) => Promise<void>;
+  // Rejects with the Firebase error; the caller decides what the user sees (never whether the account exists).
+  sendPasswordReset: (email: string, languageCode?: string) => Promise<void>;
   logout: () => Promise<void>;
   // password is null for accounts with no password, such as Google.
   deleteAccount: (password: string | null) => Promise<DeleteAccountResponse>;
@@ -346,6 +348,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signInWithCredential(auth, credential);
   };
 
+  // languageCode makes Firebase send the reset email in the app language. Timed out like the session
+  // steps, so a hung request cannot keep the button spinning.
+  const sendPasswordReset = async (email: string, languageCode?: string) => {
+    // On purpose this also sets the language of later Firebase emails (e.g. verification).
+    if (languageCode) auth.languageCode = languageCode;
+    await withSessionTimeout(sendPasswordResetEmail(auth, email));
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
@@ -420,6 +430,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signIn,
       signUp,
       signInWithSocial,
+      sendPasswordReset,
       logout,
       deleteAccount,
       deleteUnverifiedAccount,
