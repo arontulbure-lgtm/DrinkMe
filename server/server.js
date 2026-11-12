@@ -1896,6 +1896,56 @@ const NOTIFICATION_TEXT_WITHOUT_POST_NAME = {
   comment: 'Someone commented on your post.',
 };
 
+// Every type the server stores. The app writes the text from `params` in the reader's language; the stored
+// English `message` stays for older app versions and for entries the app cannot write itself.
+const NOTIFICATION_PARAM_TYPES = new Set(['cheer', 'comment', 'partner', 'partner_request']);
+const PARTNER_ADDED_NOTIFICATION_SUFFIX = ' added you as a drink partner.';
+
+// How the stored text of each type continues after the actor's name (see the pushNotification calls).
+const NOTIFICATION_VERBS_BY_TYPE = {
+  cheer: ['cheered your '],
+  comment: ['commented on '],
+  partner: ['accepted your ', 'added you '],
+  partner_request: ['sent you '],
+};
+
+// "Someone" when the entry was made while the actor's name was hidden (pending notice or hidden after
+// reports): that stays for good, as in the stored text (see getDisplayName). Matched on "Someone <verb of
+// this type>", so a user called "Someone Else" is not caught. A user whose own name starts with
+// "Someone <that verb>" also reads "Someone": a false "Someone" names nobody, so it is acceptable by design,
+// while a false name would not be. Otherwise the actor's name now, so a hidden profile or a later rename
+// shows as it is now, and an account that is gone or being deleted reads "Someone".
+const getNotificationActorName = (notification) => {
+  const { type, message, actorId } = notification;
+  const verbs = NOTIFICATION_VERBS_BY_TYPE[type] ?? [];
+  if (typeof message === 'string' && verbs.some((verb) => message.startsWith(`Someone ${verb}`))) return 'Someone';
+  return isLiveAccount(actorId) ? getDisplayName(actorId) : 'Someone';
+};
+
+// A cheer or comment notification is always about the reader's own post. The owner check also guards
+// against a drinkId that now names another user's post (ids reused after a restore of an older file).
+const getOwnNotificationDrink = (drinkId, viewerId, drinksById) => {
+  const drink = drinkId === undefined ? undefined : drinksById.get(drinkId);
+  return drink && drink.userId === viewerId ? drink : undefined;
+};
+
+// Worked out on each read, never stored. Null for entries from before actorId and for unknown types: the
+// app then shows `message`. drinkName only while the post exists, is the reader's own and the reader may
+// see it, under its current name. `variant` (partner only) tells the two partner texts apart, from the
+// text the server itself wrote.
+const toNotificationParams = (notification, viewerId, drinksById) => {
+  const { type, actorId, drinkId, message } = notification;
+  if (!NOTIFICATION_PARAM_TYPES.has(type) || typeof actorId !== 'string' || !actorId) return null;
+  const drink = NOTIFICATION_TEXT_WITHOUT_POST_NAME[type] ? getOwnNotificationDrink(drinkId, viewerId, drinksById) : undefined;
+  return {
+    actorName: getNotificationActorName(notification),
+    drinkName: drink && canViewDrink(drink, viewerId) ? drink.name : null,
+    ...(type === 'partner' && {
+      variant: typeof message === 'string' && message.endsWith(PARTNER_ADDED_NOTIFICATION_SUFFIX) ? 'added' : 'accepted',
+    }),
+  };
+};
+
 // Older notifications hold no drinkId, and a deleted post cannot be checked: both count as alcoholic.
 // The stored text is kept, so it shows in full once the reader confirms. drinkId and actorId stay internal.
 const toVisibleNotification = (storedNotification, viewerId, drinksById) => {
@@ -2009,56 +2059,6 @@ const deleteDrinkCascade = (drinkId) => {
   const [drink] = drinks.splice(index, 1);
   const comments = commentsByDrink.get(drinkId);
   commentsByDrink.delete(drinkId);
-
-// Every type the server stores. The app writes the text from `params` in the reader's language; the stored
-// English `message` stays for older app versions and for entries the app cannot write itself.
-const NOTIFICATION_PARAM_TYPES = new Set(['cheer', 'comment', 'partner', 'partner_request']);
-const PARTNER_ADDED_NOTIFICATION_SUFFIX = ' added you as a drink partner.';
-
-// How the stored text of each type continues after the actor's name (see the pushNotification calls).
-const NOTIFICATION_VERBS_BY_TYPE = {
-  cheer: ['cheered your '],
-  comment: ['commented on '],
-  partner: ['accepted your ', 'added you '],
-  partner_request: ['sent you '],
-};
-
-// "Someone" when the entry was made while the actor's name was hidden (pending notice or hidden after
-// reports): that stays for good, as in the stored text (see getDisplayName). Matched on "Someone <verb of
-// this type>", so a user called "Someone Else" is not caught. A user whose own name starts with
-// "Someone <that verb>" also reads "Someone": a false "Someone" names nobody, so it is acceptable by design,
-// while a false name would not be. Otherwise the actor's name now, so a hidden profile or a later rename
-// shows as it is now, and an account that is gone or being deleted reads "Someone".
-const getNotificationActorName = (notification) => {
-  const { type, message, actorId } = notification;
-  const verbs = NOTIFICATION_VERBS_BY_TYPE[type] ?? [];
-  if (typeof message === 'string' && verbs.some((verb) => message.startsWith(`Someone ${verb}`))) return 'Someone';
-  return isLiveAccount(actorId) ? getDisplayName(actorId) : 'Someone';
-};
-
-// A cheer or comment notification is always about the reader's own post. The owner check also guards
-// against a drinkId that now names another user's post (ids reused after a restore of an older file).
-const getOwnNotificationDrink = (drinkId, viewerId, drinksById) => {
-  const drink = drinkId === undefined ? undefined : drinksById.get(drinkId);
-  return drink && drink.userId === viewerId ? drink : undefined;
-};
-
-// Worked out on each read, never stored. Null for entries from before actorId and for unknown types: the
-// app then shows `message`. drinkName only while the post exists, is the reader's own and the reader may
-// see it, under its current name. `variant` (partner only) tells the two partner texts apart, from the
-// text the server itself wrote.
-const toNotificationParams = (notification, viewerId, drinksById) => {
-  const { type, actorId, drinkId, message } = notification;
-  if (!NOTIFICATION_PARAM_TYPES.has(type) || typeof actorId !== 'string' || !actorId) return null;
-  const drink = NOTIFICATION_TEXT_WITHOUT_POST_NAME[type] ? getOwnNotificationDrink(drinkId, viewerId, drinksById) : undefined;
-  return {
-    actorName: getNotificationActorName(notification),
-    drinkName: drink && canViewDrink(drink, viewerId) ? drink.name : null,
-    ...(type === 'partner' && {
-      variant: typeof message === 'string' && message.endsWith(PARTNER_ADDED_NOTIFICATION_SUFFIX) ? 'added' : 'accepted',
-    }),
-  };
-};
 
   // The earlier Sets are kept whole, so a restored one also keeps its order in the saved file.
   const removeFromSets = (setsByUser) => {
