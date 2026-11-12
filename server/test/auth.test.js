@@ -629,7 +629,7 @@ describe('/api/auth/mobile in Firebase mode (firebase-admin/auth stubbed)', () =
     test('every owner response has exactly the allowlisted fields', async (t) => {
       const user = { ...forgedUser, emailVerified: true, nameSetByUser: true, internalNote: 'private', ageConfirmedAt: '2026-01-01T00:00:00.000Z' };
       const { baseUrl } = await startOn(t, firebaseEnv, { dbFixture: { users: [user] } });
-      const fields = ['ageConfirmed', 'avatar', 'bio', 'city', 'email', 'emailVerified', 'firstName', 'id', 'lastName', 'needsName', 'privacyNoticeVersion'];
+      const fields = ['ageConfirmed', 'avatar', 'bio', 'city', 'email', 'emailVerified', 'firstName', 'id', 'lastName', 'needsName', 'official', 'privacyNoticeVersion'];
 
       // Only the profile read adds the count, which is not a field of the user record.
       assert.deepEqual(Object.keys(await getUser(baseUrl, 'fb-user')).filter((key) => key !== 'partnerCount').sort(), fields);

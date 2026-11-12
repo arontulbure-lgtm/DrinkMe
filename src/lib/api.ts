@@ -158,6 +158,11 @@ export function isAccountSuspendedError(error: unknown): boolean {
 
 export const ACCOUNT_SUSPENDED_ERROR_KEY = 'moderation.actionBlocked';
 
+// PUT /api/users/:id: the brand name is reserved for the official DrinkMe account.
+export function isNameReservedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 400 && error.code === 'name_reserved';
+}
+
 // For queries about one post. Neither a deleted post nor a missing age confirmation is worth the app's one retry.
 export function retryUnlessNotFound(failureCount: number, error: unknown): boolean {
   return !isNotFoundError(error) && !isAgeRequiredError(error) && failureCount < 1;

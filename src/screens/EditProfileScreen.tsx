@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
-import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError } from '../lib/api';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError, isNameReservedError } from '../lib/api';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser } from '../types/api';
@@ -58,7 +58,10 @@ export default function EditProfileScreen({ navigation }: Props) {
     },
     onError: (error) => {
       refreshIfSuspended(error);
-      Alert.alert(t('editProfile.title'), t(isAccountSuspendedError(error) ? ACCOUNT_SUSPENDED_ERROR_KEY : 'editProfile.error'));
+      const messageKey = isAccountSuspendedError(error)
+        ? ACCOUNT_SUSPENDED_ERROR_KEY
+        : isNameReservedError(error) ? 'editProfile.nameReserved' : 'editProfile.error';
+      Alert.alert(t('editProfile.title'), t(messageKey));
     },
   });
 

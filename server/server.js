@@ -1074,12 +1074,131 @@ const isEmailDerivedName = (user) => {
   return matchesEmailPrefix(user.firstName, user.email.split('@')[0]);
 };
 
+// ── Reserved display names (official DrinkMe account) ─────────────────────────
+// Owner decision (2026-11-12): only the official account (OFFICIAL_USER_IDS) may carry the brand name in its
+// profile name, so nobody can pose as DrinkMe (community guidelines, impersonation). Best effort, not a full
+// Unicode TR39 confusables check (no extra dependency, lead decision). A name is folded like this:
+//   1. NFKC, lowercase, diacritics stripped;
+//   2. look-alikes mapped to a-z, twice (so Cyrillic "з" -> "3" -> "e"): the Cyrillic, Greek, Cherokee and
+//      Latin letters in RESERVED_NAME_LOOKALIKES, regional-indicator letters, and digits and symbols used as
+//      letters (0 o, 1 i, 3 e, 4 a, 5 s, 7 t, ! i, | i, $ s, @ a; "l" reads as "i");
+//   3. any other letter or symbol becomes a wildcard ("?"); everything else (spaces, dots, underscores,
+//      hyphens, other punctuation, invisible characters) is removed.
+// The brand matches when "drinkme" appears with at most 2 of its 7 letters taken by wildcards (so at least
+// 5 real a-z hits), or appears once the wildcards are removed. "rn" read as "m" and "cl" read as "d" (as
+// "ci", since "l" already reads as "i") are checked as extra forms. A non-official name is also refused when
+// it contains "official" / "oficial" or a check-mark character, so it cannot imitate the app's Official
+// badge (lead decision, fix loop 1).
+const RESERVED_NAME_WILDCARD = '?';
+const RESERVED_NAME_MAX_WILDCARDS = 2;
+const RESERVED_NAME_LOOKALIKES = new Map(Object.entries({
+  // Cyrillic
+  'а': 'a', 'в': 'b', 'г': 'r', 'е': 'e', 'ё': 'e', 'з': '3', 'і': 'i', 'ї': 'i', 'ј': 'j', 'к': 'k', 'м': 'm',
+  'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'ѕ': 's', 'ԁ': 'd', 'һ': 'h',
+  'ԛ': 'q', 'ԝ': 'w', 'ӏ': 'i', 'п': 'n', 'и': 'n', 'ꙇ': 'i',
+  // Greek
+  'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'μ': 'm', 'ν': 'v', 'ο': 'o', 'ρ': 'p',
+  'τ': 't', 'υ': 'u', 'χ': 'x', 'ϲ': 'c', 'ϳ': 'j',
+  // Latin letters that do not decompose
+  'ı': 'i', 'ł': 'l', 'ø': 'o', 'đ': 'd', 'ð': 'd', 'ħ': 'h', 'ŀ': 'l', 'ɩ': 'i', 'ɪ': 'i', 'ʀ': 'r', 'ᴍ': 'm',
+  'ᴋ': 'k', 'ᴇ': 'e', 'ɴ': 'n', 'ᴅ': 'd', 'ɗ': 'd', 'ɖ': 'd', 'ɨ': 'i', 'ɍ': 'r', 'ɾ': 'r', 'ɼ': 'r',
+  'ƙ': 'k', 'ɱ': 'm', 'ɛ': 'e', 'ə': 'e', 'ǝ': 'e',
+  // Digits and symbols used as letters ("l" and "|" read as "i" next to "drinkme")
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '!': 'i', '|': 'i', 'l': 'i', '$': 's', '@': 'a',
+}));
+// Cherokee capitals that look like Latin ones. toLowerCase turns them into the small forms, so
+// both are mapped.
+for (const [cherokee, latin] of Object.entries({
+  'Ꭰ': 'd', 'Ꭱ': 'r', 'Ꭵ': 'i', 'Ꭺ': 'a', 'Ꭻ': 'j', 'Ꭼ': 'e', 'Ꮃ': 'w', 'Ꮋ': 'h', 'Ꮇ': 'm', 'Ꮐ': 'g',
+  'Ꮓ': 'z', 'Ꮢ': 'r', 'Ꮤ': 't', 'Ꮩ': 'v', 'Ꮪ': 's', 'Ꮮ': 'l', 'Ꮯ': 'c', 'Ꮲ': 'p', 'Ꮶ': 'k', 'Ᏼ': 'b',
+})) {
+  RESERVED_NAME_LOOKALIKES.set(cherokee, latin);
+  RESERVED_NAME_LOOKALIKES.set(cherokee.toLowerCase(), latin);
+}
+const REGIONAL_INDICATOR_A = 0x1f1e6;
+const REGIONAL_INDICATOR_Z = 0x1f1ff;
+// ✓ ✔ ☑ ✅ 🗸 🗹 ⍻ √
+const CHECK_MARK_PATTERN = /[✓✔☑✅\u{1F5F8}\u{1F5F9}⍻√]/u;
+
+const mapLookalike = (char) => {
+  const codePoint = char.codePointAt(0);
+  if (codePoint >= REGIONAL_INDICATOR_A && codePoint <= REGIONAL_INDICATOR_Z) {
+    return String.fromCharCode(0x61 + codePoint - REGIONAL_INDICATOR_A);
+  }
+  return RESERVED_NAME_LOOKALIKES.get(char) ?? char;
+};
+
+// Returns a-z and wildcards only.
+const foldNameForReservedCheck = (value) => {
+  if (typeof value !== 'string' || value === '') return '';
+  const decomposed = value.normalize('NFKC').toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '');
+  let folded = '';
+  for (const char of decomposed) folded += mapLookalike(char);
+  let mapped = '';
+  for (const char of folded) {
+    const next = mapLookalike(char);
+    if (next >= 'a' && next <= 'z' && next.length === 1) mapped += next;
+    else if (/^[\p{L}\p{So}]$/u.test(next)) mapped += RESERVED_NAME_WILDCARD;
+  }
+  return mapped;
+};
+
+// Linear in the name length (the token is fixed): every window of the token's length is compared once.
+const containsWithWildcards = (form, token) => {
+  for (let start = 0; start + token.length <= form.length; start += 1) {
+    let wildcards = 0;
+    let matches = true;
+    for (let index = 0; index < token.length; index += 1) {
+      const char = form[start + index];
+      if (char === token[index]) continue;
+      if (char === RESERVED_NAME_WILDCARD && wildcards < RESERVED_NAME_MAX_WILDCARDS) {
+        wildcards += 1;
+        continue;
+      }
+      matches = false;
+      break;
+    }
+    if (matches) return true;
+  }
+  return false;
+};
+
+// The tokens go through the same folding, so "official" is compared as it folds ("l" reads as "i").
+const RESERVED_NAME_TOKEN = foldNameForReservedCheck('drinkme');
+const RESERVED_BADGE_TOKENS = ['official', 'oficial'].map(foldNameForReservedCheck);
+
+const toReservedNameForms = (folded) => {
+  const forms = new Set();
+  for (const base of [folded, folded.replaceAll(RESERVED_NAME_WILDCARD, '')]) {
+    const withM = base.replace(/rn/g, 'm');
+    forms.add(base);
+    forms.add(withM);
+    forms.add(base.replace(/ci/g, 'd'));
+    forms.add(withM.replace(/ci/g, 'd'));
+  }
+  return Array.from(forms);
+};
+
+// True when the first name, the last name or both together use the brand name, imitate the Official
+// badge ("official", "oficial") or contain a check mark.
+const isReservedDisplayName = (firstName, lastName) => {
+  const parts = [firstName, lastName].map((part) => (typeof part === 'string' ? part : ''));
+  if (parts.some((part) => CHECK_MARK_PATTERN.test(part.normalize('NFKC')))) return true;
+  return [parts[0], parts[1], `${parts[0]}${parts[1]}`].some((part) => (
+    toReservedNameForms(foldNameForReservedCheck(part)).some((form) => (
+      containsWithWildcards(form, RESERVED_NAME_TOKEN)
+      || RESERVED_BADGE_TOKENS.some((token) => form.includes(token))
+    ))
+  ));
+};
+
 const isOlderIdToken = (user, tokenIat) => Number.isFinite(tokenIat) && Number.isFinite(user.lastIdTokenIat) && tokenIat < user.lastIdTokenIat;
 
 // A user with no usable name gets an empty one: the email must never become a public name.
 // providerName comes from the verified token, so it is trusted even when it equals the email prefix.
 // displayName comes from the request body, so a value equal to the prefix is refused. Anything with an @ is refused from both.
 // A name is only set here, on creation: later sign-ins never refill it, so a cleared name stays cleared.
+// A name that uses the reserved brand name (isReservedDisplayName) is dropped for a non-official account.
 // emailFromToken: the address comes from a verified Firebase token, so it replaces any stored value.
 // The token is verified, but the address itself may be unconfirmed; emailVerified records that.
 // emailVerified is undefined outside Firebase mode. An unverified sign-in reaches this only with REQUIRE_VERIFIED_EMAIL off.
@@ -1092,7 +1211,11 @@ const registerUserIfNeeded = ({ id, email, emailFromToken = false, emailVerified
     const firstWord = name.split(/\s+/)[0];
     const emailPrefix = normalizedEmail.split('@')[0];
     const isPrefixName = matchesEmailPrefix(name, emailPrefix) || matchesEmailPrefix(firstWord, emailPrefix);
-    const isUsableName = !name.includes('@') && (Boolean(providerName) || !isPrefixName);
+    // A provider name with the brand name in it is not stored for a non-official account: the account
+    // starts without a name, like one whose provider sent none, and the app asks for one (needsName).
+    // nameReservedAtSignIn lets the name prompt say why; it holds no name and goes with the next profile save.
+    const isReservedName = !isOfficialUser(id) && isReservedDisplayName(name, '');
+    const isUsableName = !name.includes('@') && !isReservedName && (Boolean(providerName) || !isPrefixName);
     const nameParts = (isUsableName ? name : '').split(/\s+/);
     userIndex.set(id, {
       id,
@@ -1105,6 +1228,7 @@ const registerUserIfNeeded = ({ id, email, emailFromToken = false, emailVerified
       ...(emailVerified !== undefined && { emailVerified }),
       ...(Number.isFinite(tokenIat) && { lastIdTokenIat: tokenIat }),
       ...(nameParts[0] && { nameSetByUser: true }),
+      ...(isReservedName && name !== '' && { nameReservedAtSignIn: true }),
       // Cleared by the privacy acknowledgement. Accounts from before the notice never get it.
       noticePending: true,
       // Read by the auto-hide: a reporter counts only once the account is 48 hours old. Accounts from
@@ -1689,14 +1813,21 @@ const getOpenReportersByTarget = () => {
 const countOpenReporters = (target) => getOpenReportersByTarget().get(reportTargetKey(target))?.all.size ?? 0;
 // Only those who count towards the hide.
 const countAutoHideReporters = (target) => getOpenReportersByTarget().get(reportTargetKey(target))?.counting.size ?? 0;
-const isTargetAutoHidden = (target) => countAutoHideReporters(target) >= AUTO_HIDE_REPORTER_THRESHOLD;
-
-// ADMIN_USER_IDS is read further down; these run only while requests are served.
+// ADMIN_USER_IDS and OFFICIAL_USER_IDS are read further down; these run only while requests are served.
 const isAdmin = (uid) => typeof uid === 'string' && ADMIN_USER_IDS.has(uid);
+const isOfficialUser = (uid) => typeof uid === 'string' && OFFICIAL_USER_IDS.has(uid);
+
+// ownerId: whose content the target is. Owner decision (2026-11-12): content of the official DrinkMe account
+// (its posts, comments and profile) is never hidden by reports, so a group of reporters cannot take the
+// brand's account offline. Its reports are still accepted and queued (targetOfficial in the admin queue),
+// and admins can still remove the content, clear the profile or suspend the account.
+const isTargetAutoHidden = (target, ownerId) => (
+  !isOfficialUser(ownerId) && countAutoHideReporters(target) >= AUTO_HIDE_REPORTER_THRESHOLD
+);
 
 // For everyone but its owner and the admins, hidden content answers exactly like content that does not exist.
 const isHiddenFrom = (target, ownerId, viewerId) => (
-  viewerId !== ownerId && !isAdmin(viewerId) && isTargetAutoHidden(target)
+  viewerId !== ownerId && !isAdmin(viewerId) && isTargetAutoHidden(target, ownerId)
 );
 const isDrinkHiddenFrom = (drink, viewerId) => isHiddenFrom({ targetType: 'drink', targetId: drink.id }, drink.userId, viewerId);
 const isCommentHiddenFrom = (comment, drinkId, viewerId) => (
@@ -1890,6 +2021,24 @@ const appendAudit = (action, { actorId = null, targetId = null, meta } = {}) => 
     for (const [evictedIndex, evictedEntry] of evicted) auditLog.splice(evictedIndex, 0, evictedEntry);
     if (nextAuditId === entry.id + 1) nextAuditId = entry.id;
   };
+};
+
+// auth.session_revoked shares the users' audit budget, so repeated password resets by one account could
+// push other users' consent records out. The sessionGen bump always happens; the entry is written at most
+// once per account and reason per 24 hours (lead decision, fix loop 1). Entries are appended in time order,
+// so the scan walks back from the newest and stops at the first one older than the window.
+const SESSION_REVOKED_AUDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const appendSessionRevokedAudit = (actorId, reason) => {
+  const cutoff = Date.now() - SESSION_REVOKED_AUDIT_WINDOW_MS;
+  for (let index = auditLog.length - 1; index >= 0; index -= 1) {
+    const entry = auditLog[index];
+    const at = Date.parse(entry?.at);
+    if (!Number.isFinite(at) || at <= cutoff) break;
+    if (entry.action === 'auth.session_revoked' && entry.actorId === actorId && entry.meta?.reason === reason) {
+      return () => {};
+    }
+  }
+  return appendAudit('auth.session_revoked', { actorId, ...(reason !== undefined && { meta: { reason } }) });
 };
 
 // Drops entries past the retention, or with an unreadable date, then keeps the newest of each budget
@@ -2148,9 +2297,14 @@ const toPublicUser = (user, viewerId) => {
   if (!user) return undefined;
   // Hidden until the owner has read what becomes public, so a user who leaves at the notice was never public.
   // A profile hidden after reports looks the same to others, so the answer does not tell the two apart.
-  if (user.noticePending || isUserHiddenFrom(user.id, viewerId)) return { id: user.id, lastName: '', city: '', bio: '', avatar: null };
+  // The stripped view never carries the official badge: it shows no name to put it next to.
+  if (user.noticePending || isUserHiddenFrom(user.id, viewerId)) {
+    return { id: user.id, lastName: '', city: '', bio: '', avatar: null, official: false };
+  }
   const { id, firstName, lastName, city, bio } = user;
-  return { id, ...(!isEmailDerivedName(user) && { firstName }), lastName, city, bio, avatar: toAvatarUrl(user) };
+  return {
+    id, ...(!isEmailDerivedName(user) && { firstName }), lastName, city, bio, avatar: toAvatarUrl(user), official: isOfficialUser(id),
+  };
 };
 
 // Same number as PRIVACY_NOTICE_VERSION in src/screens/OnboardingScreen.tsx. Raise both when the notice
@@ -2172,6 +2326,7 @@ const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVe
 const toOwnerUser = (user) => {
   const { id, email, emailVerified, firstName, lastName, city, bio } = user;
   const suspension = getActiveSuspension(user);
+  const needsName = !firstName || isEmailDerivedName(user);
   return {
     id,
     email,
@@ -2181,11 +2336,14 @@ const toOwnerUser = (user) => {
     city,
     bio,
     avatar: toAvatarUrl(user),
+    official: isOfficialUser(id),
     ageConfirmed: isAgeConfirmed(id),
-    needsName: !firstName || isEmailDerivedName(user),
+    needsName,
     privacyNoticeVersion: getPrivacyNoticeVersion(user),
+    // Only while the name prompt is due: the Google or Apple name was dropped as reserved at sign-in.
+    ...(needsName && user.nameReservedAtSignIn === true && { nameReservedAtSignIn: true }),
     // Only while true, so the client can explain it.
-    ...(isTargetAutoHidden({ targetType: 'user', targetId: id }) && { hiddenPendingReview: true }),
+    ...(isTargetAutoHidden({ targetType: 'user', targetId: id }, id) && { hiddenPendingReview: true }),
     ...(suspension && toSuspensionState(suspension)),
   };
 };
@@ -2215,7 +2373,7 @@ const decorateDrink = (drink, currentUserId) => {
       ? (partnerSet.has(drink.userId) || drink.userId === currentUserId)
       : false,
     // Only the owner and the admins ever get a hidden post, so only they see this.
-    ...(isTargetAutoHidden({ targetType: 'drink', targetId: drink.id }) && { hiddenPendingReview: true }),
+    ...(isTargetAutoHidden({ targetType: 'drink', targetId: drink.id }, drink.userId) && { hiddenPendingReview: true }),
   };
 };
 
@@ -2223,7 +2381,7 @@ const decorateDrink = (drink, currentUserId) => {
 const decorateComment = (comment, viewerId, drinkId = comment.drinkId) => ({
   ...comment,
   user: toPublicUser(userIndex.get(comment.userId), viewerId),
-  ...(isTargetAutoHidden({ targetType: 'comment', targetId: comment.id, drinkId }) && { hiddenPendingReview: true }),
+  ...(isTargetAutoHidden({ targetType: 'comment', targetId: comment.id, drinkId }, comment.userId) && { hiddenPendingReview: true }),
 });
 
 const toDataUrl = (buffer, mime = 'image/jpeg') => {
@@ -2602,7 +2760,7 @@ const endSessionsForFirebaseState = (uid, reason) => {
   if (!user || !isLiveAccount(uid) || user.firebaseSessionEndedReason === reason) return;
   user.sessionGen = getSessionGen(user) + 1;
   user.firebaseSessionEndedReason = reason;
-  appendAudit('auth.session_revoked', { actorId: uid, meta: { reason } });
+  appendSessionRevokedAudit(uid, reason);
   saveDb();
 };
 
@@ -2740,7 +2898,7 @@ app.post('/api/auth/mobile', async (req, res) => {
       && Number.isFinite(existingUser.lastIdTokenIat) && firebaseTokensValidAfterMs > existingUser.lastIdTokenIat * 1000;
     if (isNewerThanStored || isRevokedSinceLastSignIn) {
       existingUser.sessionGen = getSessionGen(existingUser) + 1;
-      appendAudit('auth.session_revoked', { actorId: verifiedUid, meta: { reason: 'tokens_revoked' } });
+      appendSessionRevokedAudit(verifiedUid, 'tokens_revoked');
       revocationBumped = true;
     }
     if (!hasStoredValue || isNewerThanStored) existingUser.tokensValidAfterSeen = firebaseTokensValidAfterMs ?? 0;
@@ -2858,7 +3016,7 @@ app.post('/api/auth/mobile', async (req, res) => {
   if (bumpsSessionGen && !revocationBumped) {
     user.sessionGen = getSessionGen(user) + 1;
     // Kept with the bump when the save fails (see below), so the next save records the bump that stays.
-    appendAudit('auth.session_revoked', { actorId: verifiedUid });
+    appendSessionRevokedAudit(verifiedUid, undefined);
   }
   // A new account stores the value without a bump (an existing one was handled above).
   if (firebaseAuth && !existingUser) user.tokensValidAfterSeen = firebaseTokensValidAfterMs ?? 0;
@@ -2944,6 +3102,7 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
   const { firstName, lastName, city, bio, nameChosen } = req.body || {};
   const previousProfile = {
     firstName: user.firstName, lastName: user.lastName, city: user.city, bio: user.bio, nameSetByUser: user.nameSetByUser,
+    nameReservedAtSignIn: user.nameReservedAtSignIn,
   };
   // SEC-A: sanitize profile fields
   if (typeof firstName === 'string') {
@@ -2975,11 +3134,25 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
   if (typeof lastName  === 'string') user.lastName  = sanitizeText(lastName, 120);
   if (typeof city      === 'string') user.city      = sanitizeText(city, 120);
   if (typeof bio       === 'string') user.bio       = sanitizeText(bio, 500);
-  if (!saveDbOrRespond(res)) {
+  const restorePreviousProfile = () => {
     for (const [key, value] of Object.entries(previousProfile)) {
       if (value === undefined) delete user[key];
       else user[key] = value;
     }
+  };
+  // Only the official account may use the brand name. Checked on the name as it would be saved, and only
+  // when the name changes, so a name stored before this rule does not block edits to city or bio. The name
+  // prompt making a masked email-prefix name public (nameSetByUser set) counts as a change too.
+  const nameChanged = user.firstName !== previousProfile.firstName || user.lastName !== previousProfile.lastName
+    || user.nameSetByUser !== previousProfile.nameSetByUser;
+  if (nameChanged && !isOfficialUser(user.id) && isReservedDisplayName(user.firstName, user.lastName)) {
+    restorePreviousProfile();
+    return res.status(400).json({ error: 'This name is reserved for the official DrinkMe account.', code: 'name_reserved' });
+  }
+  // The sign-in hint has done its job once the owner saves the profile.
+  delete user.nameReservedAtSignIn;
+  if (!saveDbOrRespond(res)) {
+    restorePreviousProfile();
     return;
   }
   res.json(toOwnerUser(user));
@@ -3720,7 +3893,7 @@ app.put('/api/drinks/:id', requireAuth, refuseIfSuspended, (req, res) => {
       ? res.status(404).json({ error: 'Drink not found' })
       : res.status(403).json({ error: 'Forbidden' });
   }
-  if (isTargetAutoHidden({ targetType: 'drink', targetId: drink.id })) {
+  if (isTargetAutoHidden({ targetType: 'drink', targetId: drink.id }, drink.userId)) {
     return res.status(409).json({ error: 'This post is hidden pending review and cannot be edited.', code: 'hidden_pending_review' });
   }
 
@@ -3946,7 +4119,7 @@ app.get('/api/blocks', requireAuth, (req, res) => {
     const user = isLiveAccount(id) ? toPublicUser(userIndex.get(id), req.userId) : undefined;
     if (!user || !hasBlocked(id, req.userId)) return user;
     // They blocked the caller too, so only what the caller needs to recognize the entry.
-    return { id: user.id, firstName: user.firstName, lastName: user.lastName };
+    return { id: user.id, firstName: user.firstName, lastName: user.lastName, official: user.official };
   }).filter(Boolean));
 });
 
@@ -4020,6 +4193,39 @@ if (ADMIN_USER_IDS.size === 0 && isProduction) {
   console.warn('[moderation] ADMIN_USER_IDS is empty: nobody can review reports.');
 } else if (unknownAdminCount > 0) {
   console.warn(`[moderation] ADMIN_USER_IDS: ${unknownAdminCount} of ${ADMIN_USER_IDS.size} match no known user.`);
+}
+
+// The official DrinkMe account(s). Read once at start and parsed like ADMIN_USER_IDS; empty means none.
+// Owner decision (2026-11-12): an official user gets official: true in every user view (and so on every post,
+// comment, search result and partner entry that embeds one), may use the reserved brand name in its profile
+// name, and its content is never auto-hidden by reports. It is not an admin: it gets no /api/admin access,
+// and admins can suspend it like any user unless it is also listed in ADMIN_USER_IDS.
+const OFFICIAL_USER_IDS = new Set(
+  (process.env.OFFICIAL_USER_IDS ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+);
+
+// Counts only, like the admin ids above.
+const unknownOfficialCount = Array.from(OFFICIAL_USER_IDS).filter((id) => !userIndex.has(id)).length;
+if (unknownOfficialCount > 0) {
+  console.warn(`[official] OFFICIAL_USER_IDS: ${unknownOfficialCount} of ${OFFICIAL_USER_IDS.size} match no known user.`);
+}
+// The official uid must never be an admin: an admin cannot be suspended, so the brand account would lose its
+// kill switch. Counts only.
+const officialAdminCount = Array.from(OFFICIAL_USER_IDS).filter((id) => ADMIN_USER_IDS.has(id)).length;
+if (officialAdminCount > 0) {
+  console.warn(`[official] ${officialAdminCount} OFFICIAL_USER_IDS entr(y/ies) also in ADMIN_USER_IDS: it cannot be suspended. Keep them separate.`);
+}
+// Dev sign-in trusts the client's uid, so anyone could sign in as the official account.
+if (allowInsecureDevAuth && OFFICIAL_USER_IDS.size > 0) {
+  console.warn(`[official] OFFICIAL_USER_IDS has ${OFFICIAL_USER_IDS.size} entr(y/ies) while ALLOW_INSECURE_DEV_AUTH=true: anyone can sign in as them.`);
+}
+// Names stored before the reserved-name rule are left as they are (no silent data change); the profile
+// edit refuses any name change that still uses the brand name, and admins can clear such a profile
+// (clear_profile) after a report. Counts only, so no name or id reaches the logs.
+const reservedLegacyNameCount = Array.from(userIndex.values())
+  .filter((user) => isPlainObject(user) && !isOfficialUser(user.id) && isReservedDisplayName(user.firstName, user.lastName)).length;
+if (reservedLegacyNameCount > 0) {
+  console.warn(`[official] ${reservedLegacyNameCount} non-official profile name(s) use a reserved name (brand, Official or a check mark).`);
 }
 
 // Runs after requireAuth, so logged out stays 401.
@@ -4157,15 +4363,19 @@ const isReportOverdue = (report, now) => report.status === 'open' && reportAgeMs
 // Fields added for the review queue only; the stored report has none of them.
 // openReporterCount: every distinct open reporter. autoHideReporterCount: those who count towards the
 // hide (account 48 hours old and notice accepted), so an admin can see a hide that a batch of new accounts did not reach.
-const toAdminReportListItem = (report, viewerId, now) => {
+// targetOfficial: the content belongs to the official DrinkMe account, which is never auto-hidden.
+// drinkOwners: post id to owner id, built once per request so a long queue does not scan the posts per item.
+const toAdminReportListItem = (report, viewerId, now, drinkOwners) => {
   const ageMs = reportAgeMs(report, now);
+  const ownerId = findReportTargetOwnerId(report, drinkOwners);
   return {
     ...toAdminReport(report, viewerId),
     ageHours: Number.isFinite(ageMs) ? Math.max(0, Math.floor(ageMs / MS_PER_HOUR)) : null,
     overdue: isReportOverdue(report, now),
     openReporterCount: countOpenReporters(report),
     autoHideReporterCount: countAutoHideReporters(report),
-    autoHidden: isTargetAutoHidden(report),
+    autoHidden: isTargetAutoHidden(report, ownerId),
+    targetOfficial: isOfficialUser(ownerId),
   };
 };
 
@@ -4176,8 +4386,9 @@ app.get('/api/admin/reports', requireAuth, requireAdmin, (req, res) => {
   if (status !== 'open' && status !== 'resolved') return res.status(400).json({ error: 'Invalid status' });
   const now = Date.now();
   const matching = reports.filter((r) => r.status === status);
+  const drinkOwners = new Map(drinks.map((drink) => [drink.id, drink.userId]));
   res.json({
-    items: matching.slice(0, ADMIN_REPORTS_MAX_ITEMS).map((r) => toAdminReportListItem(r, req.userId, now)),
+    items: matching.slice(0, ADMIN_REPORTS_MAX_ITEMS).map((r) => toAdminReportListItem(r, req.userId, now, drinkOwners)),
     total: matching.length,
     overdueCount: reports.filter((r) => isReportOverdue(r, now)).length,
   });
@@ -4191,9 +4402,10 @@ const removeReportTarget = ({ targetType, targetId, drinkId }) => {
 };
 
 // Whose content a report names, or undefined once it is gone.
-const findReportTargetOwnerId = ({ targetType, targetId, drinkId }) => {
+// drinkOwners (optional): a Map of post id to owner id, for callers that look up many reports at once.
+const findReportTargetOwnerId = ({ targetType, targetId, drinkId }, drinkOwners) => {
   if (targetType === 'user') return targetId;
-  if (targetType === 'drink') return drinks.find((d) => d.id === targetId)?.userId;
+  if (targetType === 'drink') return drinkOwners ? drinkOwners.get(targetId) : drinks.find((d) => d.id === targetId)?.userId;
   return (commentsByDrink.get(drinkId) ?? []).find((item) => item?.id === targetId)?.userId;
 };
 

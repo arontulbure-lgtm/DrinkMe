@@ -25,6 +25,7 @@ import { BaseUser, PartnerActionResult, PartnerRequests } from '../types/api';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 import ListLoadState from '../components/ListLoadState';
+import OfficialBadge from '../components/OfficialBadge';
 import { RootStackScreenProps } from '../navigation/types';
 
 type PartnersListScreenProps = RootStackScreenProps<'PartnersList'>;
@@ -165,7 +166,10 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
           )}
         </View>
         <View style={styles.rowContent}>
-          <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
+          <View style={styles.officialNameRow}>
+            <Text style={[styles.name, styles.officialNameShrink]} numberOfLines={1}>{displayName}</Text>
+            <OfficialBadge official={user.official} />
+          </View>
           {kind === 'outgoing' ? (
             <Text style={styles.city}>{t('partners.requested')}</Text>
           ) : user.city ? (
@@ -454,5 +458,12 @@ const styles = StyleSheet.create({
     color: '#8B5FBF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  officialNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  officialNameShrink: {
+    flexShrink: 1,
   },
 });

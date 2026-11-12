@@ -6,6 +6,7 @@ import { getImageSource } from '../lib/api';
 import { useLocalization } from '../context/LocalizationContext';
 import { formatTimeAgo } from '../lib/formatTimeAgo';
 import ModerationNotice from './ModerationNotice';
+import OfficialBadge from './OfficialBadge';
 
 interface DrinkPostCardProps {
   drink: Drink;
@@ -65,7 +66,10 @@ export default function DrinkPostCard({
             )}
           </View>
           <View style={styles.userDetails}>
-            <Text style={styles.username}>{displayName}</Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.username, styles.usernameShrink]} numberOfLines={1}>{displayName}</Text>
+              <OfficialBadge official={drink.user?.official} />
+            </View>
             <Text style={styles.timestamp}>
               {formatTimeAgo(drink.createdAt, t)}
               {drink.editedAt ? ` · ${t('post.edited')}` : ''}
@@ -259,5 +263,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  usernameShrink: {
+    flexShrink: 1,
   },
 });

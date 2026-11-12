@@ -21,6 +21,7 @@ import CommentDrawer from '../components/CommentDrawer';
 import PostActionsSheet from '../components/PostActionsSheet';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
+import OfficialBadge from '../components/OfficialBadge';
 import { useLocalization } from '../context/LocalizationContext';
 import { TabScreenProps } from '../navigation/types';
 
@@ -257,7 +258,10 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                         </Text>
                       </View>
                       <View style={styles.userInfo}>
-                        <Text style={styles.userName} numberOfLines={1}>{displayName}</Text>
+                        <View style={styles.officialNameRow}>
+                          <Text style={[styles.userName, styles.officialNameShrink]} numberOfLines={1}>{displayName}</Text>
+                          <OfficialBadge official={result.official} />
+                        </View>
                         {result.city ? <Text style={styles.userCity} numberOfLines={1}>{result.city}</Text> : null}
                       </View>
                     </TouchableOpacity>
@@ -646,5 +650,12 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontSize: 13,
     lineHeight: 18,
+  },
+  officialNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  officialNameShrink: {
+    flexShrink: 1,
   },
 });

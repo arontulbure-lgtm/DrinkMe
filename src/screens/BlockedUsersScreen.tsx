@@ -9,6 +9,7 @@ import { apiFetch, getImageSource } from '../lib/api';
 import { invalidateAfterUnblock } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
+import OfficialBadge from '../components/OfficialBadge';
 import { RootStackScreenProps } from '../navigation/types';
 
 type Props = RootStackScreenProps<'BlockedUsers'>;
@@ -49,7 +50,10 @@ export default function BlockedUsersScreen({ navigation }: Props) {
             <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
           )}
         </View>
-        <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
+        <View style={styles.officialNameRow}>
+          <Text style={[styles.name, styles.officialNameShrink]} numberOfLines={1}>{displayName}</Text>
+          <OfficialBadge official={item.official} />
+        </View>
         <TouchableOpacity
           style={[styles.unblockButton, unblockMutation.isPending && styles.buttonDisabled]}
           onPress={() => unblockMutation.mutate(item.id)}
@@ -193,5 +197,14 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: '#9CA3AF',
+  },
+  officialNameRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  officialNameShrink: {
+    flex: 0,
+    flexShrink: 1,
   },
 });

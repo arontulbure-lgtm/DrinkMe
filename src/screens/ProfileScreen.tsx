@@ -35,6 +35,7 @@ import PostActionsSheet from '../components/PostActionsSheet';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
 import ModerationNotice, { SuspensionBanner } from '../components/ModerationNotice';
+import OfficialBadge from '../components/OfficialBadge';
 import type { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList, RootStackScreenProps, TabScreenProps } from '../navigation/types';
 
@@ -142,9 +143,11 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
   const partnerStatus = profileData?.partnerStatus ?? 'none';
   const { pressPartner, pendingTargetId } = usePartnerAction();
 
+  // Another user's profile must never fall back to the viewer's own data.
+  const shownUser = isSelf ? profileData || profile : profileData;
+
   const displayName = useMemo(() => {
-    // Another user's profile must never fall back to the viewer's own data.
-    const source = isSelf ? profileData || profile : profileData;
+    const source = shownUser;
     if (source?.firstName) {
       return `${source.firstName} ${source.lastName || ''}`.trim();
     }
@@ -154,7 +157,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       return profileData.lastName || t('common.unknownUser');
     }
     return source?.email || firebaseUser?.email || t('common.unknownUser');
-  }, [firebaseUser?.email, isSelf, profile, profileData, t]);
+  }, [firebaseUser?.email, isSelf, profileData, shownUser, t]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -349,7 +352,10 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
               <ActivityIndicator color="#8B5FBF" style={styles.profileLoading} />
             ) : null
           ) : (
-            <Text style={styles.displayName}>{displayName}</Text>
+            <View style={styles.displayNameRow}>
+              <Text style={[styles.displayName, styles.displayNameShrink]} numberOfLines={2}>{displayName}</Text>
+              <OfficialBadge official={shownUser?.official} size="large" />
+            </View>
           )}
           {isSelf ? (
             <Text style={styles.email}>{profileData?.email || profile?.email || firebaseUser?.email}</Text>
@@ -783,5 +789,16 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
     borderRadius: 20,
+  },
+  displayNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '100%',
+    paddingHorizontal: 16,
+  },
+  displayNameShrink: {
+    flexShrink: 1,
+    textAlign: 'center',
   },
 });

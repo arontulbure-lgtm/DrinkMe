@@ -21,6 +21,7 @@ import { Drink, Comment, Page, isDrinkCategory } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
 import LoadMoreButton from '../components/LoadMoreButton';
 import ModerationNotice from '../components/ModerationNotice';
+import OfficialBadge from '../components/OfficialBadge';
 import PostActionsSheet from '../components/PostActionsSheet';
 import { useConfirmAge } from '../lib/useConfirmAge';
 import { useDrinkToggles } from '../lib/useDrinkToggles';
@@ -284,11 +285,14 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                           </View>
                           <View style={styles.commentBody}>
                             <View style={styles.commentHeader}>
-                              <Text style={styles.commentAuthor}>
-                                {commentUser?.firstName
-                                  ? `${commentUser.firstName} ${commentUser.lastName || ''}`
-                                  : t('common.unknownUser')}
-                              </Text>
+                              <View style={styles.commentAuthorRow}>
+                                <Text style={[styles.commentAuthor, styles.commentAuthorShrink]} numberOfLines={1}>
+                                  {commentUser?.firstName
+                                    ? `${commentUser.firstName} ${commentUser.lastName || ''}`
+                                    : t('common.unknownUser')}
+                                </Text>
+                                <OfficialBadge official={commentUser?.official} />
+                              </View>
                               <View style={styles.commentHeaderEnd}>
                                 <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt, t)}</Text>
                                 <TouchableOpacity
@@ -659,5 +663,14 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 12,
     fontStyle: 'italic',
+  },
+  commentAuthorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  commentAuthorShrink: {
+    flexShrink: 1,
   },
 });

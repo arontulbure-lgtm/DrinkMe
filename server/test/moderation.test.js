@@ -1102,7 +1102,7 @@ describe('T2-3 fix pass', () => {
     const server = await startServer({}, { dbFixture: fixture });
     t.after(() => server.stop());
     const { body } = await call(server, 'GET', '/api/blocks', 'alice');
-    assert.deepEqual(body[0], { id: 'mutual', firstName: 'mutual', lastName: 'Test' });
+    assert.deepEqual(body[0], { id: 'mutual', firstName: 'mutual', lastName: 'Test', official: false });
     assert.equal(body[1].bio, 'Shown');
   });
 

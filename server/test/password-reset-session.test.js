@@ -474,3 +474,47 @@ test('dev mode (ALLOW_INSECURE_DEV_AUTH, no Firebase) is unchanged: no lookup, n
   assert.equal(storedUser(dbFile)[FIELD], undefined);
   assert.equal(getUserCalls(dbFile), 0);
 });
+
+// ── Audit budget (lead decision, fix loop 1) ──────────────────────────────────
+// auth.session_revoked shares the users' 15,000-entry budget, so one account resetting its password over
+// and over must not push other users' consent records out: the bump always happens, the entry at most once
+// per account and reason per 24 hours.
+test('50 resets in a row bump the generation each time but write one audit entry, and keep other users\' entries', async (t) => {
+  const otherAck = { id: 1, at: new Date().toISOString(), action: 'ack.age_confirmed', actorId: OTHER, targetId: null };
+  const fixture = {
+    users: [existingUser({ [FIELD]: Date.parse(utcSecondsAgo(7200)) }), viewerUser()],
+    auditLog: [otherAck],
+    nextAuditId: 2,
+  };
+  const { baseUrl, dbFile } = await startOn(t, firebaseEnv, { dbFixture: fixture });
+  const base = nowSeconds(3600);
+  for (let cycle = 1; cycle <= 50; cycle++) {
+    setValidAfter(dbFile, new Date((base + cycle * 10) * 1000).toUTCString());
+    let res = await signIn(baseUrl, passwordClaims());
+    // Sign-in runs through the per-IP mutation limiter (30 / minute).
+    if (res.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 61_000));
+      res = await signIn(baseUrl, passwordClaims());
+    }
+    assert.equal(res.status, 200, `cycle ${cycle}: ${res.text}`);
+    assert.equal(claimsOf(res.body.token).sg, cycle);
+  }
+  assert.equal(storedUser(dbFile).sessionGen, 50);
+  const entries = revocations(dbFile).filter((entry) => entry.actorId === UID);
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0].meta, { reason: 'tokens_revoked' });
+  assert.ok(readDb(dbFile).auditLog.some((entry) => entry.action === 'ack.age_confirmed' && entry.actorId === OTHER));
+});
+
+test('an entry older than 24 hours does not stop a new one', async (t) => {
+  const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  const fixture = {
+    users: [existingUser({ [FIELD]: Date.parse(utcSecondsAgo(7200)) })],
+    auditLog: [{ id: 1, at: old, action: 'auth.session_revoked', actorId: UID, targetId: null, meta: { reason: 'tokens_revoked' } }],
+    nextAuditId: 2,
+  };
+  const { baseUrl, dbFile } = await startOn(t, firebaseEnv, { dbFixture: fixture });
+  setValidAfter(dbFile, utcSecondsAgo(600));
+  assert.equal(claimsOf(await signInToken(baseUrl, passwordClaims())).sg, 1);
+  assert.equal(revocations(dbFile).filter((entry) => entry.actorId === UID).length, 2);
+});

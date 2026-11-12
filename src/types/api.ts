@@ -4,6 +4,9 @@ export interface BaseUser {
   ageConfirmed?: boolean; // only returned to the account owner
   needsName?: boolean; // only returned to the account owner: no name is public yet
   privacyNoticeVersion?: number | null; // only returned to the account owner
+  // Owner only, while needsName: the Google or Apple name was not kept because it is reserved for the
+  // official DrinkMe account. The name prompt explains it.
+  nameReservedAtSignIn?: boolean;
   firstName?: string;
   lastName?: string;
   city?: string;
@@ -12,6 +15,10 @@ export interface BaseUser {
   partnerStatus?: PartnerStatus; // signed-in viewers, about another user
   partnerCount?: number; // only for the owner and that user's partners
   avatar?: string | null;
+  // The official DrinkMe account (OFFICIAL_USER_IDS on the server): true for it, false for everyone else.
+  // Sent in every user view, so also on post and comment authors, search results and partner lists.
+  // Optional only for older servers; the stripped view of a profile without a public name is false.
+  official?: boolean;
   // Owner only, and only while true: the profile is hidden from others after reports until an admin reviews it.
   hiddenPendingReview?: boolean;
   // Owner only, and only while suspended. suspendedUntil is null for a permanent suspension.
@@ -174,7 +181,8 @@ export interface AdminReport {
   overdue: boolean; // open and older than 24 hours
   openReporterCount: number; // distinct reporters among the open reports on the same target
   autoHideReporterCount: number; // of those, the ones who count (account 48 h old, privacy notice accepted)
-  autoHidden: boolean; // 3 or more distinct open reporters
+  autoHidden: boolean; // 3 or more distinct counting reporters, and the target is not the official account's
+  targetOfficial: boolean; // the content belongs to the official DrinkMe account, which is never auto-hidden
 }
 
 // Unused until the admin screen exists.

@@ -122,10 +122,10 @@ test('a fixture in the saveDb format loads with its users and drinks', async () 
   const { baseUrl } = server;
   const token = await signIn(baseUrl, FIXTURE_USER.id);
   const user = await getJson(`${baseUrl}/api/users/${FIXTURE_USER.id}`, token);
-  assert.deepEqual(user, { ...FIXTURE_USER, ageConfirmed: true, needsName: false, privacyNoticeVersion: null, partnerCount: 1 });
+  assert.deepEqual(user, { ...FIXTURE_USER, ageConfirmed: true, needsName: false, official: false, privacyNoticeVersion: null, partnerCount: 1 });
   const partner = await getJson(`${baseUrl}/api/users/${FIXTURE_PARTNER.id}`, token);
   const { email: _partnerEmail, ...publicPartner } = FIXTURE_PARTNER;
-  assert.deepEqual(partner, { ...publicPartner, partnerStatus: 'partner', partnerCount: 1 });
+  assert.deepEqual(partner, { ...publicPartner, official: false, partnerStatus: 'partner', partnerCount: 1 });
 
   const { items: drinks } = await getJson(`${baseUrl}/api/drinks`, token);
   assert.equal(drinks.length, 1);

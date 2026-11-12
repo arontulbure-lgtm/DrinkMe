@@ -293,7 +293,7 @@ describe('who sees hidden content', () => {
     const server = await start(t, baseFixture(reportsBy(['r1', 'r2', 'r3'], 'user', 'owner'), {
       partnerRequestsByUser: { r4: [{ fromId: 'owner', createdAt: ago(1) }] },
     }));
-    const stripped = { id: 'owner', lastName: '', city: '', bio: '', avatar: null };
+    const stripped = { id: 'owner', lastName: '', city: '', bio: '', avatar: null, official: false };
 
     const profile = await call(server, 'GET', '/api/users/owner', 'viewer');
     assert.equal(profile.status, 200);

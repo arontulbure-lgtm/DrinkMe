@@ -51,7 +51,7 @@ DrinkMeFinal/
 │   │               RecipeResultsScreen, LanguageSettingsScreen, PartnersListScreen,
 │   │               SessionErrorScreen, VerifyEmailScreen, AgeGateScreen, OnboardingScreen,
 │   │               BlockedUsersScreen
-│   ├── components/ CommentDrawer, DrinkPostCard, LocationPickerModal, StoriesSection,
+│   ├── components/ CommentDrawer, DrinkPostCard, LocationPickerModal, StoriesSection, OfficialBadge,
 │   │               ListLoadState, LoadMoreButton, PostActionsSheet (Edit, Delete, Report, Block), ReportSheet,
 │   │               ErrorBoundary (in App.tsx, inside LocalizationProvider; "Try again" clears the
 │   │               React Query cache and remounts; logs the error name and component stack only),
@@ -116,6 +116,7 @@ Navigation is typed: route params live in `src/navigation/types.ts` (`TabParamLi
 - Edit post: Edit in `PostActionsSheet` opens CreatePost with `{ drinkId }` (prefilled from the cache; sends only changed fields; the image cannot change). Edited posts show an "edited" label (`post.edited`).
 - Auth errors: every Firebase error goes through `src/lib/authErrors.ts`; never show `error.message`. Wrong password, unknown email and invalid credential share one message, social sign-in never shows it, and cancellations show nothing.
 - Forgot password: AuthScreen's "Forgot password?" calls `AuthContext.sendPasswordReset` (Firebase `sendPasswordResetEmail`, in the app's language). The same neutral confirmation for any account state; a 60 s cooldown after every outcome except invalid email and network errors (survives remounts, resets on app restart). The cooldown is UX, not a security control. After a reset, the owner's next sign-in ends every earlier server JWT (`tokensValidAfterTime` check, see the backend skill).
+- Official account: users with `official: true` (server `OFFICIAL_USER_IDS`) show `OfficialBadge` (src/components/OfficialBadge.tsx: #8B5FBF pill, checkmark icon, `official.badge` "Official"/"Oficial", `official.accessibilityLabel`) next to the name on DrinkPostCard, comments (CommentDrawer, DrinkDetail), the profile header, Explore user results, PartnersList and BlockedUsers. Put the name in a row with `flexShrink: 1`; the badge never shrinks. A profile save or name prompt refused with 400 `name_reserved` shows `editProfile.nameReserved` (`isNameReservedError` in src/lib/api.ts). When the server dropped a reserved Google/Apple name at sign-in, the owner profile has `nameReservedAtSignIn` and the name prompt shows `onboarding.nameReservedAtSignIn`.
 - Times: `formatTimeAgo` (src/lib/formatTimeAgo.ts) for every "time ago" label; 7 days or older shows a short date in the app's locale.
 
 ## Feature flags

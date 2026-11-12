@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError } from '../lib/api';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError, isNameReservedError } from '../lib/api';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
@@ -50,7 +50,10 @@ export default function OnboardingScreen({ onLater }: Props) {
   const handleSaveError = (error: unknown) => {
     if (!isCurrentAuthUser(serverUserId)) return;
     refreshIfSuspended(error);
-    setErrorKey(isAccountSuspendedError(error) ? ACCOUNT_SUSPENDED_ERROR_KEY : 'onboarding.saveFailed');
+    // name_reserved comes only from the name prompt: the brand name is kept for the official account.
+    setErrorKey(isAccountSuspendedError(error)
+      ? ACCOUNT_SUSPENDED_ERROR_KEY
+      : isNameReservedError(error) ? 'editProfile.nameReserved' : 'onboarding.saveFailed');
     // A 401 on the JWT in use already makes apiFetch rebuild the session, which brings this screen back.
   };
 
@@ -161,6 +164,9 @@ export default function OnboardingScreen({ onLater }: Props) {
               <Ionicons name="person-circle-outline" size={48} color="#8B5FBF" style={styles.icon} />
               <Text style={styles.title} accessibilityRole="header">{t('onboarding.nameTitle')}</Text>
               <Text style={styles.body}>{t('onboarding.nameHint')}</Text>
+              {profile?.nameReservedAtSignIn ? (
+                <Text style={styles.body}>{t('onboarding.nameReservedAtSignIn')}</Text>
+              ) : null}
               <TextInput
                 style={styles.input}
                 value={name}

@@ -49,7 +49,7 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | GET | `/api/users/search` | signed in | `?q=` (2+ characters), at most 50 results |
 | GET | `/api/users/:id` | signed in; owner before 18+ | Owner gets email, `ageConfirmed`, suspension and hide state |
 | GET | `/api/users/:id/partners` | signed in | Owner and that user's partners only |
-| PUT | `/api/users/:id` | owner, not suspended; before 18+ allowed | Name, city, bio, `nameChosen` |
+| PUT | `/api/users/:id` | owner, not suspended; before 18+ allowed | Name, city, bio, `nameChosen`. 400 `name_reserved` for a brand-name look-alike (official account excepted) |
 | POST | `/api/users/:id/acknowledgements` | owner; before 18+ allowed | `{ type: 'age', confirmed: true }` or `{ type: 'privacy', version }` |
 | POST | `/api/users/:id/avatar` | owner, not suspended | JSON `imageData` or multipart `avatar` |
 | GET | `/api/users/:userId/saved-drinks` | owner | Paged |
@@ -105,6 +105,7 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `ALLOW_EMPTY_DB` | off | server | `true` lets production start with no database or after a corrupt one. First deploy only |
 | `CORRUPT_BACKUP_RETENTION_DAYS` | `21` | server | Days to keep `.corrupt-*` and `.pre-migration-*` backups, `1` to `21`. Larger whole numbers are capped at `21`, anything else uses `21`, both with a warning |
 | `ADMIN_USER_IDS` | empty | server | Comma-separated Firebase uids allowed on `/api/admin/*`. Empty: every admin route returns 403 (production logs a warning). Ids are never logged |
+| `OFFICIAL_USER_IDS` | empty | server | Comma-separated Firebase uids of the official DrinkMe account, parsed like `ADMIN_USER_IDS`. Gives `official: true` (the app's "Official" badge), the right to use the brand name in the profile name, and no auto-hide by reports. Not an admin, and must never also be in `ADMIN_USER_IDS` (it could not be suspended; startup warns). Ids are logged as counts only; startup also warns while `ALLOW_INSECURE_DEV_AUTH=true`. See Official account below |
 | `PARTNER_CONSENT_REQUIRED` | on | server | Off only for exactly `false`, an emergency rollback that makes partner lists effectively public (see below) |
 | `REQUIRE_VERIFIED_EMAIL` | off | server | On only for exactly `true`; needs Firebase. See the rollout note |
 | `AI_ENABLED` | off | server | AI routes run only when exactly `true` |
@@ -198,12 +199,26 @@ There is no admin screen; admins use the API. An admin is a uid in `ADMIN_USER_I
 ### What happens automatically
 - A post, comment or profile with 3 distinct open reporters whose accounts are at least 48 hours old and have accepted the privacy notice is hidden from everyone but its owner and the admins. The owner sees a notice in the app. Resolving its reports (a dismiss too) unhides it at once. Reports from newer accounts still reach the queue.
 - Known limit: 3 colluding accounts that meet those conditions can still hide content until an admin reviews it.
+- The official account's posts, comments and profile are never hidden this way. Their reports still reach the queue with `targetOfficial: true` (and `autoHidden: false`); admins can remove the content or clear the profile as usual.
 
 ### Suspensions
 - First suspension: 7 days. Any later one (voided ones do not count): permanent. `permanent: true` makes one permanent at once.
 - A suspended user cannot post, edit a post, comment, send or accept partner requests, edit their profile or avatar, or report (403 `account_suspended` with `until`). They can still read, cheer, save, block, log out and delete their account. The app shows a banner on Home and Profile.
-- Suspending someone already suspended answers 409 `already_suspended` with the current state, unless `permanent: true` escalates a temporary suspension. Admins cannot be suspended (403 `cannot_suspend_admin`).
+- Suspending someone already suspended answers 409 `already_suspended` with the current state, unless `permanent: true` escalates a temporary suspension. Admins cannot be suspended (403 `cannot_suspend_admin`). The official account can be suspended like any user (a kill switch if it is ever compromised), unless its uid is also in `ADMIN_USER_IDS`.
 - Known limit: a suspended user can delete the account and register again.
+
+### Official account
+- Set up by the owner, not by code (nothing creates the account), in this order:
+  1. Sign up in the app with the brand address.
+  2. Confirm 18+ and accept the privacy notice.
+  3. At the name prompt, choose "Later" or any ordinary name (the brand name is refused until step 5).
+  4. Copy the account's uid from the Firebase console (Authentication, Users) into `OFFICIAL_USER_IDS` on the server, and restart it. Never put the same uid in `ADMIN_USER_IDS`.
+  5. In the app, Edit profile: set the name to "DrinkMe" / "DrinkMe Official".
+- Removing a uid from `OFFICIAL_USER_IDS`: first rename the account (or have an admin clear its profile), because once it is no longer official its brand name stays stored but can no longer be edited into another brand name, and the badge disappears while the name stays. Then remove the uid and restart. Its content becomes subject to the auto-hide again at once (open reports count).
+- Every user view has `official` (true only for these uids; the stripped view of a profile without a public name is always false), so posts, comments, search results and partner lists carry it on their `user`. The app shows an "Official" / "Oficial" badge next to the name.
+- Reserved names: a non-official account cannot save a first name, last name or both together that contain "drinkme" after folding. Folding (best effort, not a full Unicode TR39 confusables check): NFKC, lowercase, diacritics stripped; Cyrillic, Greek, Cherokee and other Latin look-alikes, regional-indicator letters and digits or symbols used as letters (0 o, 1 i, 3 e, 4 a, 5 s, 7 t, ! i, | i, $ s, @ a; "l" reads as "i") mapped to a-z; any other letter or symbol becomes a wildcard; spaces, punctuation and invisible characters removed. "drinkme" matches with at most 2 wildcards (at least 5 real letters), or with the wildcards removed; "rn" read as "m" and "cl" read as "d" are checked too. A non-official name is also refused when it contains "official" / "oficial" or a check mark (✓ ✔ ☑ ✅ 🗸 🗹 ⍻ √), so it cannot imitate the badge. `PUT /api/users/:id` answers 400 `name_reserved` when the name changes (including the name prompt making a masked email-prefix name public). At sign-in such a Google or Apple name is not stored: the account starts without a name, the owner view carries `nameReservedAtSignIn: true` while the name prompt is due (cleared by the next profile save), and the app says why.
+- Names stored before this rule are left as they are (no silent data change). The server logs how many there are, as a count only. Edits to city or bio still work; any name change that keeps the brand is refused. An admin can clear such a profile after a report (`clear_profile`).
+- No auto-hide by reports (see above). Suspension works as for any user.
 
 ### Getting an admin API token
 The examples use shell variables; never paste a real token or password into a document or ticket. `EXPO_PUBLIC_FIREBASE_API_KEY` is the client's Firebase web API key from the root `.env`. This works for an admin account with an email and password:
@@ -224,7 +239,7 @@ A fresh password sign-in counts as a verified sign-in: if the account's stored s
 ```bash
 curl -s "$API/api/admin/reports?status=open" -H "Authorization: Bearer $TOKEN"
 ```
-Oldest first, at most 100 items, plus `total` and `overdueCount` (open reports older than 24 hours). Each item has `target` (the public view of the post, comment or profile; null once gone), `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount` and `autoHidden`. Use `?status=resolved` for the history (details are cleared on resolve). Owners can edit a reported post (the image never changes): a post report then has `editedAfterReport: true`, `target` shows the current text, and `targetSnapshot` holds the content as it was when first edited after the report. The snapshot is deleted when the report is resolved.
+Oldest first, at most 100 items, plus `total` and `overdueCount` (open reports older than 24 hours). Each item has `target` (the public view of the post, comment or profile; null once gone), `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount`, `autoHidden` and `targetOfficial` (the content belongs to the official account, which is never auto-hidden). Use `?status=resolved` for the history (details are cleared on resolve). Owners can edit a reported post (the image never changes): a post report then has `editedAfterReport: true`, `target` shows the current text, and `targetSnapshot` holds the content as it was when first edited after the report. The snapshot is deleted when the report is resolved.
 
 ### Resolve a report
 ```bash
@@ -278,7 +293,7 @@ The `Dockerfile` and `.dockerignore` are in the repo root, so build from there. 
 
 ```bash
 docker build -t drinkme-api .
-docker run -p 8080:8080 -e JWT_SECRET -e FIREBASE_SERVICE_ACCOUNT_KEY -e CORS_ALLOWED_ORIGINS -e TRUST_PROXY_HOPS -e ADMIN_USER_IDS -v drinkme-data:/app/server/data drinkme-api
+docker run -p 8080:8080 -e JWT_SECRET -e FIREBASE_SERVICE_ACCOUNT_KEY -e CORS_ALLOWED_ORIGINS -e TRUST_PROXY_HOPS -e ADMIN_USER_IDS -e OFFICIAL_USER_IDS -v drinkme-data:/app/server/data drinkme-api
 ```
 
 The image uses Node 22, production dependencies only, a non-root user, `NODE_ENV=production` and `PORT=8080`. `.dockerignore` is an allowlist: only `server/package.json`, `server/package-lock.json`, `server/server.js` and `server/scripts/` enter the build, so a new server source file must be added there and in the `Dockerfile`.
@@ -289,6 +304,7 @@ Deploy variables:
 - `CORS_ALLOWED_ORIGINS`, if browser origins need access.
 - `TRUST_PROXY_HOPS`: Set the host's real hop count, which has not been verified for Railway or Render.
 - `ADMIN_USER_IDS`: The uids of the people who review reports.
+- `OFFICIAL_USER_IDS`: The uid of the official DrinkMe account, once the owner has created it.
 - `ALLOW_EMPTY_DB=true`: For the first start only, then remove it.
 - Storage: Mount a volume writable by uid 1000 at `/app/server/data`, or set an absolute `DB_FILE` in a directory of its own. Without a volume, data is lost on redeploy.
 - Backups: schedule `npm run backup` daily in the same image (for example `docker run ... drinkme-api npm run backup` with the same volume and `-e BACKUP_DIR` pointing at separate storage), and keep host or volume snapshots 30 days or less.

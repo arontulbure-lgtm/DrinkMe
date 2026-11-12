@@ -28,6 +28,7 @@ import { ActionsPanel } from './PostActionsSheet';
 import ListLoadState from './ListLoadState';
 import LoadMoreButton from './LoadMoreButton';
 import ModerationNotice from './ModerationNotice';
+import OfficialBadge from './OfficialBadge';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { formatTimeAgo } from '../lib/formatTimeAgo';
 
@@ -219,6 +220,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
                     <View style={styles.commentBody}>
                       <View style={styles.commentMeta}>
                         <Text style={styles.commentAuthor} numberOfLines={1}>{displayName}</Text>
+                        <OfficialBadge official={commentUser?.official} style={styles.officialBadge} />
                         <Text style={styles.commentTime}>{formatTimeAgo(comment.createdAt, t)}</Text>
                         <TouchableOpacity
                           style={styles.commentMoreButton}
@@ -467,5 +469,8 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#374151',
+  },
+  officialBadge: {
+    marginLeft: 0,
   },
 });
