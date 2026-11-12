@@ -104,7 +104,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
         return;
       }
       const isStorageFull = error instanceof ApiError && error.status === 507;
-      Alert.alert('Error', isStorageFull ? t('common.serviceUnavailable') : 'Failed to add item to your bar');
+      Alert.alert(t('common.errorTitle'), isStorageFull ? t('common.serviceUnavailable') : t('smartBar.addFailed'));
     },
   });
 
@@ -124,7 +124,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
       queryClient.invalidateQueries({ queryKey: ['smartBar.inventory'] });
     },
     onError: () => {
-      Alert.alert('Error', 'Failed to remove item from your bar');
+      Alert.alert(t('common.errorTitle'), t('smartBar.removeFailed'));
     },
   });
 
@@ -147,13 +147,13 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
       });
     },
     onError: () => {
-      Alert.alert('Error', t('scanner.error'));
+      Alert.alert(t('common.errorTitle'), t('scanner.error'));
     },
   });
 
   const handleAddItem = () => {
     if (!newItemName.trim() || !newItemQuantity.trim()) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert(t('common.errorTitle'), t('smartBar.fillAllFields'));
       return;
     }
     addItemMutation.mutate({
@@ -166,12 +166,12 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
   const handleDeleteItem = useCallback(
     (itemId: number, itemName: string) => {
       Alert.alert(
-        'Remove Item',
-        `Remove ${itemName} from your bar?`,
+        t('smartBar.removeTitle'),
+        t('smartBar.removeConfirm', { name: itemName }),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Remove',
+            text: t('common.remove'),
             style: 'destructive',
             onPress: () => {
               deleteItemMutation.mutate(itemId);
@@ -185,7 +185,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
         ]
       );
     },
-    [deleteItemMutation]
+    [deleteItemMutation, t]
   );
 
   const toggleSelect = useCallback((id: number) => {
@@ -263,6 +263,9 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
             <TouchableOpacity
               style={styles.deleteButton}
               onPress={() => handleDeleteItem(item.id, item.name)}
+              hitSlop={7}
+              accessibilityRole="button"
+              accessibilityLabel={t('smartBar.removeItemLabel', { name: item.name })}
             >
               <Ionicons name="trash-outline" size={18} color="#EF4444" />
             </TouchableOpacity>
@@ -308,7 +311,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
           {/* Coming soon badge */}
           <View style={styles.betaBadge}>
             <Ionicons name="flask" size={13} color="#8B5FBF" />
-            <Text style={styles.betaBadgeText}>Beta — Coming Soon</Text>
+            <Text style={styles.betaBadgeText}>{t('common.betaComingSoon')}</Text>
           </View>
 
           {/* Hero */}
@@ -321,10 +324,10 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
             </View>
           </View>
 
-          <Text style={styles.betaTitle}>AI Recipe Generator</Text>
+          <Text style={styles.betaTitle}>{t('smartBar.aiTitle')}</Text>
           <Text style={styles.betaDesc}>
             {isAgeConfirmed
-              ? 'Select ingredients from your bar, tap Generate, and our AI will craft personalised cocktail recipes matched to exactly what you have on hand.'
+              ? t('smartBar.recipesIntro')
               : t('ageGate.recipesIntro')}
           </Text>
 
@@ -332,23 +335,21 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
           <View style={styles.betaFeatureList}>
             <View style={styles.betaFeatureRow}>
               <Ionicons name="checkmark-circle" size={18} color="#8B5FBF" />
-              <Text style={styles.betaFeatureText}>Pick ingredients with one tap</Text>
+              <Text style={styles.betaFeatureText}>{t('smartBar.featurePick')}</Text>
             </View>
             <View style={styles.betaFeatureRow}>
               <Ionicons name="checkmark-circle" size={18} color="#8B5FBF" />
               <Text style={styles.betaFeatureText}>
-                {isAgeConfirmed ? 'Get 5 tailored cocktail recipes instantly' : t('ageGate.recipesFeature')}
+                {isAgeConfirmed ? t('smartBar.featureRecipes') : t('ageGate.recipesFeature')}
               </Text>
             </View>
             <View style={styles.betaFeatureRow}>
               <Ionicons name="checkmark-circle" size={18} color="#8B5FBF" />
-              <Text style={styles.betaFeatureText}>Save favourites directly to your bar</Text>
+              <Text style={styles.betaFeatureText}>{t('smartBar.featureSave')}</Text>
             </View>
           </View>
 
-          <Text style={styles.betaNote}>
-            This feature is being perfected and will be unlocked in the next update.
-          </Text>
+          <Text style={styles.betaNote}>{t('smartBar.betaNote')}</Text>
         </View>
       );
     }
@@ -479,7 +480,13 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('smartBar.title')}</Text>
-        <TouchableOpacity style={styles.headerAction} onPress={() => setIsAddingItem(true)}>
+        <TouchableOpacity
+          style={styles.headerAction}
+          onPress={() => setIsAddingItem(true)}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel={t('smartBar.addItemTitle')}
+        >
           <Ionicons name="add" size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </View>

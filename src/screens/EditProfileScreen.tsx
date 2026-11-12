@@ -68,7 +68,13 @@ export default function EditProfileScreen({ navigation }: Props) {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={navigation.goBack} style={styles.headerButton}>
+        <TouchableOpacity
+          onPress={navigation.goBack}
+          style={styles.headerButton}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+        >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('editProfile.title')}</Text>
@@ -102,7 +108,7 @@ export default function EditProfileScreen({ navigation }: Props) {
           <Text style={styles.label}>{t('editProfile.city')}</Text>
           <TextInput
             style={styles.input}
-            placeholder="București"
+            placeholder={t('editProfile.cityPlaceholder')}
             placeholderTextColor="#6B7280"
             value={city}
             onChangeText={setCity}

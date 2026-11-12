@@ -30,7 +30,7 @@ export default function ScannerScreen() {
           {/* Coming soon badge */}
           <View style={styles.betaBadge}>
             <Ionicons name="flask" size={14} color="#8B5FBF" />
-            <Text style={styles.betaBadgeText}>Beta — Coming Soon</Text>
+            <Text style={styles.betaBadgeText}>{t('common.betaComingSoon')}</Text>
           </View>
 
           {/* Hero icon */}
@@ -43,10 +43,10 @@ export default function ScannerScreen() {
             </View>
           </View>
 
-          <Text style={styles.betaTitle}>AI Scanner</Text>
+          <Text style={styles.betaTitle}>{t('scanner.aiTitle')}</Text>
           <Text style={styles.betaSubtitle}>
             {isAgeConfirmed
-              ? 'Point your camera at any bottle or label and let the AI instantly identify the product and suggest cocktail recipes crafted just for you.'
+              ? t('scanner.intro')
               : t('ageGate.scannerIntro')}
           </Text>
 
@@ -57,10 +57,10 @@ export default function ScannerScreen() {
                 <Ionicons name="camera-outline" size={24} color="#8B5FBF" />
               </View>
               <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>Instant Recognition</Text>
+                <Text style={styles.featureTitle}>{t('scanner.featureRecognitionTitle')}</Text>
                 <Text style={styles.featureDesc}>
                   {isAgeConfirmed
-                    ? 'Snap a photo or pick one from your gallery — our AI identifies spirits, wines, and mixers in seconds.'
+                    ? t('scanner.featureRecognition')
                     : t('ageGate.scannerRecognition')}
                 </Text>
               </View>
@@ -71,10 +71,10 @@ export default function ScannerScreen() {
                 <Ionicons name="flask-outline" size={24} color="#8B5FBF" />
               </View>
               <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>Recipe Generator</Text>
+                <Text style={styles.featureTitle}>{t('scanner.featureRecipesTitle')}</Text>
                 <Text style={styles.featureDesc}>
                   {isAgeConfirmed
-                    ? 'Once the product is detected, get 5 personalised cocktail recipes with ingredients and step-by-step instructions.'
+                    ? t('scanner.featureRecipes')
                     : t('ageGate.scannerRecipes')}
                 </Text>
               </View>
@@ -85,19 +85,13 @@ export default function ScannerScreen() {
                 <Ionicons name="star-outline" size={24} color="#8B5FBF" />
               </View>
               <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>Save & Share</Text>
-                <Text style={styles.featureDesc}>
-                  Love a recipe? Save it to your SmartBar and share your favourites
-                  with the DrinkMe community.
-                </Text>
+                <Text style={styles.featureTitle}>{t('scanner.featureSaveTitle')}</Text>
+                <Text style={styles.featureDesc}>{t('scanner.featureSave')}</Text>
               </View>
             </View>
           </View>
 
-          <Text style={styles.betaNote}>
-            This feature is currently being fine-tuned. It will be available in the
-            next update. Stay tuned!
-          </Text>
+          <Text style={styles.betaNote}>{t('scanner.betaNote')}</Text>
         </ScrollView>
       </SafeAreaView>
     );

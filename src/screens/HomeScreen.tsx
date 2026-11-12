@@ -164,10 +164,23 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 12 }}>
-          <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('CreatePost')}>
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => navigation.navigate('CreatePost')}
+            hitSlop={2}
+            accessibilityRole="button"
+            accessibilityLabel={t('createPost.title')}
+          >
             <Ionicons name="add-circle-outline" size={24} color="#8B5FBF" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.notificationButton} onPress={openNotifications}>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={openNotifications}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel={t('notifications.title')}
+            accessibilityHint={unreadCount > 0 ? t('notifications.unreadCount', { count: unreadCount }) : undefined}
+          >
             <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
             {unreadCount > 0 && (
               <View style={styles.badge}>
@@ -251,7 +264,12 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('notifications.title')}</Text>
-              <TouchableOpacity onPress={() => setNotificationsVisible(false)}>
+              <TouchableOpacity
+                onPress={() => setNotificationsVisible(false)}
+                hitSlop={11}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.close')}
+              >
                 <Ionicons name="close" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>

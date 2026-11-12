@@ -4,6 +4,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { Drink } from '../types/api';
 import { getImageSource } from '../lib/api';
 import { useLocalization } from '../context/LocalizationContext';
+import { formatTimeAgo } from '../lib/formatTimeAgo';
 import ModerationNotice from './ModerationNotice';
 
 interface DrinkPostCardProps {
@@ -33,17 +34,6 @@ export default function DrinkPostCard({
   const displayName = drink.user?.firstName
     ? `${drink.user.firstName} ${drink.user.lastName || ''}`
     : t('common.unknownUser');
-
-  const formatTimeAgo = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-    return `${Math.floor(diffInMinutes / 1440)}d ago`;
-  };
 
   const renderStars = (rating: number) => (
     <View style={styles.starsContainer}>
@@ -77,7 +67,7 @@ export default function DrinkPostCard({
           <View style={styles.userDetails}>
             <Text style={styles.username}>{displayName}</Text>
             <Text style={styles.timestamp}>
-              {formatTimeAgo(drink.createdAt)}
+              {formatTimeAgo(drink.createdAt, t)}
               {drink.editedAt ? ` · ${t('post.edited')}` : ''}
             </Text>
           </View>

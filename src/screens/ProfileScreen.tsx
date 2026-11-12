@@ -153,7 +153,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       if (!profileData) return '';
       return profileData.lastName || t('common.unknownUser');
     }
-    return source?.email || firebaseUser?.email || 'User';
+    return source?.email || firebaseUser?.email || t('common.unknownUser');
   }, [firebaseUser?.email, isSelf, profile, profileData, t]);
 
   const handleLogout = () => {
@@ -260,10 +260,19 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
               <TouchableOpacity
                 onPress={() => navigation.navigate('LanguageSettings')}
                 style={styles.headerIconButton}
+                hitSlop={7}
+                accessibilityRole="button"
+                accessibilityLabel={t('profile.language')}
               >
                 <Ionicons name="settings-outline" size={22} color="#8B5FBF" />
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleLogout} style={styles.headerIconButton}>
+              <TouchableOpacity
+                onPress={handleLogout}
+                style={styles.headerIconButton}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={t('profile.logout')}
+              >
                 <Ionicons name="log-out-outline" size={24} color="#EF4444" />
               </TouchableOpacity>
             </>
@@ -280,7 +289,13 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
                   <Ionicons name="ellipsis-horizontal" size={22} color="#FFFFFF" />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconButton}>
+              <TouchableOpacity
+                onPress={() => navigation.goBack()}
+                style={styles.headerIconButton}
+                hitSlop={7}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.close')}
+              >
                 <Ionicons name="close" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </>

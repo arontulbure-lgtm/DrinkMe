@@ -29,6 +29,7 @@ import ListLoadState from './ListLoadState';
 import LoadMoreButton from './LoadMoreButton';
 import ModerationNotice from './ModerationNotice';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
+import { formatTimeAgo } from '../lib/formatTimeAgo';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DRAWER_HEIGHT = SCREEN_HEIGHT * 0.72;
@@ -37,21 +38,6 @@ interface CommentDrawerProps {
   drinkId: number | null;
   onClose: () => void;
   onBlocked?: (userId: string) => void;
-}
-
-function formatTimeAgo(dateString: string): string {
-  const now = Date.now();
-  const then = new Date(dateString).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffDay > 0) return `${diffDay}d`;
-  if (diffHr > 0) return `${diffHr}h`;
-  if (diffMin > 0) return `${diffMin}m`;
-  return 'now';
 }
 
 export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDrawerProps) {
@@ -159,7 +145,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
       statusBarTranslucent
       onRequestClose={() => (actionsComment ? actionsCloseRef.current() : handleClose())}
     >
-      <TouchableWithoutFeedback onPress={handleClose}>
+      <TouchableWithoutFeedback onPress={handleClose} accessibilityRole="button" accessibilityLabel={t('common.close')}>
         <View style={styles.backdrop} />
       </TouchableWithoutFeedback>
 
@@ -173,7 +159,12 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
           <View style={styles.handle} />
           <View style={styles.titleRow}>
             <Text style={styles.title}>{t('drinkDetail.comments')}</Text>
-            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <TouchableOpacity
+              onPress={handleClose}
+              hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.close')}
+            >
               <Ionicons name="close" size={22} color="#9CA3AF" />
             </TouchableOpacity>
           </View>
@@ -227,8 +218,8 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
                     </View>
                     <View style={styles.commentBody}>
                       <View style={styles.commentMeta}>
-                        <Text style={styles.commentAuthor}>{displayName}</Text>
-                        <Text style={styles.commentTime}>{formatTimeAgo(comment.createdAt)}</Text>
+                        <Text style={styles.commentAuthor} numberOfLines={1}>{displayName}</Text>
+                        <Text style={styles.commentTime}>{formatTimeAgo(comment.createdAt, t)}</Text>
                         <TouchableOpacity
                           style={styles.commentMoreButton}
                           onPress={() => {
@@ -282,6 +273,10 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
               style={[styles.sendButton, (!text.trim() || addCommentMutation.isPending) && styles.sendButtonDisabled]}
               onPress={handleSend}
               disabled={!text.trim() || addCommentMutation.isPending}
+              hitSlop={4}
+              accessibilityRole="button"
+              accessibilityLabel={t('comment.send')}
+              accessibilityState={{ disabled: !text.trim() || addCommentMutation.isPending }}
             >
               <Ionicons name="send" size={18} color="#FFFFFF" />
             </TouchableOpacity>
@@ -404,6 +399,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 1,
   },
   commentTime: {
     color: '#6B7280',

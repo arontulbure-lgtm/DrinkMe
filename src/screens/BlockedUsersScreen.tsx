@@ -73,8 +73,9 @@ export default function BlockedUsersScreen({ navigation }: Props) {
         <TouchableOpacity
           onPress={navigation.goBack}
           style={styles.headerButton}
+          hitSlop={6}
           accessibilityRole="button"
-          accessibilityLabel={t('common.close')}
+          accessibilityLabel={t('common.back')}
         >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>

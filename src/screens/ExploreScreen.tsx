@@ -175,7 +175,12 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
             autoCorrect={false}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={13}
+              accessibilityRole="button"
+              accessibilityLabel={t('explore.clearSearch')}
+            >
               <Ionicons name="close-circle" size={18} color="#6B7280" />
             </TouchableOpacity>
           )}

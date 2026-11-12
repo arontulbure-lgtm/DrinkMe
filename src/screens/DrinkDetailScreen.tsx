@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import { useDrinkToggles } from '../lib/useDrinkToggles';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
+import { formatTimeAgo } from '../lib/formatTimeAgo';
 import { RootStackScreenProps } from '../navigation/types';
 
 type Props = RootStackScreenProps<'DrinkDetail'>;
@@ -132,21 +133,6 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
     commentMutation.mutate(trimmed);
   };
 
-  const formatTimeAgo = useMemo(
-    () =>
-      (dateString: string) => {
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-
-        if (diffInMinutes < 1) return 'Just now';
-        if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-        if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-        return `${Math.floor(diffInMinutes / 1440)}d ago`;
-      },
-    []
-  );
-
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <KeyboardAvoidingView
@@ -156,7 +142,13 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
       >
         <View style={{ flex: 1 }}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={navigation.goBack} style={styles.headerButton}>
+            <TouchableOpacity
+              onPress={navigation.goBack}
+              style={styles.headerButton}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.back')}
+            >
               <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{t('drinkDetail.title')}</Text>
@@ -298,7 +290,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                                   : t('common.unknownUser')}
                               </Text>
                               <View style={styles.commentHeaderEnd}>
-                                <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt)}</Text>
+                                <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt, t)}</Text>
                                 <TouchableOpacity
                                   style={styles.commentMoreButton}
                                   onPress={() => setActionsComment(comment)}
@@ -354,6 +346,10 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                 style={[styles.sendButton, (!commentText.trim() || commentMutation.isPending) && styles.sendButtonDisabled]}
                 onPress={handleSubmitComment}
                 disabled={!commentText.trim() || commentMutation.isPending}
+                hitSlop={2}
+                accessibilityRole="button"
+                accessibilityLabel={t('comment.send')}
+                accessibilityState={{ disabled: !commentText.trim() || commentMutation.isPending }}
               >
                 <Ionicons name="send" size={18} color="#FFFFFF" />
               </TouchableOpacity>

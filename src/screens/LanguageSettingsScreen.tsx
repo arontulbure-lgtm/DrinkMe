@@ -44,7 +44,13 @@ export default function LanguageSettingsScreen({ navigation }: Props) {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton} onPress={navigation.goBack}>
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={navigation.goBack}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+        >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('languageSettings.title')}</Text>

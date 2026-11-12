@@ -183,7 +183,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
       trimAndInvalidate(queryClient, { queryKey: ['drinks.search'] });
       setOriginalDrink(updatedDrink);
       Alert.alert(t('editPost.title'), t('editPost.success'), [
-        { text: 'OK', onPress: () => navigation.goBack() },
+        { text: t('common.ok'), onPress: () => navigation.goBack() },
       ]);
     },
     // The form keeps what the user typed on every error, so a retry (after going back online) resends it.
@@ -192,7 +192,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
       if (isNotFoundError(error)) {
         if (isCurrentAuthUser(serverUserId)) removeDrinkFromCaches(queryClient, drinkId);
         Alert.alert(t('editPost.title'), t('post.notFound'), [
-          { text: 'OK', onPress: () => navigation.goBack() },
+          { text: t('common.ok'), onPress: () => navigation.goBack() },
         ]);
         return;
       }
@@ -243,7 +243,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
       setPhoto(null);
 
       Alert.alert(t('createPost.title'), t('createPost.success'), [
-        { text: 'OK', onPress: () => navigation.goBack() },
+        { text: t('common.ok'), onPress: () => navigation.goBack() },
       ]);
     },
     onError: (error) => {
@@ -351,7 +351,15 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
       <Text style={styles.ratingLabel}>{t('createPost.rating')}</Text>
       <View style={styles.starsContainer}>
         {[1, 2, 3, 4, 5].map((star) => (
-          <TouchableOpacity key={star} onPress={() => setRating(star)} style={styles.starButton}>
+          <TouchableOpacity
+            key={star}
+            onPress={() => setRating(star)}
+            style={styles.starButton}
+            hitSlop={2}
+            accessibilityRole="button"
+            accessibilityLabel={t('createPost.rateStars', { count: star })}
+            accessibilityState={{ selected: star === rating }}
+          >
             <Ionicons
               name={star <= rating ? 'star' : 'star-outline'}
               size={32}
@@ -451,7 +459,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
 
             {/* Alcoholic toggle */}
             <View style={styles.toggleSection}>
-              <Text style={styles.label}>Type</Text>
+              <Text style={styles.label}>{t('createPost.typeLabel')}</Text>
               <View style={styles.toggleRow}>
                 <TouchableOpacity
                   style={[styles.toggleOption, isAlcoholic && styles.toggleOptionActive, !isAgeConfirmed && styles.toggleOptionLocked]}
@@ -461,7 +469,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
                 >
                   <Ionicons name="wine" size={16} color={isAlcoholic ? '#FFFFFF' : '#6B7280'} />
                   <Text style={[styles.toggleOptionText, isAlcoholic && styles.toggleOptionTextActive]}>
-                    Alcoholic
+                    {t('createPost.alcoholic')}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -470,7 +478,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
                 >
                   <Ionicons name="leaf" size={16} color={!isAlcoholic ? '#FFFFFF' : '#6B7280'} />
                   <Text style={[styles.toggleOptionText, !isAlcoholic && styles.toggleOptionTextActive]}>
-                    Non-alcoholic
+                    {t('createPost.nonAlcoholic')}
                   </Text>
                 </TouchableOpacity>
               </View>

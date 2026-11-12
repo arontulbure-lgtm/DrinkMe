@@ -159,7 +159,7 @@ export function ActionsPanel({ target, onClose, onDeleted, onBlocked, closeRef }
 
   return (
     <>
-      <TouchableWithoutFeedback onPress={handleClose}>
+      <TouchableWithoutFeedback onPress={handleClose} accessibilityRole="button" accessibilityLabel={t('common.close')}>
         <View style={styles.backdrop} />
       </TouchableWithoutFeedback>
 

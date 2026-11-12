@@ -30,6 +30,7 @@ const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
 function TabNavigator() {
+  const { t } = useLocalization();
   return (
     <Tab.Navigator
       id={undefined}
@@ -66,11 +67,11 @@ function TabNavigator() {
         headerTintColor: '#FFFFFF',
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Explore" component={ExploreScreen} />
-      <Tab.Screen name="Scanner" component={ScannerScreen} />
-      <Tab.Screen name="SmartBar" component={SmartBarScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Home" component={HomeScreen} options={{ title: t('tabs.home') }} />
+      <Tab.Screen name="Explore" component={ExploreScreen} options={{ title: t('tabs.explore') }} />
+      <Tab.Screen name="Scanner" component={ScannerScreen} options={{ title: t('tabs.scanner') }} />
+      <Tab.Screen name="SmartBar" component={SmartBarScreen} options={{ title: t('tabs.smartBar') }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t('tabs.profile') }} />
     </Tab.Navigator>
   );
 }

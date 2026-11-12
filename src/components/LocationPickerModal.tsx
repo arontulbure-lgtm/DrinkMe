@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { useLocalization } from '../context/LocalizationContext';
 
 interface LocationSuggestion {
   description: string;
@@ -32,6 +33,7 @@ const GOOGLE_API_KEY =
   (Constants.manifest2?.extra as any)?.googleMapsApiKey;
 
 export function LocationPickerModal({ visible, onClose, onSelect, initialValue }: LocationPickerModalProps) {
+  const { t } = useLocalization();
   const [query, setQuery] = useState(initialValue ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +57,7 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
         setLoading(true);
         setError(null);
         if (!GOOGLE_API_KEY) {
-          setError('Missing Google Maps API key');
+          setError(t('location.notConfigured'));
           setResults([]);
           setLoading(false);
           return;
@@ -67,7 +69,7 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
         );
         const data = await response.json();
         if (data.status !== 'OK') {
-          setError(data.error_message || 'Unable to load suggestions');
+          setError(data.error_message || t('location.loadError'));
           setResults([]);
           return;
         }
@@ -78,13 +80,13 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
         setResults(suggestions);
       } catch (error) {
         console.error('Failed to fetch location suggestions', error);
-        setError('Unable to load suggestions');
+        setError(t('location.loadError'));
         setResults([]);
       } finally {
         setLoading(false);
       }
     },
-    []
+    [t]
   );
 
   useEffect(() => {
@@ -140,14 +142,14 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <View style={styles.header}>
-            <Text style={styles.title}>Search location</Text>
-            <TouchableOpacity onPress={onClose}>
+            <Text style={styles.title}>{t('location.title')}</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={11} accessibilityRole="button" accessibilityLabel={t('common.close')}>
               <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
           <TextInput
             style={styles.input}
-            placeholder="Search venues or addresses"
+            placeholder={t('location.searchPlaceholder')}
             placeholderTextColor="#6B7280"
             value={query}
             onChangeText={setQuery}
@@ -162,7 +164,7 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               !loading && !error && query.length >= 2 ? (
-                <Text style={styles.emptyText}>No matches found</Text>
+                <Text style={styles.emptyText}>{t('location.noMatches')}</Text>
               ) : null
             }
           />

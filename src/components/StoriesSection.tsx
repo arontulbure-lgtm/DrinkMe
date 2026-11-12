@@ -37,7 +37,7 @@ export default function StoriesSection({ stories, isLoading = false }: StoriesSe
 
   return (
     <View style={styles.container}>
-      <Text style={styles.sectionTitle}>Stories</Text>
+      <Text style={styles.sectionTitle}>{t('stories.title')}</Text>
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
@@ -62,7 +62,7 @@ export default function StoriesSection({ stories, isLoading = false }: StoriesSe
               </View>
             </View>
             <Text style={styles.storyUsername} numberOfLines={1}>
-              {story ? getDisplayName(story.user) : 'Loading'}
+              {story ? getDisplayName(story.user) : t('stories.loading')}
             </Text>
           </TouchableOpacity>
         ))}
@@ -74,7 +74,7 @@ export default function StoriesSection({ stories, isLoading = false }: StoriesSe
               <Ionicons name="add" size={24} color="#FFFFFF" />
             </View>
           </View>
-          <Text style={styles.addStoryText}>Your Story</Text>
+          <Text style={styles.addStoryText}>{t('stories.yourStory')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
