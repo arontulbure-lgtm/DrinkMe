@@ -16,10 +16,12 @@ External documentation (not in the repo) is in `D:\DrinkMeApp\`: TECHNICAL_REFER
 | security-reviewer | security review (read-only) |
 | docs-writer | README, technical docs, changelog |
 | deployment-prep | deployment/release prep, only when asked |
+| legal-compliance | legal documents (docs/legal), compliance matrix, store disclosures; never edits code |
 
 ## Pipeline
-**Feature:** planner → show the spec to the user and wait for OK → developer (one task at a time) → code-reviewer + test-engineer + security-reviewer (in parallel) → developer fixes BLOCKERs → re-review (max 3 loops, then stop and ask the user) → docs-writer → summary.
+**Feature:** planner → show the spec to the user and wait for OK → developer (one task at a time) → code-reviewer + test-engineer + security-reviewer (+ legal-compliance when required, see below) (in parallel) → developer fixes BLOCKERs → re-review (max 3 loops, then stop and ask the user) → docs-writer → summary.
 **Bug:** bug-fixer → test-engineer → code-reviewer → security-reviewer if auth, data or uploads are involved → docs-writer if behavior changed.
+**Legal review:** any change that touches personal data, user content, age rules, brand content or a new market also gets a legal-compliance review (in parallel with the other reviewers; its gaps go to docs/legal/compliance-matrix.md).
 **Single step:** if the user asks for one step only ("just review", "only plan"), run only that agent.
 
 ## Working rules
