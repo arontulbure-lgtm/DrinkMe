@@ -10,7 +10,7 @@ import { LocalizationProvider } from './src/context/LocalizationContext';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import { resetDrinkToggles } from './src/lib/drinkToggleChains';
 
-// Development only (device test sessions, docs/IOS_TEST_SESSION.md). __DEV__ is false in a release build,
+// Development only (device test sessions, docs/DEVICE_TEST_SESSION.md). __DEV__ is false in a release build,
 // so the bundler drops both requires and neither file is in it.
 /* eslint-disable @typescript-eslint/no-require-imports */
 const devLogBridge: typeof import('./src/lib/devLogBridge') | null = __DEV__ ? require('./src/lib/devLogBridge') : null;

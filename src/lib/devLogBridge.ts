@@ -1,4 +1,4 @@
-// Development-only log bridge for device test sessions (npm run test:ios, docs/IOS_TEST_SESSION.md).
+// Development-only log bridge for device test sessions (npm run test:ios or test:android, docs/DEVICE_TEST_SESSION.md).
 //
 // App.tsx loads this file only when __DEV__, so a release build does not contain it. It sends to
 // POST /__dev/client-log on the API server, which exists only when the server runs with

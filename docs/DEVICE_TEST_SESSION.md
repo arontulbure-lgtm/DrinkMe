@@ -1,10 +1,49 @@
-# iPhone test session with Expo Go
+# Device test sessions: Android emulator and iPhone
 
-For John. How to run DrinkMe on your iPhone from this PC over Wi-Fi, with every error captured, and then get a fix list.
+For John. How to run DrinkMe in Expo Go, on the Android emulator on this PC or on your iPhone over Wi-Fi, with every error captured, and then get a fix list.
 
-What happens: one command starts the API server and Expo. The app on your phone sends its errors, failed requests, screen changes and your notes back to the PC (development builds only). Everything is saved in `logs/sessions/<date-time>/`, and new problems are printed live in the terminal.
+What happens: one command starts the API server and Expo. The app sends its errors, failed requests, screen changes and your notes back to the PC (development builds only). Everything is saved in `logs/sessions/<date-time>/`, and new problems are printed live in the terminal. The checklist (section 4), the official account (section 5) and the triage (section 6) are the same on both.
 
-## 1. One-time setup
+| | Android emulator (section A) | iPhone (sections 1 to 2) |
+|---|---|---|
+| Command | `npm run test:android` | `npm run test:ios` |
+| Expo Go | installed automatically, SDK 54 version | App Store version, **no longer runs SDK 54** (see 1c) |
+| Network | inside this PC, nothing to set up | same Wi-Fi + firewall rules |
+
+## A. Android emulator on this PC
+
+### A1. What is installed (2026-11-13)
+- **JDK 17** (Microsoft OpenJDK, `C:\Program Files\Microsoft\jdk-17…`, `JAVA_HOME` set by its installer). The old Java 8 is still there and still first on PATH; the Android tools use `JAVA_HOME`.
+- **Android SDK** in `%LOCALAPPDATA%\Android\Sdk`: command-line tools, platform-tools (`adb`), the emulator, Android 15 (API 35) and the Google Play x86_64 system image. Only the Android SDK License Agreement was accepted.
+- User environment: `ANDROID_HOME` and PATH entries for `platform-tools`, `emulator` and `cmdline-tools\latest\bin`. **Open a new terminal** for them to apply.
+- **Emulator `DrinkMe_Pixel8`**: Pixel 8 screen, 4 GB RAM, 8 GB storage, hardware keyboard on, Google Play. It uses Windows' hypervisor (WHPX), which works here because Hyper-V is on; nothing else to enable.
+- No Android Studio is needed. To remove everything later: delete `%LOCALAPPDATA%\Android`, `%USERPROFILE%\.android`, uninstall "Microsoft Build of OpenJDK 17" and remove the two user environment entries.
+
+### A2. Run a session
+```powershell
+cd D:\DrinkMeApp\DrinkMeFinal
+npm run emulator        # starts DrinkMe_Pixel8 in its own window and waits until Android has booted (about 1.5 min)
+npm run test:android    # preflight, API server, Expo; installs Expo Go on the emulator and opens the app
+```
+- `npm run test:android` also offers to start the emulator if none is running.
+- The preflight checks `adb`, the emulator and a booted device too. Metro uses port 8081 or the next free one: Docker holds 8081 on this PC, so you will usually see 8082 or 8083. That is fine.
+- The script checks that the emulator reaches the API at the PC's Wi-Fi address. If it can't, it uses `http://10.0.2.2:5000` (the emulator's own name for this PC) and says so.
+- The first start downloads and installs Expo Go (SDK 54) on the emulator, then builds the app (a minute or two). Later starts are faster.
+- Leave the emulator window open between sessions; `npm run test:android` reuses it. Close it like a window when you are done for the day.
+- Ctrl+C stops the server and Expo (the emulator keeps running). `npm run test:android -- --capture-metro` also saves Metro's output to `metro.log`.
+
+### A3. Using the emulator
+- **Typing:** click a field and type on the PC keyboard (hardware keyboard is on). The on-screen keyboard still opens and covers the lower half, as on a phone; Esc or the ⌄ key closes it. Paste: copy on the PC, then Ctrl+V in a field (the clipboard is shared).
+- **First open:** Expo Go shows its own "developer menu" introduction sheet over the app; tap **Continue**, then the **X** on the menu. It can come back after Expo Go restarts.
+- **Back:** Esc, or the ◁ button in the emulator's side toolbar. **Home:** the ○ button.
+- **Dev menu** (reload, debugger): Ctrl+M in the emulator window, or `adb shell input keyevent 82`. **Reload:** press `r` twice quickly (RR) in the emulator window.
+- **Test photos:** drag JPG/PNG files from Explorer onto the emulator window; they land in the Download folder and appear in the photo picker (Create Post → gallery). Or from a terminal: `adb push C:\path\photo.jpg /sdcard/Pictures/` then `adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/photo.jpg`.
+- **Camera:** the emulator camera shows a virtual room you can move in (hold Alt and use WASD/mouse). Good enough to test the camera flow; use dragged photos for real images.
+- **Screenshot into the session folder:** `adb exec-out screencap -p > logs\sessions\<date-time>\screen-1.png` (from Git Bash; in PowerShell use `cmd /c "adb exec-out screencap -p > logs\sessions\<date-time>\screen-1.png"`). The log-triage agent looks at PNGs in the folder.
+- **Rotate:** Ctrl+Left/Right. **Location** for the location picker: emulator toolbar → ⋯ → Location.
+- What the emulator cannot tell you: real performance, real camera quality, push notifications, Google sign-in (disabled in Expo Go, section 3).
+
+## 1. iPhone one-time setup
 
 ### 1a. Same Wi-Fi
 - The PC and the iPhone must be on the **same Wi-Fi network**. A guest network or "client isolation" (common in offices and hotels) blocks phone-to-PC traffic; use your home network or a phone hotspot with the PC connected to it.
@@ -19,15 +58,20 @@ Get-NetConnectionProfile
 Set-NetConnectionProfile -InterfaceAlias "Wi-Fi" -NetworkCategory Private   # only if it shows Public
 
 New-NetFirewallRule -DisplayName "DrinkMe API (5000)"  -Direction Inbound -Protocol TCP -LocalPort 5000 -Action Allow -Profile Private
-New-NetFirewallRule -DisplayName "DrinkMe Metro (8081)" -Direction Inbound -Protocol TCP -LocalPort 8081 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "DrinkMe Metro (8081-8090)" -Direction Inbound -Protocol TCP -LocalPort 8081-8090 -Action Allow -Profile Private
 ```
+
+(Metro moves to 8082 or higher when 8081 is taken, as Docker does on this PC. If you already made a rule for 8081 only, add this one too.)
 
 If Windows ever shows "Windows Defender Firewall has blocked some features of Node.js", allow it on **Private** networks only.
 To remove the rules later: `Remove-NetFirewallRule -DisplayName "DrinkMe API (5000)"` (and the same for Metro).
 
 ### 1c. Expo Go on the iPhone
 - Install **Expo Go** from the App Store.
-- **Check the SDK first.** Expo Go on iOS runs only the newest Expo SDK, and the App Store has no older versions. DrinkMe is on **SDK 54** (we decided not to upgrade). If Expo Go says the project is incompatible, or asks for a newer SDK, Expo Go cannot be used. Tell Claude Code; the alternative is a development build (needs the Apple Developer account, see `docs/JOHN_TODO.md` section 5).
+- **The App Store Expo Go no longer runs SDK 54.** Expo Go on iOS supports only the newest Expo SDK and the App Store has no older versions, so it refuses DrinkMe (SDK 54; we decided not to upgrade). Until one of these is done, **test on the Android emulator** (section A):
+  - a **development build** of DrinkMe for your iPhone (`eas build --profile development --platform ios`): needs the Apple Developer account ($99/year, `docs/JOHN_TODO.md` section 5). It also makes Google sign-in testable. The log bridge and `npm run test:ios` work with it unchanged;
+  - or a later **SDK upgrade** (a major upgrade; your decision, currently "no majors").
+- **If Expo Go hangs on launch** ("Opening project…" or a white screen that never loads, while Safari reaches `/healthz`): the router's DNS is a known cause. iPhone Settings → Wi-Fi → (i) next to your network → Configure DNS → Manual → remove the entries, add `1.1.1.1` and `8.8.8.8` → Save, then reopen Expo Go. Switch back to Automatic after testing if you like.
 - The first time, iOS asks whether Expo Go may "find and connect to devices on your local network". Tap **Allow**. If you tapped "Don't Allow": iPhone Settings → Privacy & Security → Local Network → turn on Expo Go.
 
 ### 1d. Config files (you, not Claude Code)
@@ -35,7 +79,7 @@ To remove the rules later: `Remove-NetFirewallRule -DisplayName "DrinkMe API (50
 - `.env` in the project root must have the six `EXPO_PUBLIC_FIREBASE_*` values.
 - You do not need to change `EXPO_PUBLIC_API_URL`: the session command sets it to the PC's current Wi-Fi address for this run only.
 
-## 2. Run a session
+## 2. Run an iPhone session
 
 Use PowerShell (not cmd.exe, where Ctrl+C asks "Terminate batch job (Y/N)?" over the summary):
 
@@ -44,7 +88,7 @@ cd D:\DrinkMeApp\DrinkMeFinal
 npm run test:ios
 ```
 
-1. **Preflight.** A list of ✓/✗ checks: Node version, ports 5000 and 8081 free, `server/.env` with `NODE_ENV=development`, the Firebase service account, the `EXPO_PUBLIC_FIREBASE_*` names, and the PC's Wi-Fi address. No secret is ever printed. Fix any ✗ (each has a hint) and run it again. `npm run test:ios -- --preflight` runs only the checks.
+1. **Preflight.** A list of ✓/✗ checks: Node version, port 5000 and a Metro port (8081 or the next free one), `server/.env` with `NODE_ENV=development`, the Firebase service account, the `EXPO_PUBLIC_FIREBASE_*` names, and the PC's Wi-Fi address. No secret is ever printed. Fix any ✗ (each has a hint) and run it again. `npm run test:ios -- --preflight` runs only the checks.
 2. **Quick network test.** On the iPhone, open Safari at `http://<the IP shown>:5000/healthz`. You should see `{"status":"ok"}`. If the page never loads, the firewall or the Wi-Fi is the problem (section 1).
 3. **Scan the QR code** that Expo prints with the iPhone **Camera** app and tap the banner. It opens in Expo Go. The first load builds the app and takes a minute.
 4. **Test.** Use the checklist in section 3. While you test, the terminal shows lines like:
@@ -66,11 +110,12 @@ If the PC has several network adapters and the wrong IP is picked: `npm run test
 | `client.jsonl` | from the app: errors, crashes, warnings, failed requests (method, path, status, duration; never bodies or tokens), screen changes, your notes. Emails, tokens and keys are removed before saving. |
 | `metro.log` | only with `--capture-metro` |
 | `live-issues.txt` | what the watcher printed |
-| `session.json` | time, IP, branch and commit |
+| `session.json` | platform (ios or android), emulator, time, IP, API URL, Metro port, branch and commit |
+| `*.png` | screenshots you save there (see A3) |
 
 Logs and triage reports (`reports/test-sessions/`) stay on this PC and are never committed. They can still hold test account names and what you typed, so use throwaway test accounts, and delete a session folder and its report once its issues are fixed (at the latest after 30 days).
 
-The app log route (`/__dev/client-log`) is switched on only while `npm run test:ios` runs. A server started by hand (`node server.js`) does not have it. Anyone on the same Wi-Fi could write fake entries into the log during a session, so test on a network you trust.
+The app log route (`/__dev/client-log`) is switched on only while `npm run test:ios` or `npm run test:android` runs. A server started by hand (`node server.js`) does not have it. Anyone on the same Wi-Fi could write fake entries into the log during a session, so test on a network you trust.
 
 ## 3. What Expo Go cannot test
 - **Google sign-in.** The button is disabled in Expo Go on purpose: Google does not accept Expo Go's `exp://` return address. It needs a development build.
