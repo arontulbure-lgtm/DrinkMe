@@ -226,7 +226,8 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
             <Text style={styles.emptySubtitle}>{t('home.sections.emptyFeedSubtitle')}</Text>
             <TouchableOpacity
               style={styles.createButton}
-              onPress={() => navigation.navigate('Explore')}
+              onPress={() => navigation.navigate('CreatePost')}
+              accessibilityRole="button"
             >
               <Text style={styles.createButtonText}>{t('home.sections.createFirstPost')}</Text>
             </TouchableOpacity>
