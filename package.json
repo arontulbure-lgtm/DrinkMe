@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint",
+    "test:ios": "node scripts/test-session.mjs",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {

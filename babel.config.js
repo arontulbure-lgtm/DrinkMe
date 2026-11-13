@@ -1,3 +1,4 @@
+/* global __dirname */
 const path = require('path');
 
 // babel-preset-expo comes with the expo package and is no longer hoisted to the top-level node_modules

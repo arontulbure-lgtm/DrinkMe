@@ -25,3 +25,6 @@ coverage/
 **/serviceAccount*.json
 server/backups/
 .claude/worktrees/
+
+# Device test sessions (npm run test:ios): server, Metro and app logs
+logs/
