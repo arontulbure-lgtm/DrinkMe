@@ -1,16 +1,17 @@
 import React from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { apiFetch, getImageSource } from '../lib/api';
+import { apiFetch } from '../lib/api';
 import { invalidateAfterUnblock } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
 import OfficialBadge from '../components/OfficialBadge';
 import { RootStackScreenProps } from '../navigation/types';
+import MediaImage from '../components/MediaImage';
 
 type Props = RootStackScreenProps<'BlockedUsers'>;
 
@@ -45,7 +46,7 @@ export default function BlockedUsersScreen({ navigation }: Props) {
       <View style={styles.row}>
         <View style={styles.avatar}>
           {item.avatar ? (
-            <Image source={getImageSource(item.avatar)} style={styles.avatarImage} />
+            <MediaImage uri={item.avatar} style={styles.avatarImage} />
           ) : (
             <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
           )}

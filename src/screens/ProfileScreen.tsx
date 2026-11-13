@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Image,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,7 +17,6 @@ import {
   ACCOUNT_SUSPENDED_ERROR_KEY,
   apiFetch,
   ApiError,
-  getImageSource,
   isAccountSuspendedError,
   isNotFoundError,
   retryUnlessNotFound,
@@ -38,6 +36,7 @@ import ModerationNotice, { SuspensionBanner } from '../components/ModerationNoti
 import OfficialBadge from '../components/OfficialBadge';
 import type { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList, RootStackScreenProps, TabScreenProps } from '../navigation/types';
+import MediaImage from '../components/MediaImage';
 
 // Mounted twice: as the Profile tab (own profile) and as the UserProfile stack screen. navigation is the
 // part both mounts share (a union of the two cannot be called), so only navigate, goBack and isFocused
@@ -324,7 +323,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
             disabled={!isSelf || uploadAvatarMutation.isPending}
           >
             {avatarSource ? (
-              <Image source={getImageSource(avatarSource)} style={styles.avatarImage} />
+              <MediaImage uri={avatarSource} style={styles.avatarImage} />
             ) : (
               <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
             )}

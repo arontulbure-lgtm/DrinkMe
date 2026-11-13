@@ -122,6 +122,18 @@ export function sanitizeClientLogEntry(raw) {
   return entry;
 }
 
+/** The kind of HTTP client from its User-Agent, for the dev media diagnostic: never the string itself. */
+export function clientKind(userAgent) {
+  const ua = String(userAgent ?? '');
+  if (/okhttp/i.test(ua)) return 'android-okhttp';
+  if (/Dalvik|Android/i.test(ua)) return 'android';
+  if (/CFNetwork|Darwin/i.test(ua)) return 'ios-cfnetwork';
+  if (/Expo|ReactNative/i.test(ua)) return 'expo';
+  if (/Mozilla/i.test(ua)) return 'browser';
+  if (/node|undici/i.test(ua)) return 'node';
+  return ua ? 'other' : 'none';
+}
+
 export const DEV_LOG_HEADER = 'x-drinkme-dev-log';
 
 /**

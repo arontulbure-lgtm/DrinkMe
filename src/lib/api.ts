@@ -1,6 +1,8 @@
 import Constants from 'expo-constants';
-import type { ImageURISource } from 'react-native';
 import { devHooks } from './devHooks';
+
+// What MediaImage (expo-image) needs to load one image: no uri means no image.
+export type MediaSource = { uri?: string; headers?: Record<string, string> };
 
 type RequestConfig = RequestInit & {
   query?: Record<string, string | number | boolean | undefined | null>;
@@ -11,8 +13,19 @@ type RequestConfig = RequestInit & {
 // apiFetch îl injectează automat pe toate request-urile care nu au deja Authorization.
 let _apiToken: string | null = null;
 
+// Told when the token in use changes (sign-in, sign-out, account switch, session rebuild). MediaImage
+// clears its image cache then, so one account never sees images cached for another.
+const _tokenChangeListeners = new Set<() => void>();
+
+export function onApiTokenChange(listener: () => void): () => void {
+  _tokenChangeListeners.add(listener);
+  return () => _tokenChangeListeners.delete(listener);
+}
+
 export function setApiToken(token: string | null): void {
+  if (token === _apiToken) return;
   _apiToken = token;
+  _tokenChangeListeners.forEach((listener) => listener());
 }
 
 export function getApiToken(): string | null {
@@ -150,9 +163,10 @@ export async function apiFetch<T>(path: string, config: RequestConfig = {}): Pro
 // Image source for a path or URL from the API: own media or https, otherwise no image.
 // The token goes only to this server's /media routes.
 // The prefix ends in a slash, so it cannot match another host that merely starts the same way.
-// Other URLs get an empty headers object, not none: Android's image view ignores null headers and
-// would otherwise resend the previous image's token, for example to a Google photo URL.
-export function getImageSource(uri: string | null | undefined): ImageURISource {
+// Other URLs get an empty headers object, not none, so no image view can reuse a previous token.
+// Render it with MediaImage (expo-image): React Native's own Image drops these headers on Android under
+// the New Architecture, so every /media request got 401 there (device test 2026-11-13).
+export function getImageSource(uri: string | null | undefined): MediaSource {
   if (!uri) return {};
   const isRelativeMedia = uri.startsWith('/media/');
   if (isRelativeMedia && !API_BASE_URL) return {};

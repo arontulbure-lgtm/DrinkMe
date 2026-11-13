@@ -168,6 +168,16 @@ describe('POST /__dev/client-log with NODE_ENV=development', () => {
     assert.equal((await fetch(`${server.baseUrl}/__dev/other`, { method: 'POST' })).status, 404);
     // The sink logs no request line for its own batches.
     assert.doesNotMatch(server.getOutput(), /POST \/__dev\/client-log/);
+
+    // The media diagnostic: whether a token came and from which client, never the token itself.
+    const junkToken = 'not-a-real-token-1234567890';
+    const media = (headers) => fetch(`${server.baseUrl}/media/drinks/1`, { headers });
+    assert.equal((await media({ 'User-Agent': 'okhttp/4.12.0' })).status, 401);
+    assert.equal((await media({ Authorization: `Bearer ${junkToken}`, 'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 15)' })).status, 401);
+    const output = server.getOutput();
+    assert.match(output, /\[dev-media\] GET \/media\/drinks\/1 auth=absent client=android-okhttp/);
+    assert.match(output, /\[dev-media\] GET \/media\/drinks\/1 auth=refused client=android/);
+    assert.ok(!output.includes(junkToken), 'the token is never logged');
   });
 });
 
@@ -187,7 +197,8 @@ describe('POST /__dev/client-log is absent outside development', () => {
     const res = await postBatch(server.baseUrl, { entries: [{ kind: 'note', message: 'x' }] });
     assert.equal(res.status, 404);
     assert.deepEqual(fs.readdirSync(sessionDir), []);
-    assert.doesNotMatch(server.getOutput(), /\[dev-log\]/);
+    await fetch(`${server.baseUrl}/media/drinks/1`);
+    assert.doesNotMatch(server.getOutput(), /\[dev-log\]|\[dev-media\]/);
   });
 
   test('production mode: 404 and no client.jsonl', { timeout: TIMEOUT }, async (t) => {

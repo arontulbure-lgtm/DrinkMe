@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
-  Image,
   TextInput,
   KeyboardAvoidingView,
   Platform,
@@ -15,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch, getCommentErrorKey, getImageSource, isAgeRequiredError, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
+import { apiFetch, getCommentErrorKey, isAgeRequiredError, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
 import { flattenPages, getNextCursor, removeDrinkIfNotFound } from '../lib/drinkCache';
 import { Drink, Comment, Page, isDrinkCategory } from '../types/api';
 import ListLoadState from '../components/ListLoadState';
@@ -30,6 +29,7 @@ import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 import { formatTimeAgo } from '../lib/formatTimeAgo';
 import { RootStackScreenProps } from '../navigation/types';
+import MediaImage from '../components/MediaImage';
 
 type Props = RootStackScreenProps<'DrinkDetail'>;
 
@@ -216,7 +216,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     </View>
                   </View>
                   {drink.imageUrl ? (
-                    <Image source={getImageSource(drink.imageUrl)} style={styles.heroImage} />
+                    <MediaImage uri={drink.imageUrl} style={styles.heroImage} />
                   ) : null}
                   {drink.location && (
                     <View style={styles.locationRow}>
@@ -276,7 +276,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                         <View key={comment.id} style={styles.commentItem}>
                           <View style={styles.commentAvatar}>
                             {commentUser?.avatar ? (
-                              <Image source={getImageSource(commentUser.avatar)} style={styles.commentAvatarImage} />
+                              <MediaImage uri={commentUser.avatar} style={styles.commentAvatarImage} />
                             ) : (
                               <Text style={styles.commentAvatarText}>
                                 {commentUser?.firstName?.[0]?.toUpperCase() || '?'}

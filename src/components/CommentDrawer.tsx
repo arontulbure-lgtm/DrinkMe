@@ -3,7 +3,6 @@ import {
   Alert,
   Animated,
   Dimensions,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -20,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch, getCommentErrorKey, getImageSource, isAgeRequiredError, isNotFoundError, retryUnlessNotFound } from '../lib/api';
+import { apiFetch, getCommentErrorKey, isAgeRequiredError, isNotFoundError, retryUnlessNotFound } from '../lib/api';
 import { findCachedDrink, flattenPages, getNextCursor, removeDrinkIfNotFound } from '../lib/drinkCache';
 import { Comment, Page } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
@@ -31,6 +30,7 @@ import ModerationNotice from './ModerationNotice';
 import OfficialBadge from './OfficialBadge';
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { formatTimeAgo } from '../lib/formatTimeAgo';
+import MediaImage from './MediaImage';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DRAWER_HEIGHT = SCREEN_HEIGHT * 0.72;
@@ -210,7 +210,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
                   <View key={comment.id} style={styles.commentRow}>
                     <View style={styles.avatarWrap}>
                       {avatarUri ? (
-                        <Image source={getImageSource(avatarUri)} style={styles.avatarImg} />
+                        <MediaImage uri={avatarUri} style={styles.avatarImg} />
                       ) : (
                         <View style={styles.avatarFallback}>
                           <Text style={styles.avatarInitial}>{initial}</Text>
@@ -252,7 +252,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
           {/* Input area */}
           <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             {profile?.avatar ? (
-              <Image source={getImageSource(profile.avatar)} style={styles.inputAvatar} />
+              <MediaImage uri={profile.avatar} style={styles.inputAvatar} />
             ) : (
               <View style={[styles.inputAvatar, styles.inputAvatarFallback]}>
                 <Text style={styles.inputAvatarInitial}>

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   SectionList,
   TouchableOpacity,
-  Image,
   Alert,
   ActivityIndicator,
   RefreshControl,
@@ -13,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch, getImageSource, isForbiddenError, isNotFoundError, retryUnlessNotFound } from '../lib/api';
+import { apiFetch, isForbiddenError, isNotFoundError, retryUnlessNotFound } from '../lib/api';
 import {
   invalidateAfterPartnerChange,
   invalidateAfterPartnerRequest,
@@ -27,6 +26,7 @@ import { useLocalization } from '../context/LocalizationContext';
 import ListLoadState from '../components/ListLoadState';
 import OfficialBadge from '../components/OfficialBadge';
 import { RootStackScreenProps } from '../navigation/types';
+import MediaImage from '../components/MediaImage';
 
 type PartnersListScreenProps = RootStackScreenProps<'PartnersList'>;
 
@@ -160,7 +160,7 @@ export default function PartnersListScreen({ navigation, route }: PartnersListSc
       >
         <View style={styles.avatar}>
           {user.avatar ? (
-            <Image source={getImageSource(user.avatar)} style={styles.avatarImage} />
+            <MediaImage uri={user.avatar} style={styles.avatarImage} />
           ) : (
             <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
           )}

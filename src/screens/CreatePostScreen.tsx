@@ -21,7 +21,6 @@ import {
   apiFetch,
   ApiError,
   getEditPostErrorKey,
-  getImageSource,
   isAccountSuspendedError,
   isNotFoundError,
   retryUnlessNotFound,
@@ -47,6 +46,7 @@ import {
 import LocationPickerModal from '../components/LocationPickerModal';
 import ListLoadState from '../components/ListLoadState';
 import { RootStackScreenProps } from '../navigation/types';
+import MediaImage from '../components/MediaImage';
 
 interface SelectedImage {
   uri: string;
@@ -514,8 +514,8 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
             {isEditMode ? (
               <View style={styles.photoSection}>
                 {originalDrink?.imageUrl ? (
-                  <Image
-                    source={getImageSource(originalDrink.imageUrl)}
+                  <MediaImage
+                    uri={originalDrink.imageUrl}
                     style={styles.preview}
                     accessibilityLabel={t('editPost.photoLocked')}
                   />

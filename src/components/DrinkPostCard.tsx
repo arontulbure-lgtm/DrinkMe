@@ -1,12 +1,13 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { Drink } from '../types/api';
-import { getImageSource } from '../lib/api';
+
 import { useLocalization } from '../context/LocalizationContext';
 import { formatTimeAgo } from '../lib/formatTimeAgo';
 import ModerationNotice from './ModerationNotice';
 import OfficialBadge from './OfficialBadge';
+import MediaImage from './MediaImage';
 
 interface DrinkPostCardProps {
   drink: Drink;
@@ -60,7 +61,7 @@ export default function DrinkPostCard({
         >
           <View style={styles.avatar}>
             {drink.user?.avatar ? (
-              <Image source={getImageSource(drink.user.avatar)} style={styles.avatarImage} />
+              <MediaImage uri={drink.user.avatar} style={styles.avatarImage} />
             ) : (
               <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
             )}
@@ -100,7 +101,7 @@ export default function DrinkPostCard({
 
       <View style={styles.content}>
         {drink.imageUrl ? (
-          <Image source={getImageSource(drink.imageUrl)} style={styles.image} />
+          <MediaImage uri={drink.imageUrl} style={styles.image} />
         ) : null}
         <Text style={styles.drinkName}>{drink.name}</Text>
         <View style={styles.ratingContainer}>

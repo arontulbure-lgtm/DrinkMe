@@ -262,6 +262,16 @@ const mediaLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/media', mediaLimiter);
+// Device test sessions only (see devLogBridge): whether a media request carries a usable token, and
+// from which client. Never the token, never the user. Diagnoses images that load on one platform only.
+if (devLogBridge) {
+  app.use('/media', (req, res, next) => {
+    const header = req.headers.authorization;
+    const auth = !header ? 'absent' : !/^Bearer\s+\S+$/i.test(header) ? 'malformed' : getUserId(req) ? 'accepted' : 'refused';
+    console.log(`[dev-media] ${req.method} ${devLogBridge.cleanApiPath(req.baseUrl + req.path)} auth=${auth} client=${devLogBridge.clientKind(req.get('user-agent'))}`);
+    next();
+  });
+}
 // Signed in and 18+ confirmed; see requireSignedInAdult.
 app.use('/media', requireSignedInAdult);
 
