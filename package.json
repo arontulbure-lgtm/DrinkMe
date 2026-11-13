@@ -11,6 +11,8 @@
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint",
     "test:ios": "node scripts/test-session.mjs",
+    "test:android": "node scripts/test-session.mjs --platform android",
+    "emulator": "node scripts/test-session.mjs --start-emulator",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {

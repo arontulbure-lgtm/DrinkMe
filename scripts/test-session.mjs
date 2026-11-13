@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// npm run test:ios — one command for a device test session with Expo Go over the LAN.
-// See docs/IOS_TEST_SESSION.md.
+// npm run test:ios / npm run test:android: one command for a device test session with Expo Go over the
+// LAN. npm run emulator starts the DrinkMe_Pixel8 Android emulator. See docs/DEVICE_TEST_SESSION.md.
 //
-//   1. Preflight (✓/✗, never a secret value): Node version, ports 5000 and 8081, server/.env with
-//      NODE_ENV=development, the Firebase service account, the EXPO_PUBLIC_FIREBASE_* names, the LAN IPv4.
+//   1. Preflight (✓/✗, never a secret value): Node version, port 5000, a Metro port (8081, or the next
+//      free one), server/.env with NODE_ENV=development, the Firebase service account, the
+//      EXPO_PUBLIC_FIREBASE_* names, the LAN IPv4; for Android also adb, the emulator and a booted device
+//      (offers to start DrinkMe_Pixel8). The server must answer /healthz before Expo starts; on Android the
+//      script checks that the emulator reaches the API at the LAN address, else uses 10.0.2.2.
 //   2. logs/sessions/<timestamp>/ (git-ignored) with server.log, client.jsonl (the app's dev log bridge),
 //      metro.log (only with --capture-metro), live-issues.txt and session.json.
 //   3. The API server (NODE_ENV=development, DEV_SESSION_DIR=<session folder>), mirrored to the console.
@@ -15,9 +18,10 @@
 //   5. A live watcher prints "NEW ISSUE #n [source] message (screen)" for each new error/warning signature.
 //   6. Ctrl+C (or quitting Expo) stops everything and prints the session folder.
 //
-// Options: --capture-metro, --ip <IPv4> (override the detected address), --preflight (checks only), --help.
+// Options: --platform ios|android, --capture-metro, --ip <IPv4> (override the detected address),
+// --preflight (checks only), --start-emulator, --help.
 // No dependencies beyond Node itself and the project's own expo package.
-/* global Buffer, setInterval, clearInterval, setTimeout */
+/* global Buffer, setInterval, clearInterval, setTimeout, fetch, AbortSignal */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -32,6 +36,9 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const SERVER_DIR = path.join(ROOT, 'server');
 const API_PORT = 5000;
 const METRO_PORT = 8081;
+// When 8081 is taken, the next free port up to 8081 + this is used.
+const METRO_PORT_TRIES = 9;
+const HEALTH_TIMEOUT_MS = 30_000;
 const MIN_NODE_MAJOR = 20;
 const FIREBASE_CLIENT_NAMES = ['API_KEY', 'AUTH_DOMAIN', 'PROJECT_ID', 'STORAGE_BUCKET', 'MESSAGING_SENDER_ID', 'APP_ID']
   .map((suffix) => `EXPO_PUBLIC_FIREBASE_${suffix}`);
@@ -123,24 +130,97 @@ export function rankLanAddresses(interfaces = os.networkInterfaces()) {
   return candidates.sort((a, b) => b.score - a.score);
 }
 
-const isPortFree = (port) => new Promise((resolve) => {
+const isPortFreeOn = (port, host) => new Promise((resolve) => {
   const probe = net.createServer();
   probe.once('error', () => resolve(false));
   probe.once('listening', () => probe.close(() => resolve(true)));
-  probe.listen(port, '0.0.0.0');
+  probe.listen(port, host);
+});
+// Both addresses: on Windows a program can hold 127.0.0.1:<port> (Docker does for 8081) while 0.0.0.0
+// still binds, and Expo's own checks on localhost would then reach that program instead of Metro.
+const isPortFree = async (port) => (await isPortFreeOn(port, '0.0.0.0')) && isPortFreeOn(port, '127.0.0.1');
+
+// ── Android SDK ───────────────────────────────────────────────────────────────
+export const AVD_NAME = 'DrinkMe_Pixel8';
+const androidSdkDir = () => process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT
+  || path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'Android', 'Sdk');
+const sdkTool = (...parts) => {
+  const file = path.join(androidSdkDir(), ...parts);
+  const withExe = process.platform === 'win32' ? `${file}.exe` : file;
+  return fs.existsSync(withExe) ? withExe : null;
+};
+export const adbPath = () => sdkTool('platform-tools', 'adb');
+const emulatorPath = () => sdkTool('emulator', 'emulator');
+const runAdb = (args, timeout = 15_000) => {
+  const adb = adbPath();
+  if (!adb) return { ok: false, out: '' };
+  const result = spawnSync(adb, args, { encoding: 'utf8', timeout });
+  return { ok: result.status === 0, out: `${result.stdout ?? ''}${result.stderr ?? ''}`.trim() };
+};
+
+/** The serial of a booted emulator or device, or null. */
+export function findBootedAndroid() {
+  const listed = runAdb(['devices']).out.split(/\r?\n/).slice(1)
+    .map((line) => line.trim().split(/\s+/))
+    .filter(([serial, state]) => serial && state === 'device')
+    .map(([serial]) => serial);
+  return listed.find((serial) => runAdb(['-s', serial, 'shell', 'getprop', 'sys.boot_completed']).out === '1') ?? null;
+}
+
+/** Starts the AVD in its own window (it keeps running after this script) and waits until Android has booted. */
+export async function startEmulator({ timeoutMs = 6 * 60 * 1000 } = {}) {
+  const emulator = emulatorPath();
+  if (!emulator) throw new Error('Android emulator not found: see docs/DEVICE_TEST_SESSION.md, section Android setup.');
+  console.log(`Starting ${AVD_NAME}… (first boot can take two minutes)`);
+  spawn(emulator, ['-avd', AVD_NAME, '-no-snapshot-save'], { detached: true, stdio: 'ignore', env: { ...process.env, ANDROID_HOME: androidSdkDir() } }).unref();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const serial = findBootedAndroid();
+    if (serial) return serial;
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error(`${AVD_NAME} did not finish booting in ${Math.round(timeoutMs / 60000)} minutes.`);
+}
+
+/** Whether the emulator gets an answer from the API at host:port (toybox nc; the image has no curl). */
+export function canAndroidReach(serial, host, port) {
+  const probe = `printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' | nc -w 3 ${host} ${port}`;
+  return /"status"\s*:\s*"ok"/.test(runAdb(['-s', serial, 'shell', probe], 10_000).out);
+}
+
+const askYesNo = (question) => new Promise((resolve) => {
+  if (!process.stdin.isTTY) return resolve(false);
+  process.stdout.write(question);
+  process.stdin.setEncoding('utf8');
+  process.stdin.once('data', (answer) => {
+    process.stdin.pause();
+    resolve(!/^\s*n/i.test(answer));
+  });
+  process.stdin.resume();
 });
 
 // ── Preflight ─────────────────────────────────────────────────────────────────
-export async function runPreflight({ ipOverride } = {}) {
+export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
   const results = [];
   const check = (ok, label, hint) => results.push({ ok, label, hint });
 
   const nodeMajor = Number(process.versions.node.split('.')[0]);
   check(nodeMajor >= MIN_NODE_MAJOR, `Node ${process.versions.node} (need ${MIN_NODE_MAJOR}+)`, 'Install Node 22 LTS from nodejs.org.');
 
-  for (const [port, what] of [[API_PORT, 'API server'], [METRO_PORT, 'Metro']]) {
-    check(await isPortFree(port), `Port ${port} free (${what})`,
-      `Something already listens on ${port}: close the old server/Expo window, or find it with: Get-NetTCPConnection -LocalPort ${port} | Select OwningProcess`);
+  check(await isPortFree(API_PORT), `Port ${API_PORT} free (API server)`,
+    `Something already listens on ${API_PORT}: close the old server window, or find it with: Get-NetTCPConnection -LocalPort ${API_PORT} | Select OwningProcess`);
+  let metroPort = null;
+  for (let port = METRO_PORT; port <= METRO_PORT + METRO_PORT_TRIES; port += 1) {
+    if (await isPortFree(port)) { metroPort = port; break; }
+  }
+  check(metroPort !== null, metroPort === METRO_PORT
+    ? `Port ${METRO_PORT} free (Metro)`
+    : `Metro port: ${metroPort ?? 'none free'}${metroPort ? dim(`  (${METRO_PORT} is used by another program, for example Docker)`) : ''}`,
+  `Ports ${METRO_PORT} to ${METRO_PORT + METRO_PORT_TRIES} are all in use: close old Expo windows.`);
+
+  if (platform === 'android') {
+    check(Boolean(adbPath()), 'adb found (Android platform-tools)', 'Install the Android SDK: docs/DEVICE_TEST_SESSION.md, section Android setup.');
+    check(Boolean(emulatorPath()), 'Android emulator installed', 'sdkmanager "emulator" (docs/DEVICE_TEST_SESSION.md).');
   }
 
   const serverEnv = readEnvFile(path.join(SERVER_DIR, '.env'));
@@ -167,9 +247,9 @@ export async function runPreflight({ ipOverride } = {}) {
   const others = ranked.filter((item) => item.address !== lanIp).map((item) => `${item.address} (${item.name})`);
   check(ipIsValid, ipIsValid
     ? `LAN IPv4: ${lanIp}${ipOverride ? ' (from --ip)' : ` (${ranked[0].name})`}${others.length ? dim(`  other: ${others.join(', ')}`) : ''}`
-    : 'LAN IPv4 found', 'Connect the PC to the same Wi-Fi as the iPhone, or pass --ip <address>.');
+    : 'LAN IPv4 found', 'Connect the PC to the same Wi-Fi as the phone, or pass --ip <address>.');
 
-  return { results, ok: results.every((item) => item.ok), lanIp: ipIsValid ? lanIp : null };
+  return { results, ok: results.every((item) => item.ok), lanIp: ipIsValid ? lanIp : null, metroPort };
 }
 
 const printPreflight = ({ results }) => {
@@ -280,9 +360,27 @@ const printQrCode = (url) => {
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: npm run test:ios [-- --capture-metro] [-- --ip 192.168.x.y] [-- --preflight]\nSee docs/IOS_TEST_SESSION.md.');
+    console.log([
+      'Usage: npm run test:ios | npm run test:android  [-- --capture-metro] [-- --ip 192.168.x.y] [-- --preflight]',
+      '       npm run emulator   (start the DrinkMe_Pixel8 Android emulator and wait for it)',
+      'See docs/DEVICE_TEST_SESSION.md.',
+    ].join('\n'));
     return;
   }
+  if (args.includes('--start-emulator')) {
+    const already = findBootedAndroid();
+    const serial = already ?? await startEmulator();
+    console.log(green(`${already ? 'Already running' : 'Booted'}: ${serial}. Next: npm run test:android`));
+    return;
+  }
+  const platformIndex = args.indexOf('--platform');
+  const platform = platformIndex >= 0 ? args[platformIndex + 1] : 'ios';
+  if (!['ios', 'android'].includes(platform)) {
+    console.error(red('--platform must be ios or android'));
+    process.exitCode = 1;
+    return;
+  }
+  const npmCommand = `npm run test:${platform}`;
   const ipIndex = args.indexOf('--ip');
   const ipOverride = ipIndex >= 0 ? args[ipIndex + 1] : undefined;
   if (ipIndex >= 0 && (!ipOverride || ipOverride.startsWith('--'))) {
@@ -292,10 +390,23 @@ async function main() {
   }
   const captureMetro = args.includes('--capture-metro');
 
-  const preflight = await runPreflight({ ipOverride });
+  const preflight = await runPreflight({ ipOverride, platform });
+  let androidSerial = null;
+  if (platform === 'android' && preflight.ok) {
+    androidSerial = findBootedAndroid();
+    const onlyChecks = args.includes('--preflight');
+    preflight.results.push({
+      ok: Boolean(androidSerial) || !onlyChecks,
+      label: androidSerial
+        ? `Android emulator booted (${androidSerial})`
+        : `Android emulator booted${onlyChecks ? '' : dim('  (not yet: you will be asked to start it)')}`,
+      hint: 'Start it with: npm run emulator',
+    });
+    preflight.ok = preflight.results.every((item) => item.ok);
+  }
   printPreflight(preflight);
   if (!preflight.ok) {
-    console.log(red('\nFix the ✗ items above, then run npm run test:ios again.\n'));
+    console.log(red(`\nFix the ✗ items above, then run ${npmCommand} again.\n`));
     process.exitCode = 1;
     return;
   }
@@ -303,9 +414,22 @@ async function main() {
     console.log(green('\nAll checks passed.\n'));
     return;
   }
+  if (platform === 'android' && !androidSerial) {
+    const start = await askYesNo(`No booted Android emulator. Start ${AVD_NAME} now? (Y/n) `);
+    if (!start) {
+      console.log(red('\nStart one with: npm run emulator\n'));
+      process.exitCode = 1;
+      return;
+    }
+    androidSerial = await startEmulator();
+    console.log(green(`  ✓ ${androidSerial} booted`));
+  }
 
   const lanIp = preflight.lanIp;
-  const apiUrl = `http://${lanIp}:${API_PORT}`;
+  const metroPort = preflight.metroPort;
+  // The phone uses the LAN address. The emulator usually reaches it too; if not, 10.0.2.2 (the emulator's
+  // name for this PC) is used instead, decided once the server answers (see below).
+  let apiUrl = `http://${lanIp}:${API_PORT}`;
   const sessionDir = path.join(ROOT, 'logs', 'sessions', timestamp());
   fs.mkdirSync(sessionDir, { recursive: true });
   const serverLog = fs.createWriteStream(path.join(sessionDir, 'server.log'), { flags: 'a' });
@@ -314,18 +438,20 @@ async function main() {
   const clientFile = path.join(sessionDir, 'client.jsonl');
   const meta = {
     startedAt: new Date().toISOString(),
+    platform,
+    ...(androidSerial && { androidDevice: androidSerial, avd: AVD_NAME }),
     lanIp,
     apiUrl,
+    metroPort,
     captureMetro,
     node: process.versions.node,
-    platform: `${os.platform()} ${os.release()}`,
+    host: `${os.platform()} ${os.release()}`,
     ...gitInfo(),
   };
   const writeMeta = () => fs.writeFileSync(path.join(sessionDir, 'session.json'), `${JSON.stringify(meta, null, 2)}\n`);
   writeMeta();
 
   console.log(bold(`\nSession folder: ${sessionDir}`));
-  console.log(`API for the app: ${apiUrl}${dim('  (set for Expo only; .env is unchanged)')}\n`);
 
   // Live watcher.
   const seen = new Map();
@@ -392,12 +518,44 @@ async function main() {
   };
   const clientTimer = setInterval(readClientLog, CLIENT_POLL_MS);
 
-  // Expo.
+  // Wait for the server before Expo, so the app's first requests find it.
+  const healthDeadline = Date.now() + HEALTH_TIMEOUT_MS;
+  let isHealthy = false;
+  while (!isHealthy && Date.now() < healthDeadline && server.exitCode === null) {
+    try {
+      isHealthy = (await fetch(`http://127.0.0.1:${API_PORT}/healthz`, { signal: AbortSignal.timeout(2000) })).ok;
+    } catch { /* not listening yet */ }
+    if (!isHealthy) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!isHealthy) {
+    console.error(red(`\nThe API server did not answer on port ${API_PORT}; see ${path.join(sessionDir, 'server.log')}.`));
+    if (server.exitCode === null) server.kill();
+    clearInterval(clientTimer);
+    process.exitCode = 1;
+    return;
+  }
+  if (androidSerial) {
+    if (canAndroidReach(androidSerial, lanIp, API_PORT)) {
+      console.log(green(`  ✓ The emulator reaches the API at ${apiUrl}`));
+    } else if (canAndroidReach(androidSerial, '10.0.2.2', API_PORT)) {
+      apiUrl = `http://10.0.2.2:${API_PORT}`;
+      console.log(yellow(`  ! The emulator cannot reach ${lanIp}:${API_PORT}; using ${apiUrl} (the emulator's address for this PC).`));
+    } else {
+      console.log(yellow(`  ! The emulator reached neither ${lanIp}:${API_PORT} nor 10.0.2.2:${API_PORT}; keeping ${apiUrl}. Check the firewall (docs/DEVICE_TEST_SESSION.md).`));
+    }
+    meta.apiUrl = apiUrl;
+    writeMeta();
+  }
+  console.log(`API for the app: ${apiUrl}${dim('  (set for Expo only; .env is unchanged)')}\n`);
+
+  // Expo. With --android, Expo installs the matching Expo Go on the emulator and opens the app there.
   const expoCli = createRequire(path.join(ROOT, 'package.json')).resolve('expo/bin/cli');
   const expoEnv = { ...process.env, EXPO_PUBLIC_API_URL: apiUrl, REACT_NATIVE_PACKAGER_HOSTNAME: lanIp };
   delete expoEnv.NODE_ENV; // Expo picks its own mode
-  if (captureMetro) printQrCode(`exp://${lanIp}:${METRO_PORT}`);
-  const expo = spawn(process.execPath, [expoCli, 'start', '--lan', '--port', String(METRO_PORT)], {
+  if (androidSerial) expoEnv.ANDROID_SERIAL = androidSerial;
+  if (captureMetro && platform === 'ios') printQrCode(`exp://${lanIp}:${metroPort}`);
+  const expoArgs = [expoCli, 'start', '--lan', '--port', String(metroPort), ...(platform === 'android' ? ['--android'] : [])];
+  const expo = spawn(process.execPath, expoArgs, {
     cwd: ROOT,
     env: expoEnv,
     stdio: captureMetro ? ['ignore', 'pipe', 'pipe'] : 'inherit',
