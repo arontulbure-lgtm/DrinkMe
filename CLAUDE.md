@@ -17,6 +17,7 @@ External documentation (not in the repo) is in `D:\DrinkMeApp\`: TECHNICAL_REFER
 | docs-writer | README, technical docs, changelog |
 | deployment-prep | deployment/release prep, only when asked |
 | legal-compliance | legal documents (docs/legal), compliance matrix, store disclosures; never edits code |
+| log-triage | after a device test session (`npm run test:ios`): ranked fix list in reports/test-sessions/ from logs/sessions/; never edits code |
 
 ## Pipeline
 **Feature:** planner → show the spec to the user and wait for OK → developer (one task at a time) → code-reviewer + test-engineer + security-reviewer (+ legal-compliance when required, see below) (in parallel) → developer fixes BLOCKERs → re-review (max 3 loops, then stop and ask the user) → docs-writer → summary.
@@ -38,6 +39,7 @@ External documentation (not in the repo) is in `D:\DrinkMeApp\`: TECHNICAL_REFER
 
 ## Commands
 - Type check: `npm run typecheck` · Lint: `npm run lint` · Both: `npm run check` (client only; server tests stay separate)
+- Device test session: `npm run test:ios` (server + Expo over LAN + live issue watcher; logs in `logs/sessions/`, git-ignored). Then run the log-triage agent. See `docs/IOS_TEST_SESSION.md`. `POST /__dev/client-log` exists only with `NODE_ENV=development`.
 - Backend: `cd server` then `node server.js` (port 5000). `server/.env` must set `NODE_ENV=development` locally; any other value, or none, applies production rules and the server may refuse to start. See `server/README.md`.
 - App: `npx expo start` (port 8081)
 - Backend tests: `cd server` then `npm test` (node:test, no extra dependency). Over 1165 tests taking about 14 minutes; they use port 5055, so only one run at a time. A new route must also be listed in `server/test/helpers/routes.js` (`ROUTE_MANIFEST`), or `route-coverage.test.js` fails.
