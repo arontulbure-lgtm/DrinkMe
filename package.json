@@ -13,6 +13,9 @@
     "test:ios": "node scripts/test-session.mjs",
     "test:android": "node scripts/test-session.mjs --platform android",
     "emulator": "node scripts/test-session.mjs --start-emulator",
+    "official:check": "node server/scripts/official.mjs check",
+    "official:find": "node server/scripts/official.mjs find",
+    "official:set": "node server/scripts/official.mjs set",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {

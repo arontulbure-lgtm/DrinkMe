@@ -78,6 +78,7 @@ To remove the rules later: `Remove-NetFirewallRule -DisplayName "DrinkMe API (50
 - `server/.env` must contain `NODE_ENV=development` and `FIREBASE_SERVICE_ACCOUNT_KEY=./serviceAccount.json`, with the key file at `server/serviceAccount.json`.
 - `.env` in the project root must have the six `EXPO_PUBLIC_FIREBASE_*` values.
 - You do not need to change `EXPO_PUBLIC_API_URL`: the session command sets it to the PC's current Wi-Fi address for this run only.
+- **Keep other secrets out of the root `.env`.** Expo loads every name in it into Metro, and only `EXPO_PUBLIC_` names reach the app. A key that belongs to something else (for example `ANTHROPIC_API_KEY`) should live in your user environment or a password manager instead. The session preflight shows a yellow **!** with the names (never values) when it finds one. Server secrets go in `server/.env`.
 
 ## 2. Run an iPhone session
 
@@ -168,13 +169,29 @@ Adapted from `docs/JOHN_TODO.md` section 1. Write a 📝 note at each step whose
 Moderation as admin (`docs/JOHN_TODO.md` section 1c) uses curl from the PC and can run in the same session.
 
 ## 5. Setting up the official DrinkMe account
-Do this during a session, with the email/password flow:
-1. In the app, sign up with **drinkmesocialapp@gmail.com**, confirm 18+, accept the privacy notice, and **skip** the name prompt.
-2. In the Firebase console → Authentication → Users, copy that account's **User UID**.
-3. Stop the session (Ctrl+C). In `server/.env`, set `OFFICIAL_USER_IDS=<that uid>`. Never also put this uid in `ADMIN_USER_IDS` (an official account that is also an admin could no longer be suspended).
-4. Start `npm run test:ios` again. Check the server output for `[official]` warnings, and for any older account that already uses the brand name; clear those names first.
-5. In the app (signed in as the official account), Edit Profile → set the name **DrinkMe**. Posts and the profile now show the Official badge.
-6. No brand-partner post before the "Paid partnership" label exists (`docs/legal/CODE_GAPS_PLAN.md`, T-13/T-14).
+Do this during a session (the emulator is easiest), with the email/password flow. The three `official:` commands read your `.env` files but print only what is shown below, never a key or any other line.
+
+1. **Sign up in the app** with **drinkmesocialapp@gmail.com**: confirm 18+, accept the privacy notice, and **skip** the name prompt ("Later"). A name with "DrinkMe" in it is refused until step 5 (`name_reserved`); that is expected.
+2. In a second PowerShell window (the session keeps running):
+   ```powershell
+   cd D:\DrinkMeApp\DrinkMeFinal
+   npm run official:check
+   ```
+   It prints the Firebase project of the app (`EXPO_PUBLIC_FIREBASE_PROJECT_ID` in `.env`) and of the server's service account, then **MATCH** or **MISMATCH**. Both should be **drinkmeapp-a8fea**. On MISMATCH stop here: sign-in cannot work until `.env` and the service account point to the same project.
+3. Find the account's uid:
+   ```powershell
+   npm run official:find -- drinkmesocialapp@gmail.com
+   ```
+   It prints `uid`, `email`, `created` and the next command, or "not found – sign up in the app first".
+4. Make it official:
+   ```powershell
+   npm run official:set -- <the uid from step 3>
+   ```
+   It sets the `OFFICIAL_USER_IDS=<uid>` line in `server/.env` (adds it if missing; replaces an existing value, so it holds only this uid) and changes nothing else in the file. It refuses if that uid is also in `ADMIN_USER_IDS`, because an official account that is also an admin could no longer be suspended.
+5. **Restart the session:** Ctrl+C in the session window, then `npm run test:android` (or `test:ios`). The server reads `OFFICIAL_USER_IDS` only at start. Check its output for `[official]` warnings (an official uid that is also an admin, or one that matches no user). Before the account posts, check for older accounts that already use the brand name and clear those names.
+6. In the app, signed in as the official account: Profile → Edit Profile → name **DrinkMe** → Save. It is accepted now.
+7. **Check the badge:** the profile header and your posts and comments show **Official** (Romanian: **Oficial**) next to the name. Sign in as another account (or look from another device): the badge shows there too, and that account still cannot take the name "DrinkMe".
+8. No brand-partner post before the "Paid partnership" label exists (`docs/legal/CODE_GAPS_PLAN.md`, T-13/T-14).
 
 ## 6. After the session
 Ask Claude Code: **"Run the log-triage agent on the latest test session."**
