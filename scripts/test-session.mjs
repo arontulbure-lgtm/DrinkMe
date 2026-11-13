@@ -21,7 +21,7 @@
 // Options: --platform ios|android, --capture-metro, --ip <IPv4> (override the detected address),
 // --preflight (checks only), --start-emulator, --help.
 // No dependencies beyond Node itself and the project's own expo package.
-/* global Buffer, setInterval, clearInterval, setTimeout, fetch, AbortSignal */
+/* global Buffer, setInterval, clearInterval, setTimeout, AbortSignal */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
