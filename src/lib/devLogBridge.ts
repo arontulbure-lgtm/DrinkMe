@@ -45,8 +45,11 @@ const REDACTIONS: [RegExp, string | ((match: string, base: string) => string)][]
   [/\bBearer\s+[\w.~+/=-]+/gi, 'Bearer [token]'],
   [/\bAIza[\w-]{30,}/g, '[google-key]'],
   [/[\w.!#$%&'*+/=?^`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[email]'],
+  [/[\w.+-]+%40[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/gi, '[email]'],
   [/(\bhttps?:\/\/[^\s?#"']+)\?[^\s#"']*/gi, (match, base) => (/\.(bundle|map)$/i.test(base) ? match : `${base}?[query]`)],
-  [/(\b(?:id_?token|access_?token|refresh_?token|api_?key|apikey|token|password|passwd|secret|authorization|code_verifier|code|key)\b["']?\s*[:=]\s*["']?)(?!Bearer\b|\[)[^\s"'&,;}\]]+/gi, '$1[redacted]'],
+  [/([\w-]*(?:token|password|passwd|secret|api_?key|apikey|private_?key|authorization|code_verifier)["']?\s*[:=]\s*["']?)(?!Bearer\b|\[)[^\s"'&,;}\]]+/gi, '$1[redacted]'],
+  // A bare code or key only when the value is long: "code":"age_required" and status codes stay readable.
+  [/(\b(?:code|key)\b["']?\s*[:=]\s*["']?)(?!\[)[^\s"'&,;}\]]{16,}/gi, '$1[redacted]'],
 ];
 const OPAQUE_RUN = /[A-Za-z0-9_+/=-]{32,}/g;
 const looksLikeToken = (run: string) => (
@@ -100,7 +103,8 @@ async function flush(): Promise<void> {
   try {
     const response = await fetch(`${API_BASE_URL}/__dev/client-log`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The server refuses a batch without this header, so a web page cannot post one with a plain form.
+      headers: { 'Content-Type': 'application/json', 'X-DrinkMe-Dev-Log': '1' },
       body: JSON.stringify({ entries: batch }),
       signal: controller.signal,
     });
@@ -160,9 +164,14 @@ const wrapConsole = (level: 'error' | 'warn') => {
 type GlobalErrorHandler = (error: unknown, isFatal?: boolean) => void;
 type ErrorUtilsLike = { getGlobalHandler?: () => GlobalErrorHandler; setGlobalHandler?: (handler: GlobalErrorHandler) => void };
 
+// Kept on globalThis: Fast Refresh re-runs this module, and a second install would wrap console again.
+const INSTALLED_FLAG = '__drinkmeDevLogBridgeInstalled';
+
 export function installDevLogBridge(): void {
-  if (!__DEV__ || isInstalled) return;
+  const globalFlags = globalThis as unknown as Record<string, boolean | undefined>;
+  if (!__DEV__ || isInstalled || globalFlags[INSTALLED_FLAG]) return;
   isInstalled = true;
+  globalFlags[INSTALLED_FLAG] = true;
   if (!API_BASE_URL) return;
   originalLog = console.log.bind(console);
 

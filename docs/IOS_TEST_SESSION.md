@@ -37,6 +37,8 @@ To remove the rules later: `Remove-NetFirewallRule -DisplayName "DrinkMe API (50
 
 ## 2. Run a session
 
+Use PowerShell (not cmd.exe, where Ctrl+C asks "Terminate batch job (Y/N)?" over the summary):
+
 ```powershell
 cd D:\DrinkMeApp\DrinkMeFinal
 npm run test:ios
@@ -60,11 +62,15 @@ If the PC has several network adapters and the wrong IP is picked: `npm run test
 ### What is saved (`logs/sessions/<date-time>/`, never committed)
 | File | Content |
 |---|---|
-| `server.log` | API server output with times |
+| `server.log` | API server output with times (emails, tokens and keys removed) |
 | `client.jsonl` | from the app: errors, crashes, warnings, failed requests (method, path, status, duration; never bodies or tokens), screen changes, your notes. Emails, tokens and keys are removed before saving. |
 | `metro.log` | only with `--capture-metro` |
 | `live-issues.txt` | what the watcher printed |
 | `session.json` | time, IP, branch and commit |
+
+Logs and triage reports (`reports/test-sessions/`) stay on this PC and are never committed. They can still hold test account names and what you typed, so use throwaway test accounts, and delete a session folder and its report once its issues are fixed (at the latest after 30 days).
+
+The app log route (`/__dev/client-log`) is switched on only while `npm run test:ios` runs. A server started by hand (`node server.js`) does not have it. Anyone on the same Wi-Fi could write fake entries into the log during a session, so test on a network you trust.
 
 ## 3. What Expo Go cannot test
 - **Google sign-in.** The button is disabled in Expo Go on purpose: Google does not accept Expo Go's `exp://` return address. It needs a development build.

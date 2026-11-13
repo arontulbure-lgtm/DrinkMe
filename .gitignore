@@ -28,3 +28,5 @@ server/backups/
 
 # Device test sessions (npm run test:ios): server, Metro and app logs
 logs/
+# Triage reports quote tester notes and error text: kept local, like the logs
+reports/test-sessions/

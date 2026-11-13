@@ -69,10 +69,21 @@ function buildUrl(path: string, query?: RequestConfig['query']) {
 
 // Development only: tells the device test log (devLogBridge.ts) about a failed request. Method, path
 // without its query string, status, error code and duration; never headers, tokens or bodies.
+function pathWithoutQuery(path: string): string {
+  if (path.startsWith('http')) {
+    try {
+      return new URL(path).pathname;
+    } catch {
+      // Falls through: a log entry must never replace the request's own error.
+    }
+  }
+  return path.split(/[?#]/)[0];
+}
+
 function reportApiFailure(method: string | undefined, path: string, status: number, code: string | undefined, startedAt: number) {
   devHooks.apiFailure?.({
     method: (method ?? 'GET').toUpperCase(),
-    path: path.startsWith('http') ? new URL(path).pathname : path.split(/[?#]/)[0],
+    path: pathWithoutQuery(path),
     status,
     code,
     durationMs: Date.now() - startedAt,

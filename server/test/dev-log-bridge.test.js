@@ -1,6 +1,7 @@
 // POST /__dev/client-log: the development-only sink for the app's log bridge (server/dev-log-bridge.js,
 // src/lib/devLogBridge.ts). It exists only with NODE_ENV=development, writes redacted JSON lines to
-// <DEV_SESSION_DIR>/client.jsonl, and is absent (404, nothing written) in test and production mode.
+// <DEV_SESSION_DIR>/client.jsonl, and is absent (404, nothing written) without DEV_SESSION_DIR and in test
+// and production mode. Only JSON with the app's header and no Origin is accepted.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -26,10 +27,12 @@ const makeTempDir = (t, prefix) => {
   return dir;
 };
 
-const postBatch = async (baseUrl, body, { raw = false } = {}) => {
+const APP_HEADERS = { 'Content-Type': 'application/json', 'X-DrinkMe-Dev-Log': '1' };
+
+const postBatch = async (baseUrl, body, { raw = false, headers = APP_HEADERS } = {}) => {
   const res = await fetch(`${baseUrl}${ROUTE}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: raw ? body : JSON.stringify(body),
     signal: AbortSignal.timeout(20_000),
   });
@@ -60,6 +63,15 @@ describe('redaction and entry cleaning (unit)', () => {
     assert.match(out, /\[google-key\]/);
     assert.match(out, /blob \[token\]/);
     assert.match(out, /https:\/\/maps\.example\.test\/place\?\[query\]/);
+  });
+
+  test('compound secret names, URL-encoded emails, controls and direction overrides', () => {
+    const out = redactText('{"newPassword":"pw1","authToken":"t1","clientSecret":"s1","private_key":"k1"} jane%40example.test');
+    for (const secret of ['pw1', 't1', 's1', 'k1', 'jane%40example.test']) assert.ok(!out.includes(secret), out);
+    assert.equal(redactText('"code":"age_required" status code: 500'), '"code":"age_required" status code: 500');
+    assert.match(redactText('code=4/0AbCdEfGhIjKlMnOpQr'), /code=\[redacted\]/);
+    const entry = sanitizeClientLogEntry({ kind: 'note', message: 'a\u009b2Jb\u202ec\u2066d' });
+    assert.equal(entry.message, 'a2Jbcd');
   });
 
   test('stack traces, file paths and short ids stay readable', () => {
@@ -133,6 +145,15 @@ describe('POST /__dev/client-log with NODE_ENV=development', () => {
     assert.equal(lines[2].kind, 'note');
     assert.equal(lines[3].screen, 'Explore');
 
+    // What a browser or a stray client can send is refused before anything is parsed into the log.
+    const note = { entries: [{ kind: 'note', message: 'from a web page' }] };
+    const form = await postBatch(server.baseUrl, 'entries[0][kind]=note&entries[0][message]=x', {
+      raw: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(form.status, 415);
+    assert.equal((await postBatch(server.baseUrl, note, { headers: { 'Content-Type': 'application/json' } })).status, 403);
+    assert.equal((await postBatch(server.baseUrl, note, { headers: { ...APP_HEADERS, Origin: 'https://evil.example.test' } })).status, 403);
+
     // Refused batches write nothing.
     for (const body of [{}, { entries: [] }, { entries: 'x' }, { entries: Array(51).fill({ kind: 'note', message: 'x' }) }]) {
       assert.equal((await postBatch(server.baseUrl, body)).status, 400);
@@ -151,6 +172,14 @@ describe('POST /__dev/client-log with NODE_ENV=development', () => {
 });
 
 describe('POST /__dev/client-log is absent outside development', () => {
+  test('development without DEV_SESSION_DIR (a server started by hand): 404', { timeout: TIMEOUT }, async (t) => {
+    const server = await startServer({ NODE_ENV: 'development' });
+    t.after(() => server.stop());
+    const res = await postBatch(server.baseUrl, { entries: [{ kind: 'note', message: 'x' }] });
+    assert.equal(res.status, 404);
+    assert.doesNotMatch(server.getOutput(), /\[dev-log\]/);
+  });
+
   test('test mode: 404 and no client.jsonl', { timeout: TIMEOUT }, async (t) => {
     const sessionDir = makeTempDir(t, 'drinkme-devlog-');
     const server = await startServer({ DEV_SESSION_DIR: sessionDir }); // the harness sets NODE_ENV=test

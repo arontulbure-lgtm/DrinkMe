@@ -1,7 +1,7 @@
 // Development-only floating "📝 Note" button for device test sessions. App.tsx loads it only when
 // __DEV__, so a release build does not contain it. A note is saved with the current screen and time
 // through the dev log bridge (src/lib/devLogBridge.ts).
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +17,10 @@ export default function DevNoteButton() {
   const [isOpen, setIsOpen] = useState(false);
   const [text, setText] = useState('');
   const [showSaved, setShowSaved] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+  }, []);
 
   if (!isDevLogBridgeActive()) return null;
 
@@ -29,7 +33,8 @@ export default function DevNoteButton() {
     addDevNote(text);
     close();
     setShowSaved(true);
-    setTimeout(() => setShowSaved(false), SAVED_MESSAGE_MS);
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+    savedTimer.current = setTimeout(() => setShowSaved(false), SAVED_MESSAGE_MS);
   };
 
   return (

@@ -26,6 +26,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { redactText } from '../server/dev-log-bridge.js';
+
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SERVER_DIR = path.join(ROOT, 'server');
 const API_PORT = 5000;
@@ -48,6 +50,13 @@ const bold = (text) => paint('1', text);
 const dim = (text) => paint('2', text);
 const ANSI =/\u001b\[[0-9;?]*[A-Za-z]/g;
 export const stripAnsi = (text) => text.replace(ANSI, '');
+// App log text can come from anyone on the Wi-Fi: one line, no terminal controls or direction overrides,
+// so it cannot fake a [server], NEW ISSUE or "Session saved" line.
+const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+export const printable = (value, limit) => {
+  const text = stripAnsi(String(value ?? '')).replace(/[\r\n]+/g, ' ⏎ ').replace(UNPRINTABLE, '');
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+};
 
 // ── .env reading: names and comparisons only, values are never returned or printed ─────────────
 const ENV_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
@@ -221,6 +230,8 @@ export function classifyClientEntry(entry) {
     case 'rejection':
       return { kind: 'error', message: entry.message ?? '', signature: `rejection ${signatureOf(entry.message ?? '')}` };
     case 'console':
+      // The ErrorBoundary also sends a 'boundary' entry with the details: one issue, not two.
+      if (String(entry.message ?? '').startsWith('[ErrorBoundary]')) return null;
       return { kind: entry.level === 'warn' ? 'warning' : 'error', message: entry.message ?? '', signature: signatureOf(entry.message ?? '') };
     case 'note':
       return { kind: 'note', message: entry.message ?? '', signature: null };
@@ -274,6 +285,11 @@ async function main() {
   }
   const ipIndex = args.indexOf('--ip');
   const ipOverride = ipIndex >= 0 ? args[ipIndex + 1] : undefined;
+  if (ipIndex >= 0 && (!ipOverride || ipOverride.startsWith('--'))) {
+    console.error(red('--ip needs an address, for example: npm run test:ios -- --ip 192.168.0.115'));
+    process.exitCode = 1;
+    return;
+  }
   const captureMetro = args.includes('--capture-metro');
 
   const preflight = await runPreflight({ ipOverride });
@@ -314,12 +330,13 @@ async function main() {
   // Live watcher.
   const seen = new Map();
   let noteCount = 0;
-  const report = (source, found, screen) => {
-    if (!found) return;
+  const report = (source, found, rawScreen) => {
+    if (!found || issuesLog.writableEnded) return;
+    const screen = printable(rawScreen, 80);
     const where = screen ? ` (${screen})` : '';
     if (found.kind === 'note') {
       noteCount += 1;
-      const line = `NOTE #${noteCount}${where}: ${found.message}`;
+      const line = `NOTE #${noteCount}${where}: ${printable(found.message, 300)}`;
       console.log(bold(paint('35', line)));
       issuesLog.write(`${new Date().toISOString()} ${line}\n`);
       return;
@@ -329,7 +346,7 @@ async function main() {
     if (known) { known.count += 1; return; }
     const number = seen.size + 1;
     seen.set(key, { number, count: 1 });
-    const line = `NEW ISSUE #${number} [${source}] ${found.kind}: ${found.message.split('\n')[0].slice(0, 200)}${where}`;
+    const line = `NEW ISSUE #${number} [${source}] ${found.kind}: ${printable(found.message.split('\n')[0], 200)}${where}`;
     console.log(found.kind === 'warning' || found.kind === 'failed request' ? yellow(bold(line)) : red(bold(line)));
     issuesLog.write(`${new Date().toISOString()} ${stripAnsi(line)}\n`);
   };
@@ -337,12 +354,15 @@ async function main() {
   // API server.
   const server = spawn(process.execPath, ['server.js'], {
     cwd: SERVER_DIR,
-    env: { ...process.env, NODE_ENV: 'development', DEV_SESSION_DIR: sessionDir },
+    // PORT and HOST fixed here, so a value in server/.env cannot make the server unreachable from the phone.
+    env: { ...process.env, NODE_ENV: 'development', PORT: String(API_PORT), HOST: '0.0.0.0', DEV_SESSION_DIR: sessionDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const onServerLine = (line) => {
+    if (serverLog.writableEnded) return;
     console.log(`${dim('[server]')} ${line}`);
-    serverLog.write(`${new Date().toISOString()} ${stripAnsi(line)}\n`);
+    // Same redaction as client.jsonl: 5xx stack traces and request paths can hold user data.
+    serverLog.write(`${new Date().toISOString()} ${redactText(stripAnsi(line))}\n`);
     report('server', classifyLogLine('server', line));
   };
   onLines(server.stdout, onServerLine);
@@ -384,8 +404,9 @@ async function main() {
   });
   if (captureMetro) {
     const onMetroLine = (line) => {
+      if (metroLog.writableEnded) return;
       console.log(`${dim('[metro]')} ${line}`);
-      metroLog.write(`${new Date().toISOString()} ${stripAnsi(line)}\n`);
+      metroLog.write(`${new Date().toISOString()} ${redactText(stripAnsi(line))}\n`);
       report('metro', classifyLogLine('metro', line));
     };
     onLines(expo.stdout, onMetroLine);
@@ -393,19 +414,26 @@ async function main() {
   }
 
   // Shutdown.
+  // 'close', not 'exit': by then the child's last output (often a stack trace) has been read.
+  const closed = new Map([[expo, false], [server, false]]);
+  for (const child of closed.keys()) child.once('close', () => closed.set(child, true));
   const exited = (child) => new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) return resolve();
-    child.once('exit', resolve);
+    if (closed.get(child)) return resolve();
+    child.once('close', resolve);
     child.once('error', resolve);
   });
+  // On Windows kill() ends only that process and Metro's workers keep running; taskkill /T ends the tree.
+  const killTree = (child) => {
+    if (closed.get(child) || child.pid === undefined) return;
+    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    else child.kill();
+  };
   let isStopping = false;
-  const stop = async (reason) => {
+  const stop = async (reason, exitCode = 0) => {
     if (isStopping) return;
     isStopping = true;
     console.log(dim(`\nStopping (${reason})…`));
-    for (const child of [expo, server]) {
-      if (child.exitCode === null && child.signalCode === null) child.kill();
-    }
+    for (const child of [expo, server]) killTree(child);
     await Promise.race([
       Promise.all([exited(expo), exited(server)]),
       new Promise((resolve) => setTimeout(resolve, STOP_TIMEOUT_MS)),
@@ -420,18 +448,31 @@ async function main() {
     console.log(bold(`\nSession saved: ${sessionDir}`));
     console.log(`  ${seen.size} distinct issue(s), ${noteCount} note(s).`);
     console.log('  Next: ask Claude Code to "run the log-triage agent on the latest test session".\n');
-    process.exit(0);
+    // A killed Expo cannot hand the terminal back: leave it in normal mode.
+    if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
+    process.exit(exitCode);
   };
 
   process.on('SIGINT', () => { void stop('Ctrl+C'); });
   process.on('SIGTERM', () => { void stop('SIGTERM'); });
   // Expo reads Ctrl+C itself while it owns the terminal, then exits: that ends the session too.
-  expo.once('exit', (code) => { void stop(`Expo exited${code ? ` with code ${code}` : ''}`); });
+  expo.once('exit', (code) => { void stop(`Expo exited${code ? ` with code ${code}` : ''}`, code ? 1 : 0); });
+  // With --capture-metro, Ctrl+C reaches the server too: give the parent's SIGINT handler a moment and
+  // ignore Windows' Ctrl+C exit code, so a normal stop is not reported as a crash.
+  const STATUS_CONTROL_C_EXIT = 3221225786;
   server.once('exit', (code) => {
-    if (isStopping) return;
-    report('server', { kind: 'crash', message: `API server exited with code ${code}`, signature: `server exit ${code}` });
-    void stop('the API server exited');
+    setTimeout(() => {
+      if (isStopping || code === null || code === STATUS_CONTROL_C_EXIT) return;
+      report('server', { kind: 'crash', message: `API server exited with code ${code}`, signature: `server exit ${code}` });
+      void stop('the API server exited', 1);
+    }, 300);
   });
+  for (const [child, name] of [[server, 'API server'], [expo, 'Expo']]) {
+    child.once('error', (err) => {
+      report('session', { kind: 'crash', message: `${name} could not start: ${err.code ?? err.message}`, signature: `spawn ${name}` });
+      void stop(`${name} could not start`, 1);
+    });
+  }
 }
 
 const isEntryPoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

@@ -1,6 +1,9 @@
 // Development-only sink for the app's log bridge (src/lib/devLogBridge.ts), used during device test sessions.
-// server.js imports this file only when NODE_ENV is exactly 'development', and only then registers
-// POST /__dev/client-log. In test and production mode the module is never loaded and the route does not exist.
+// server.js imports this file only when NODE_ENV is exactly 'development' and DEV_SESSION_DIR is set
+// (scripts/test-session.mjs sets it), and only then registers POST /__dev/client-log. A server started by
+// hand, and test and production mode, never load the module and the route does not exist.
+// The route takes only JSON with the X-DrinkMe-Dev-Log header and no Origin (the app's fetch sends none),
+// so a web page cannot post to it. A device on the same Wi-Fi still can: entries are untrusted text.
 //
 // Each accepted entry becomes one JSON line in <session dir>/client.jsonl. Only listed fields are kept,
 // every string is cut to a fixed length and redacted again here (the app redacts first): email
@@ -29,10 +32,14 @@ const REDACTIONS = [
   [/\bBearer\s+[\w.~+/=-]+/gi, 'Bearer [token]'],
   [/\bAIza[\w-]{30,}/g, '[google-key]'],
   [/[\w.!#$%&'*+/=?^`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[email]'],
+  [/[\w.+-]+%40[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/gi, '[email]'],
   // URL query strings can hold search terms, API keys and OAuth codes. Metro bundle URLs in stack
   // traces keep theirs (platform and dev flags only), so the line and column after it stay readable.
   [/(\bhttps?:\/\/[^\s?#"']+)\?[^\s#"']*/gi, (match, base) => (/\.(bundle|map)$/i.test(base) ? match : `${base}?[query]`)],
-  [/(\b(?:id_?token|access_?token|refresh_?token|api_?key|apikey|token|password|passwd|secret|authorization|code_verifier|code|key)\b["']?\s*[:=]\s*["']?)(?!Bearer\b|\[)[^\s"'&,;}\]]+/gi, '$1[redacted]'],
+  // Also compounds such as newPassword, authToken, clientSecret, private_key.
+  [/([\w-]*(?:token|password|passwd|secret|api_?key|apikey|private_?key|authorization|code_verifier)["']?\s*[:=]\s*["']?)(?!Bearer\b|\[)[^\s"'&,;}\]]+/gi, '$1[redacted]'],
+  // A bare code or key only when the value is long: "code":"age_required" and status codes stay readable.
+  [/(\b(?:code|key)\b["']?\s*[:=]\s*["']?)(?!\[)[^\s"'&,;}\]]{16,}/gi, '$1[redacted]'],
 ];
 
 // A long run of token characters with a digit and both letter cases, and at most two slashes (a file
@@ -49,9 +56,10 @@ export function redactText(value) {
   return out.replace(OPAQUE_RUN, (run) => (looksLikeToken(run) ? '[token]' : run));
 }
 
-// Control characters other than newline and tab are removed, so a log line cannot rewrite the terminal.
+// Control characters other than newline and tab (C0, DEL, C1) and direction overrides are removed, so a
+// log line cannot rewrite the terminal or display differently from what it contains.
 // eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
 
 const cleanText = (value, limit) => {
   if (typeof value !== 'string') return undefined;
@@ -114,6 +122,20 @@ export function sanitizeClientLogEntry(raw) {
   return entry;
 }
 
+export const DEV_LOG_HEADER = 'x-drinkme-dev-log';
+
+/**
+ * Refuses what a browser can send: a form post (not JSON), a request without the app's header (a custom
+ * header needs a CORS preflight), or any request with an Origin (the app's fetch sends none).
+ * @returns {{ status: number, error: string } | null} null when the request may be appended.
+ */
+export function refuseUntrustedRequest(req) {
+  if (!req.is('application/json')) return { status: 415, error: 'JSON only' };
+  if (req.get(DEV_LOG_HEADER) !== '1') return { status: 403, error: 'Missing dev log header' };
+  if (req.get('origin') !== undefined) return { status: 403, error: 'Browser requests are not accepted' };
+  return null;
+}
+
 /**
  * Appends the app's batches to <dir>/client.jsonl.
  * @param {string} dir The session folder. Created if missing.
@@ -140,7 +162,7 @@ export function createClientLogSink(dir) {
       if (isFull) return { ok: true, written: 0 };
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const size = fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0;
-      if (size + lines.length > MAX_CLIENT_LOG_BYTES) {
+      if (size + Buffer.byteLength(lines) + 1 > MAX_CLIENT_LOG_BYTES) {
         isFull = true;
         console.warn(`[dev-log] ${CLIENT_LOG_FILE_NAME} reached ${MAX_CLIENT_LOG_BYTES} bytes; later app logs are dropped.`);
         return { ok: true, written: 0 };

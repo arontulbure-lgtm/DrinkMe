@@ -26,7 +26,8 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Only the error name and the component stack: the message can hold user data. Nothing leaves the device.
+    // Only the error name and the component stack: the message can hold user data. Nothing leaves the
+    // device in a release build; in development the redacted message goes to the dev log bridge.
     console.error('[ErrorBoundary]', error?.name ?? 'Error', info.componentStack ?? '');
     // Development only: the device test log (devLogBridge.ts) gets the message and stack, redacted.
     if (__DEV__) devHooks.boundaryError?.(error, info.componentStack);

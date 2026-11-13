@@ -19,8 +19,10 @@ dotenv.config();
 const isProduction = !['development', 'test'].includes(process.env.NODE_ENV);
 const allowInsecureDevAuth = !isProduction && process.env.ALLOW_INSECURE_DEV_AUTH === 'true';
 // Device test sessions only (npm run test:ios): POST /__dev/client-log exists only when NODE_ENV is
-// exactly 'development'. In test and production mode the module is never loaded. See dev-log-bridge.js.
-const isDevLogBridgeEnabled = process.env.NODE_ENV === 'development';
+// exactly 'development' and DEV_SESSION_DIR is set (the session script sets it). A server started by
+// hand, and test and production mode, never load the module. See dev-log-bridge.js.
+const devSessionDir = process.env.DEV_SESSION_DIR?.trim() ?? '';
+const isDevLogBridgeEnabled = process.env.NODE_ENV === 'development' && devSessionDir !== '';
 const devLogBridge = isDevLogBridgeEnabled ? await import('./dev-log-bridge.js') : null;
 // Exactly 'true', read once at start: any other value leaves sign-in and existing JWTs as they are.
 const REQUIRE_VERIFIED_EMAIL = process.env.REQUIRE_VERIFIED_EMAIL === 'true';
@@ -4883,20 +4885,22 @@ app.post('/api/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, asyn
 // ── Dev log bridge (NODE_ENV=development only) ────────────────────────────────
 // The app (only when __DEV__) sends its errors, warnings, failed API calls, screen changes and tester
 // notes here during a device test session. Outside /api and /media, so it needs no sign-in: errors on
-// the sign-in screen are wanted too. It writes to DEV_SESSION_DIR (set by scripts/test-session.mjs),
-// or to logs/sessions/manual when the server was started by hand. Bodies above the JSON parser's 100 kB
-// are refused before this point.
+// the sign-in screen are wanted too. Only JSON with the app's header and no Origin is taken, so a web
+// page cannot post here (see refuseUntrustedRequest); a device on the same Wi-Fi still can. It writes to
+// DEV_SESSION_DIR. Bodies above the JSON parser's 100 kB are refused before this point.
 if (devLogBridge) {
-  const devLogDir = process.env.DEV_SESSION_DIR?.trim() || path.join(__dirname, '..', 'logs', 'sessions', 'manual');
-  const devLogSink = devLogBridge.createClientLogSink(devLogDir);
+  const devLogSink = devLogBridge.createClientLogSink(devSessionDir);
+  // The app sends at most one batch every 2 seconds.
   const devLogLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 120,
+    max: 60,
     standardHeaders: true,
     legacyHeaders: false,
   });
   console.log(`[dev-log] Development only: app logs go to ${devLogSink.file}`);
   app.post('/__dev/client-log', devLogLimiter, (req, res) => {
+    const refusal = devLogBridge.refuseUntrustedRequest(req);
+    if (refusal) return res.status(refusal.status).json({ error: refusal.error });
     let result;
     try {
       result = devLogSink.append(req.body);
