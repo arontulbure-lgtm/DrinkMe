@@ -73,7 +73,9 @@ const ROUTES = Object.entries(ROUTE_MANIFEST).map(([key, entry]) => {
   const space = key.indexOf(' ');
   return { key, method: key.slice(0, space), path: key.slice(space + 1), ...entry };
 });
-const GATED = ROUTES.filter((route) => route.gate !== 'public');
+const GATED = ROUTES.filter((route) => route.gate !== 'public' && route.gate !== 'dev-only');
+// Registered only when NODE_ENV=development; this file runs the server in test mode.
+const DEV_ONLY = ROUTES.filter((route) => route.gate === 'dev-only');
 
 // The segment before a parameter says what it names: a user, or a numbered post, comment or report.
 const NUMBERED_SEGMENTS = new Set(['drinks', 'comments', 'reports', 'smart-bar']);
@@ -139,6 +141,18 @@ describe('gates on every listed route', () => {
   after(async () => {
     await server?.stop();
     assert.deepEqual(statRealDb(), realDbBefore, 'server/data/db.json must stay untouched');
+  });
+
+  test('dev-only routes do not exist in test mode (404, nothing written)', async () => {
+    assert.ok(DEV_ONLY.length > 0);
+    await server.restart();
+    const dbBefore = readDbText(server);
+    for (const route of DEV_ONLY) {
+      const res = await call(server, { method: route.method, route: route.path, body: { entries: [{ kind: 'note', message: 'x' }] } });
+      assert.equal(res.status, 404, route.key);
+    }
+    assert.equal(readDbText(server), dbBefore);
+    assert.doesNotMatch(server.getOutput(), /\[dev-log\]/);
   });
 
   test('the manifest gives this file something to check', () => {

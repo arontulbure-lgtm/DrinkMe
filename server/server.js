@@ -18,6 +18,10 @@ dotenv.config();
 // Fails closed: an unset or mistyped NODE_ENV gets every production guard.
 const isProduction = !['development', 'test'].includes(process.env.NODE_ENV);
 const allowInsecureDevAuth = !isProduction && process.env.ALLOW_INSECURE_DEV_AUTH === 'true';
+// Device test sessions only (npm run test:ios): POST /__dev/client-log exists only when NODE_ENV is
+// exactly 'development'. In test and production mode the module is never loaded. See dev-log-bridge.js.
+const isDevLogBridgeEnabled = process.env.NODE_ENV === 'development';
+const devLogBridge = isDevLogBridgeEnabled ? await import('./dev-log-bridge.js') : null;
 // Exactly 'true', read once at start: any other value leaves sign-in and existing JWTs as they are.
 const REQUIRE_VERIFIED_EMAIL = process.env.REQUIRE_VERIFIED_EMAIL === 'true';
 
@@ -241,7 +245,8 @@ app.use(helmet());
 morgan.token('url', (req) => (
   (req.originalUrl || req.url).split('?')[0].replace(/^(\/api\/users\/)[^/]+(\/delete-account\/?)$/i, '$1:id$2')
 ));
-app.use(morgan(isProduction ? 'combined' : 'dev'));
+// The app's dev log batches (development only) would fill the console with one line every few seconds.
+app.use(morgan(isProduction ? 'combined' : 'dev', { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
 
 // ── Media ─────────────────────────────────────────────────────────────────────
 // Images leave the JSON responses and come from here. Mounted before the body parsers, which a GET
@@ -4874,6 +4879,35 @@ app.post('/api/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, asyn
     res.json({ recipes: await generateAiRecipes(instructions, inputText, { mocktailsOnly }) });
   } catch (error) { next(error); }
 });
+
+// ── Dev log bridge (NODE_ENV=development only) ────────────────────────────────
+// The app (only when __DEV__) sends its errors, warnings, failed API calls, screen changes and tester
+// notes here during a device test session. Outside /api and /media, so it needs no sign-in: errors on
+// the sign-in screen are wanted too. It writes to DEV_SESSION_DIR (set by scripts/test-session.mjs),
+// or to logs/sessions/manual when the server was started by hand. Bodies above the JSON parser's 100 kB
+// are refused before this point.
+if (devLogBridge) {
+  const devLogDir = process.env.DEV_SESSION_DIR?.trim() || path.join(__dirname, '..', 'logs', 'sessions', 'manual');
+  const devLogSink = devLogBridge.createClientLogSink(devLogDir);
+  const devLogLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  console.log(`[dev-log] Development only: app logs go to ${devLogSink.file}`);
+  app.post('/__dev/client-log', devLogLimiter, (req, res) => {
+    let result;
+    try {
+      result = devLogSink.append(req.body);
+    } catch (err) {
+      console.warn('[dev-log] Could not write the app log:', err.code ?? err.name);
+      return res.status(500).json({ error: 'Could not write the log' });
+    }
+    if (!result.ok) return res.status(400).json({ error: 'Invalid log batch' });
+    return res.status(204).end();
+  });
+}
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

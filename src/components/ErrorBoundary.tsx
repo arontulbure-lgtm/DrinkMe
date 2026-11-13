@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalization } from '../context/LocalizationContext';
+import { devHooks } from '../lib/devHooks';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -27,6 +28,8 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // Only the error name and the component stack: the message can hold user data. Nothing leaves the device.
     console.error('[ErrorBoundary]', error?.name ?? 'Error', info.componentStack ?? '');
+    // Development only: the device test log (devLogBridge.ts) gets the message and stack, redacted.
+    if (__DEV__) devHooks.boundaryError?.(error, info.componentStack);
   }
 
   handleReset = () => {

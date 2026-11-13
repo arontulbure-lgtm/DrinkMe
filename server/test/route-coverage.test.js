@@ -9,7 +9,7 @@ import { describe, test } from 'node:test';
 
 import { ROUTE_MANIFEST, TEST_DIR, parseRoutes, readServerRoutes, staticParts } from './helpers/routes.js';
 
-const GATES = new Set(['public', 'own-before-age', 'adult']);
+const GATES = new Set(['public', 'own-before-age', 'adult', 'dev-only']);
 // The only routes requireSignedInAdult lets through without a JWT, or before the 18+ confirmation.
 // Changing either list needs the owner's OK (drinkme-backend-api, "Rules for every backend change").
 const EXPECTED_PUBLIC = ['GET /healthz', 'POST /api/account/delete-unverified', 'POST /api/auth/mobile'];
@@ -59,6 +59,14 @@ describe('route coverage guard', () => {
       }
       assert.ok(Array.isArray(entry.files) && entry.files.length > 0, `${key}: no test file`);
       assert.ok(!(entry.gate === 'public' && (entry.suspended || entry.admin)), `${key}: a public route cannot check suspension or admin`);
+    }
+  });
+
+  test('dev-only routes, and only they, live under /__dev/', () => {
+    for (const [key, entry] of Object.entries(ROUTE_MANIFEST)) {
+      const routePath = key.slice(key.indexOf(' ') + 1);
+      assert.equal(entry.gate === 'dev-only', routePath.startsWith('/__dev/'), key);
+      if (entry.gate === 'dev-only') assert.ok(!entry.suspended && !entry.admin, `${key}: a dev-only route has no account checks`);
     }
   });
 

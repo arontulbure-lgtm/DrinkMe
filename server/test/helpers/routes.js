@@ -90,6 +90,8 @@ export function parseRoutes(sourceText) {
  *   'public'         no JWT needed (requireSignedInAdult lets it through for everyone)
  *   'own-before-age' needs a JWT; open before the 18+ confirmation only when :id is the caller
  *   'adult'          needs a JWT and the 18+ confirmation (the default for every new route)
+ *   'dev-only'       registered only when NODE_ENV=development (device test sessions); absent in test and
+ *                    production mode, so route-gates.test.js checks a 404 instead of the gates. Path under /__dev/.
  * suspended: true when a suspended caller must get 403 account_suspended.
  * admin: true when only ADMIN_USER_IDS may call it (403 otherwise).
  * files: test files (in server/test) that exercise the route. Each must name the route's path.
@@ -155,6 +157,8 @@ export const ROUTE_MANIFEST = {
   'POST /api/smart-bar/generate-recipes': { gate: 'adult', files: ['ai-routes.test.js', 'age-gate.test.js', 'route-gates.test.js'] },
   'POST /api/detect-product': { gate: 'adult', files: ['ai-routes.test.js', 'route-gates.test.js'] },
   'POST /api/generate-recipes': { gate: 'adult', files: ['ai-routes.test.js', 'age-gate.test.js', 'route-gates.test.js'] },
+
+  'POST /__dev/client-log': { gate: 'dev-only', files: ['dev-log-bridge.test.js', 'route-gates.test.js'] },
 };
 
 /** The fixed parts of a route path, without edge slashes: '/api/users/:id/avatar' gives ['api/users', 'avatar']. */

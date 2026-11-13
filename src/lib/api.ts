@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import type { ImageURISource } from 'react-native';
+import { devHooks } from './devHooks';
 
 type RequestConfig = RequestInit & {
   query?: Record<string, string | number | boolean | undefined | null>;
@@ -66,6 +67,18 @@ function buildUrl(path: string, query?: RequestConfig['query']) {
   return url.toString();
 }
 
+// Development only: tells the device test log (devLogBridge.ts) about a failed request. Method, path
+// without its query string, status, error code and duration; never headers, tokens or bodies.
+function reportApiFailure(method: string | undefined, path: string, status: number, code: string | undefined, startedAt: number) {
+  devHooks.apiFailure?.({
+    method: (method ?? 'GET').toUpperCase(),
+    path: path.startsWith('http') ? new URL(path).pathname : path.split(/[?#]/)[0],
+    status,
+    code,
+    durationMs: Date.now() - startedAt,
+  });
+}
+
 export async function apiFetch<T>(path: string, config: RequestConfig = {}): Promise<T> {
   const { query, headers, ...rest } = config;
   const url = buildUrl(path, query);
@@ -89,14 +102,22 @@ export async function apiFetch<T>(path: string, config: RequestConfig = {}): Pro
   const sentAuthorization = Object.entries(finalHeaders).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
   const usedToken = _apiToken && sentAuthorization === `Bearer ${_apiToken}` ? _apiToken : null;
 
-  const response = await fetch(url, {
-    headers: finalHeaders,
-    ...rest,
-  });
+  const startedAt = Date.now();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: finalHeaders,
+      ...rest,
+    });
+  } catch (networkError) {
+    if (__DEV__) reportApiFailure(rest.method, path, 0, undefined, startedAt);
+    throw networkError;
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     const error = new ApiError(text || response.statusText, response.status, parseErrorCode(text));
+    if (__DEV__) reportApiFailure(rest.method, path, response.status, error.code, startedAt);
     // Only for the token in use: a request that ran with a token since replaced says nothing about the
     // current session, and sign-in itself is the rebuild. A started rebuild clears the token at once, so
     // the other requests failing alongside this one do not start it again. When the handler declines
