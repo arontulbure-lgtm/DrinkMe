@@ -59,7 +59,7 @@ const ANSI =/\u001b\[[0-9;?]*[A-Za-z]/g;
 export const stripAnsi = (text) => text.replace(ANSI, '');
 // App log text can come from anyone on the Wi-Fi: one line, no terminal controls or direction overrides,
 // so it cannot fake a [server], NEW ISSUE or "Session saved" line.
-const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+const UNPRINTABLE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 export const printable = (value, limit) => {
   const text = stripAnsi(String(value ?? '')).replace(/[\r\n]+/g, ' ⏎ ').replace(UNPRINTABLE, '');
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
@@ -92,6 +92,7 @@ export function readEnvFile(file) {
   }
   return {
     exists,
+    names: () => [...values.keys()],
     isSet: (name) => Boolean(values.get(name)),
     equals: (name, expected) => values.get(name) === expected,
     valueKind: (name) => {
@@ -199,10 +200,17 @@ const askYesNo = (question) => new Promise((resolve) => {
   process.stdin.resume();
 });
 
+/** A .env name that looks like a secret and is not one of the app's EXPO_PUBLIC_ settings. Names only. */
+export const isSecretLookingName = (name) => (
+  !name.startsWith('EXPO_PUBLIC_') && /KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|AUTH/i.test(name)
+);
+
 // ── Preflight ─────────────────────────────────────────────────────────────────
 export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
   const results = [];
   const check = (ok, label, hint) => results.push({ ok, label, hint });
+  // Shown with a yellow "!", never blocks the session.
+  const warn = (label, hint) => results.push({ ok: true, warn: true, label, hint });
 
   const nodeMajor = Number(process.versions.node.split('.')[0]);
   check(nodeMajor >= MIN_NODE_MAJOR, `Node ${process.versions.node} (need ${MIN_NODE_MAJOR}+)`, 'Install Node 22 LTS from nodejs.org.');
@@ -240,6 +248,13 @@ export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
     const isSet = Boolean(process.env[name]) || clientEnvFiles.some((file) => file.isSet(name));
     check(isSet, `${name} is set`, 'Add it to .env in the project root (values from the Firebase console, Project settings).');
   }
+  // Expo loads every name in the root .env files into Metro's process. Only EXPO_PUBLIC_ names reach the
+  // app, but a server or personal secret has no business there. Names only, never values.
+  const misplaced = [...new Set(clientEnvFiles.flatMap((file) => file.names()))].filter(isSecretLookingName);
+  if (misplaced.length > 0) {
+    warn(`Root .env holds secret-looking names that the app does not use: ${misplaced.join(', ')}`,
+      'Move them out of the project .env (for example to your user environment or a password manager). The app reads only EXPO_PUBLIC_ names; see docs/DEVICE_TEST_SESSION.md.');
+  }
 
   const ranked = rankLanAddresses();
   const lanIp = ipOverride || ranked[0]?.address;
@@ -254,9 +269,9 @@ export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
 
 const printPreflight = ({ results }) => {
   console.log(bold('\nPreflight'));
-  for (const { ok, label, hint } of results) {
-    console.log(`  ${ok ? green('✓') : red('✗')} ${label}`);
-    if (!ok && hint) console.log(`      ${dim(hint)}`);
+  for (const { ok, warn, label, hint } of results) {
+    console.log(`  ${warn ? yellow('!') : ok ? green('✓') : red('✗')} ${warn ? yellow(label) : label}`);
+    if ((!ok || warn) && hint) console.log(`      ${dim(hint)}`);
   }
 };
 
@@ -452,6 +467,9 @@ async function main() {
   writeMeta();
 
   console.log(bold(`\nSession folder: ${sessionDir}`));
+  if (metroPort !== METRO_PORT) {
+    console.log(yellow(`! Metro uses port ${metroPort}, not ${METRO_PORT} (another program holds ${METRO_PORT}). Expo Go connects to exp://${lanIp}:${metroPort}; a phone needs the firewall rule for ports ${METRO_PORT}-${METRO_PORT + METRO_PORT_TRIES} (docs/DEVICE_TEST_SESSION.md).`));
+  }
 
   // Live watcher.
   const seen = new Map();

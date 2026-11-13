@@ -59,7 +59,7 @@ export function redactText(value) {
 // Control characters other than newline and tab (C0, DEL, C1) and direction overrides are removed, so a
 // log line cannot rewrite the terminal or display differently from what it contains.
 // eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
 const cleanText = (value, limit) => {
   if (typeof value !== 'string') return undefined;
