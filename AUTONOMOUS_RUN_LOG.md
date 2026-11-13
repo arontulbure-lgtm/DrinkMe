@@ -3,6 +3,19 @@
 Branch: `auto/run-2026-10-30` (committed in logical chunks on this branch; never pushed, never on main; review with `git log main..` and `git diff main`).
 
 ## Summary for John
+### Session 5 (2026-11-13): iPhone test sessions with live error capture, done
+- **Start here:** `docs/IOS_TEST_SESSION.md` (firewall, Wi-Fi, Expo Go, `npm run test:ios`, checklist, official account, triage).
+- **Checks:** server tests 1236 of 1236 (full run on the final code); `npm run check` 0 errors, 0 warnings. Nothing pushed, nothing on main.
+- **Found and fixed first (d8eea14):** the app could not bundle at all. Since the Expo patch updates (99dd861) `babel-preset-expo` is no longer hoisted, so `npx expo start/export` failed with "Cannot find module 'babel-preset-expo'". `babel.config.js` now resolves it through `expo` (no new dependency). A production `expo export` works again.
+- **1. `npm run test:ios` (4be9df6):** `scripts/test-session.mjs`, no new dependencies. ✓/✗ preflight that never prints a value; session folder `logs/sessions/<time>/` (git-ignored); server in development mode mirrored to the console and `server.log`; Expo with `--lan` and the API URL set for Expo only (`.env` untouched); live `NEW ISSUE #n` lines; Ctrl+C stops everything. **Decision:** Expo hides its QR code and keys when its output is captured, so by default Expo keeps the terminal and app errors come through the bridge; `--capture-metro` also saves Metro's output and prints the QR code itself.
+- **2. Dev-only log bridge (68c4617):** the app (only in `__DEV__`; checked absent from a production bundle) sends console errors/warnings, JS crashes, unhandled rejections, ErrorBoundary catches, failed API calls (no bodies, headers or tokens), screen changes and 📝 notes to `POST /__dev/client-log`. The route exists only with `NODE_ENV=development` and a session folder (404 in test and production, tested), takes only JSON with the app's header and no Origin, and redacts emails, tokens and keys twice (app and server). New `dev-only` gate in the route manifest.
+- **3. log-triage agent (0c3d2e3):** reads the latest session, writes `reports/test-sessions/<time>.md` (git-ignored) with a ranked table and a fix list. No shell, never edits code, treats log text as untrusted.
+- **4. Guide (67713f9).**
+- **Reviews (e89b340):** code and security reviews, no BLOCKER; all SHOULD-FIX items fixed (browser posts refused, route off outside sessions, terminal-safe output, more redaction, Windows shutdown, reports not committed).
+- **Verified by hand:** a development server on a temp database accepted a fake batch; `client.jsonl` had the email, token and JWT redacted, the body dropped and the uid masked. Test mode answered 404 and wrote nothing.
+- **Not verified:** a real `npm run test:ios` with the phone (it needs your `.env` files and real database, which I don't touch). **Risk:** Expo Go on the App Store supports only the newest SDK; if it no longer opens SDK 54, the guide says what to do.
+- **Note:** during the first full test run your own server started (12:31) and migrated `server/data/db.json` (backup `db.json.pre-migration-…` beside it). The test guard flagged it; nothing in the tests wrote there.
+
 ### Session 4 (2026-11-12 to 2026-11-13): your instructions 0 to 8, done
 - **Checks:** server tests 1225 of 1225 (full run on the final code); `npm run check` 0 errors, 0 warnings. Nothing pushed, nothing on main.
 - **0. Setup (6a45f11):** `git commit` and `git add` allowed in `.claude/settings.json` (`git push` still asks); legal-compliance agent and skill moved into `.claude/`, `_claude/` deleted; CLAUDE.md team table and pipeline now call for a legal review on personal data, user content, age, brand content or a new market.
