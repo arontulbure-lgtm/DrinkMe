@@ -4223,6 +4223,10 @@ const OFFICIAL_USER_IDS = new Set(
 
 // Counts only, like the admin ids above.
 const unknownOfficialCount = Array.from(OFFICIAL_USER_IDS).filter((id) => !userIndex.has(id)).length;
+// One count-only line at every start, so a test session log shows whether an official account is set.
+if (OFFICIAL_USER_IDS.size > 0) {
+  console.log(`[official] ${OFFICIAL_USER_IDS.size} official account(s) configured, ${OFFICIAL_USER_IDS.size - unknownOfficialCount} of them known users.`);
+}
 if (unknownOfficialCount > 0) {
   console.warn(`[official] OFFICIAL_USER_IDS: ${unknownOfficialCount} of ${OFFICIAL_USER_IDS.size} match no known user.`);
 }

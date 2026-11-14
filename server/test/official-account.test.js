@@ -92,11 +92,14 @@ describe('OFFICIAL_USER_IDS', () => {
     assert.equal((await call(server, 'GET', '/api/users/official', 'viewer')).body.official, true);
     assert.equal((await call(server, 'GET', '/api/users/author', 'viewer')).body.official, false);
     assert.match(server.getOutput(), /OFFICIAL_USER_IDS: 1 of 2 match no known user/);
+    // One count-only line at every start (device test logs show whether an official account is set).
+    assert.match(server.getOutput(), /\[official\] 2 official account\(s\) configured, 1 of them known users\./);
     assert.ok(!server.getOutput().includes('ghost'), 'ids stay out of the logs');
   });
 
   test('empty by default: nobody is official', async (t) => {
     const server = await start(t, baseFixture(), {});
+    assert.doesNotMatch(server.getOutput(), /official account\(s\) configured/);
     assert.equal((await call(server, 'GET', '/api/users/official', 'viewer')).body.official, false);
     assert.equal((await call(server, 'GET', '/api/users/official', 'official')).body.official, false);
   });
