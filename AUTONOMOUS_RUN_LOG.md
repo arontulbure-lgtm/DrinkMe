@@ -3,6 +3,24 @@
 Branch: `auto/run-2026-10-30` (committed in logical chunks on this branch; never pushed, never on main; review with `git log main..` and `git diff main`).
 
 ## Summary for John
+### Session 9 (2026-11-14): cleanup, automated retest on the emulator, merge
+- **Checks:** server tests 1279 of 1279 (full run, route coverage included); `npm run check` 0 errors, 0 warnings; gitleaks clean.
+- **0. Triage fixes (7e6629c, ec20cde):** app log entries from before a session are no longer counted as its new issues (entry numbers, duplicate detection); session.json records the Firebase project; the server prints a count-only `[official]` line at start.
+- **1. Secrets:**
+  - `npm run env:remove` (638f35e). `ANTHROPIC_API_KEY` was **not** removed: `agents/orchestrator.ts` (`npm run agent:feature`) reads it from the root `.env`. Your call (see the rotation list).
+  - `D:\DrinkMeApp\CLAUDE.md`: all 13 env values replaced by `<set in .env – rotated>`; no Google or `sk-` keys left in it.
+  - gitleaks over all branches: 5 false positives (test canaries, the hash of the refused old JWT default), recorded in `.gitleaksignore`; no secret or key file in history (e813bd6).
+  - `docs/SECURITY_ROTATION.md` lists names and consoles: Maps key, old project's service-account and web keys, Anthropic (optional), OpenAI (SEC-C), Google web client ID.
+  - `official:check`: MATCH on drinkmeapp-a8fea. **Not done (sandbox):** moving `server/serviceAccount.json` (old project) to `D:\DrinkMeApp\_old_secrets\`; Claude Code may not write outside the project folder. Command in the rotation list.
+  - `.gitignore` covers every `.env` variant and `_old_secrets/` (5929798).
+- **3. Firebase (8baf874):** `npm run firebase:auth-check`: Email/Password on, **enumeration protection already on** (checked through the Identity Toolkit config API, nothing changed), password policy ENFORCE 8+ / uppercase / digit / special (same as the app), authorized domains localhost + the project's two, emails from "DrinkMe" with reply-to drinkmesocialapp@gmail.com.
+- **2. Automated retest (scripted with `scripts/adb-ui.mjs`, test users from `npm run testusers:create`, all deleted afterwards):** every listed flow passed on the Android emulator: sign-up (18+, notice, name), sign-in/out, forgot password, post with photo, images, rating, comment, cheers, save, partner request + accept, notifications, 3 reports, block, Explore/search, Smart Bar, profile edit, ro/en, official badge, and account deletion (the user is gone from Firebase). Auto-hide did not trigger: the reporters were minutes old, and the 48 h rule is working as designed. Triage: 1 high, 2 medium, 6 low (`reports/test-sessions/2026-11-14_13-33-19-e2e.md`). **Fixed and re-verified on the emulator:**
+  - High: the keyboard covered Sign In / Sign Up on Android (faf3f72, 23a66f7). Expo Go on Android 15 reports a keyboard height of 0, so the form is now padded and scrolled.
+  - Medium: Cheer/Save on the post detail showed no state (75d1097).
+  - Medium: feed cards did not open the post detail (2b30d1b).
+  - Lows are listed in the release notes, not fixed.
+- **4. Merge:** `docs/RELEASE_NOTES_run-2026-10-30.md`; PR and merge status below.
+
 ### Session 8 (2026-11-14): Firebase project switch tooling, Google sign-in readiness, second triage, done
 - **Your decision:** the app's Firebase project is `drinkmeapp-a8fea` (path B).
 - **Checks:** `npm run check` clean; new and affected server tests 31/31 (firebase-configure, official-scripts, client-source, route-coverage). `server.js` is unchanged since the full 1251/1251 run of session 7, so the full suite was not repeated (your session was writing to the real database, which trips its guard).
