@@ -75,7 +75,12 @@ describe('AuthScreen keyboard does not cover the submit button', () => {
   test('the form sits in a KeyboardAvoidingView and a ScrollView that lets taps dismiss the keyboard', () => {
     const auth = read('src/screens/AuthScreen.tsx');
     const ret = auth.slice(auth.lastIndexOf("<SafeAreaView edges={['top', 'left', 'right']}"));
-    assert.match(ret, /<KeyboardAvoidingView[\s\S]*?behavior=\{Platform\.OS === 'ios' \? 'padding' : 'height'\}/);
+    assert.match(ret, /<KeyboardAvoidingView[\s\S]*?behavior=\{Platform\.OS === 'ios' \? 'padding' : undefined\}/);
+    // Android: padded by the keyboard height and scrolled to the end (KeyboardAvoidingView gets no usable
+    // keyboard frame there with edge-to-edge; seen on the emulator 2026-11-14).
+    // Expo Go on Android 15 reports a keyboard height of 0, so an estimate is used then.
+    assert.match(auth, /Keyboard\.addListener\('keyboardDidShow'[\s\S]*?event\.endCoordinates\.height[\s\S]*?ESTIMATED_KEYBOARD_SHARE[\s\S]*?scrollToEnd/);
+    assert.match(ret, /paddingBottom: keyboardHeight/);
     assert.match(ret, /<ScrollView[\s\S]*?keyboardShouldPersistTaps="handled"/);
     // Both wrappers enclose the email field and the submit buttons.
     const kav = ret.indexOf('<KeyboardAvoidingView');

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, ActivityIndicator, AccessibilityInfo,
-  KeyboardAvoidingView, ScrollView,
+  KeyboardAvoidingView, ScrollView, Keyboard, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -173,7 +173,29 @@ function GoogleAuthButton({ onCredential, disabled }: {
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
+// Share of the window an on-screen keyboard usually covers, used only when Android reports no height.
+const ESTIMATED_KEYBOARD_SHARE = 0.45;
+
 export default function AuthScreen() {
+  // Android with edge-to-edge (app.config.ts) neither resizes the window for the keyboard nor gives
+  // KeyboardAvoidingView a usable frame, so the form is padded by the keyboard's height and scrolled to
+  // its end: the submit button stays just above the keyboard (device test 2026-11-14).
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const show = Keyboard.addListener('keyboardDidShow', (event) => {
+      // Some Android builds (Expo Go on Android 15, edge-to-edge) report a height of 0: estimate it then.
+      const reported = event.endCoordinates.height;
+      setKeyboardHeight(reported > 0 ? reported : Math.round(Dimensions.get('window').height * ESTIMATED_KEYBOARD_SHARE));
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -336,10 +358,11 @@ export default function AuthScreen() {
           itself and scrolls; taps outside the fields dismiss the keyboard. */}
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        ref={scrollRef}
+        contentContainerStyle={[styles.scrollContent, keyboardHeight > 0 && { paddingBottom: keyboardHeight }]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
