@@ -242,19 +242,32 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                 </View>
 
                 <View style={styles.actionsRow}>
+                  {/* Same state fields as DrinkPostCard; useDrinkToggles patches them optimistically. */}
                   <TouchableOpacity
                     style={styles.primaryAction}
                     onPress={() => toggleCheer(drink)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: drink.isLiked === true }}
+                    accessibilityLabel={t(drink.isLiked ? 'drinkDetail.uncheerA11y' : 'drinkDetail.cheerA11y', {
+                      count: drink.cheersCount ?? 0,
+                    })}
                   >
-                    <FontAwesome5 name="glass-cheers" size={18} color="#FFFFFF" />
-                    <Text style={styles.primaryActionText}>{t('drinkDetail.like')}</Text>
+                    <FontAwesome5 name="glass-cheers" size={18} color={drink.isLiked ? '#FCD34D' : '#FFFFFF'} />
+                    <Text style={styles.primaryActionText}>
+                      {drink.isLiked ? t('drinkDetail.cheered') : t('drinkDetail.like')}
+                      {' · '}
+                      {t('common.cheersCount', { count: drink.cheersCount ?? 0 })}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.secondaryAction}
                     onPress={() => toggleSave(drink)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: drink.isSaved === true }}
+                    accessibilityLabel={t(drink.isSaved ? 'drinkDetail.unsaveA11y' : 'drinkDetail.saveA11y')}
                   >
-                    <Ionicons name="bookmark" size={20} color="#8B5FBF" />
-                    <Text style={styles.secondaryActionText}>{t('drinkDetail.save')}</Text>
+                    <Ionicons name={drink.isSaved ? 'bookmark' : 'bookmark-outline'} size={20} color="#8B5FBF" />
+                    <Text style={styles.secondaryActionText}>{drink.isSaved ? t('common.saved') : t('common.save')}</Text>
                   </TouchableOpacity>
                 </View>
 

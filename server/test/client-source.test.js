@@ -5,6 +5,7 @@
 //    React Native's Image drops request headers on Android under the New Architecture: every post photo
 //    answered 401 on the emulator (2026-11-13).
 // 2. The empty Home feed's "Create first post" button must open CreatePost, not Explore.
+// 3. DrinkDetail Cheer/Save buttons must reflect the cheered/saved state and expose accessibilityState.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -92,5 +93,44 @@ describe('AuthScreen keyboard does not cover the submit button', () => {
     const input = auth.slice(auth.lastIndexOf('<TextInput', at), auth.indexOf('/>', at));
     assert.match(input, /returnKeyType="go"/);
     assert.match(input, /onSubmitEditing=\{isLoading \? undefined : handleEmailAuth\}/);
+  });
+});
+
+// 3. The detail screen's Cheer and Save buttons showed static labels: no cheered/saved state, no count,
+//    no accessibility state, so a second tap silently un-cheered (Android device test, 2026-11-14).
+describe('DrinkDetail cheer and save buttons', () => {
+  const screen = read('src/screens/DrinkDetailScreen.tsx');
+  const button = (onPress) => {
+    const at = screen.indexOf(onPress);
+    assert.ok(at > 0, `${onPress} is still there`);
+    const start = screen.lastIndexOf('<TouchableOpacity', at);
+    return screen.slice(start, screen.indexOf('</TouchableOpacity>', at));
+  };
+
+  test('the cheer button reflects drink.isLiked and shows drink.cheersCount', () => {
+    const cheer = button('toggleCheer(drink)');
+    assert.match(cheer, /accessibilityRole="button"/);
+    assert.match(cheer, /accessibilityState=\{\{\s*selected:\s*drink\.isLiked === true\s*\}\}/);
+    assert.match(cheer, /accessibilityLabel=\{t\(drink\.isLiked \?/);
+    assert.match(cheer, /color=\{drink\.isLiked \?/);
+    assert.match(cheer, /drink\.isLiked \? t\('drinkDetail\.cheered'\) : t\('drinkDetail\.like'\)/);
+    assert.match(cheer, /t\('common\.cheersCount', \{ count: drink\.cheersCount/);
+  });
+
+  test('the save button reflects drink.isSaved', () => {
+    const save = button('toggleSave(drink)');
+    assert.match(save, /accessibilityRole="button"/);
+    assert.match(save, /accessibilityState=\{\{\s*selected:\s*drink\.isSaved === true\s*\}\}/);
+    assert.match(save, /accessibilityLabel=\{t\(drink\.isSaved \?/);
+    assert.match(save, /name=\{drink\.isSaved \? 'bookmark' : 'bookmark-outline'\}/);
+    assert.match(save, /drink\.isSaved \? t\('common\.saved'\) : t\('common\.save'\)/);
+    assert.doesNotMatch(save, /t\('drinkDetail\.save'\)/);
+  });
+
+  test('the new labels exist in en and ro', () => {
+    const loc = read('src/context/LocalizationContext.tsx');
+    for (const key of ['cheered', 'cheerA11y', 'uncheerA11y', 'saveA11y', 'unsaveA11y']) {
+      assert.equal(loc.match(new RegExp(`^\\s+${key}: '`, 'gm'))?.length, 2, key);
+    }
   });
 });
