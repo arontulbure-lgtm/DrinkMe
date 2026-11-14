@@ -96,6 +96,7 @@ export function sanitizeClientLogEntry(raw) {
     level: LEVELS.has(raw.level) ? raw.level : undefined,
     clientTs: cleanTimestamp(raw.clientTs),
     appSession: cleanText(raw.appSession, TEXT_LIMITS.appSession),
+    seq: cleanInteger(raw.seq, 1, 1_000_000_000),
     platform: PLATFORMS.has(raw.platform) ? raw.platform : undefined,
     screen: cleanText(raw.screen, TEXT_LIMITS.screen),
     trail: Array.isArray(raw.trail)

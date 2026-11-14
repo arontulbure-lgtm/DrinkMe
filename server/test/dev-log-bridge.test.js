@@ -119,7 +119,7 @@ describe('POST /__dev/client-log with NODE_ENV=development', () => {
 
     const ok = await postBatch(server.baseUrl, {
       entries: [
-        { kind: 'console', level: 'error', message: `Login failed for ${EMAIL} with ${JWT}`, screen: 'Auth', trail: ['Auth'], clientTs: '2026-11-13T10:00:00.000Z', appSession: 's1', platform: 'ios' },
+        { kind: 'console', level: 'error', message: `Login failed for ${EMAIL} with ${JWT}`, screen: 'Auth', trail: ['Auth'], clientTs: '2026-11-13T10:00:00.000Z', appSession: 's1', seq: 7, platform: 'ios' },
         { kind: 'api', method: 'GET', path: '/api/users/Xy12abCD34efGH56ijKL78mnOP90?token=abc', status: 500, durationMs: 42, screen: 'Profile', body: 'secret body' },
         { kind: 'note', message: `Button looks cut off, key=${OPAQUE}`, screen: 'Home' },
         { kind: 'nav', screen: 'Explore' },
@@ -135,6 +135,8 @@ describe('POST /__dev/client-log with NODE_ENV=development', () => {
       assert.ok(!text.includes(secret), `client.jsonl still contains ${secret}`);
     }
     assert.equal(lines[0].kind, 'console');
+    assert.equal(lines[0].seq, 7, 'the entry number is kept, so a resent batch can be recognised');
+    assert.equal(lines[1].seq, undefined);
     assert.equal(lines[0].screen, 'Auth');
     assert.match(lines[0].message, /\[email\].*\[jwt\]/);
     assert.ok(!Number.isNaN(Date.parse(lines[0].ts)));

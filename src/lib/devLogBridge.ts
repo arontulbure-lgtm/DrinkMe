@@ -21,6 +21,7 @@ type LogEntry = {
   kind: EntryKind;
   clientTs: string;
   appSession: string;
+  seq: number;
   platform: string;
   screen?: string;
   trail?: string[];
@@ -81,12 +82,17 @@ let trail: string[] = [];
 // The unwrapped console, so the bridge never logs through itself.
 let originalLog: (...args: unknown[]) => void = () => {};
 
-const enqueue = (entry: Omit<LogEntry, 'clientTs' | 'appSession' | 'platform' | 'screen' | 'trail'>, withTrail = false) => {
+// Numbers each entry of this app session, so a batch sent twice (the answer was lost when the server
+// stopped) can be recognised as the same entries.
+let nextSeq = 1;
+
+const enqueue = (entry: Omit<LogEntry, 'clientTs' | 'appSession' | 'platform' | 'screen' | 'trail' | 'seq'>, withTrail = false) => {
   if (isDisabled) return;
   queue.push({
     ...entry,
     clientTs: new Date().toISOString(),
     appSession,
+    seq: nextSeq++,
     platform: Platform.OS,
     screen: currentScreen,
     ...(withTrail && trail.length > 0 && { trail: trail.slice(-TRAIL_LENGTH) }),

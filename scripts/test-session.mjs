@@ -291,7 +291,7 @@ export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
     ? `LAN IPv4: ${lanIp}${ipOverride ? ' (from --ip)' : ` (${ranked[0].name})`}${others.length ? dim(`  other: ${others.join(', ')}`) : ''}`
     : 'LAN IPv4 found', 'Connect the PC to the same Wi-Fi as the phone, or pass --ip <address>.');
 
-  return { results, ok: results.every((item) => item.ok), lanIp: ipIsValid ? lanIp : null, metroPort };
+  return { results, ok: results.every((item) => item.ok), lanIp: ipIsValid ? lanIp : null, metroPort, firebaseProject: projectCheck.error ? null : { app: projectCheck.app, server: projectCheck.server } };
 }
 
 const printPreflight = ({ results }) => {
@@ -335,6 +335,25 @@ export function classifyLogLine(source, rawLine) {
   if (!PROBLEM_WORDS.test(line)) return null;
   const kind = /warn|⚠/i.test(line) && !/error|fatal|❌/i.test(line) ? 'warning' : 'error';
   return { kind, message: line.slice(0, 300), signature: signatureOf(line) };
+}
+
+// Clock difference allowed between the app (emulator or phone) and this PC.
+const CLOCK_SKEW_MS = 5000;
+
+/**
+ * Where a client.jsonl entry comes from: 'new' (this session), 'carried-over' (made before the session
+ * started, queued by the app while no server ran), or 'duplicate' (the same appSession + seq again, when a
+ * batch was resent). seen collects the ids of this session.
+ */
+export function clientEntryOrigin(entry, sessionStartMs, seen) {
+  if (entry?.appSession && Number.isInteger(entry.seq)) {
+    const id = `${entry.appSession}:${entry.seq}`;
+    if (seen.has(id)) return 'duplicate';
+    seen.add(id);
+  }
+  const made = Date.parse(entry?.clientTs ?? '');
+  if (!Number.isNaN(made) && made < sessionStartMs - CLOCK_SKEW_MS) return 'carried-over';
+  return 'new';
 }
 
 /** A client.jsonl entry that is a problem, or null. Notes are returned with kind 'note'. */
@@ -482,6 +501,7 @@ async function main() {
     startedAt: new Date().toISOString(),
     platform,
     ...(androidSerial && { androidDevice: androidSerial, avd: AVD_NAME }),
+    firebaseProject: preflight.firebaseProject,
     lanIp,
     apiUrl,
     metroPort,
@@ -540,6 +560,9 @@ async function main() {
   onLines(server.stderr, onServerLine);
 
   // App log bridge output, written by the server.
+  const sessionStartMs = Date.parse(meta.startedAt);
+  const sentEntries = new Set();
+  let carriedOverCount = 0;
   let clientOffset = 0;
   let clientPending = '';
   const readClientLog = () => {
@@ -555,6 +578,14 @@ async function main() {
       for (const line of lines) {
         let entry;
         try { entry = JSON.parse(line); } catch { continue; }
+        const kind = clientEntryOrigin(entry, sessionStartMs, sentEntries);
+        if (kind === 'duplicate') continue;
+        if (kind === 'carried-over') {
+          // Queued by the app while no session was running; it belongs to the previous one.
+          carriedOverCount += 1;
+          if (carriedOverCount === 1) console.log(dim('  (app log entries from before this session arrived; they are not counted as new issues)'));
+          continue;
+        }
         report('app', classifyClientEntry(entry), entry.screen);
       }
     } finally {
@@ -646,6 +677,7 @@ async function main() {
     meta.endedAt = new Date().toISOString();
     meta.issueCount = seen.size;
     meta.noteCount = noteCount;
+    meta.carriedOverCount = carriedOverCount;
     writeMeta();
     await Promise.all([serverLog, metroLog, issuesLog].filter(Boolean).map((stream) => new Promise((resolve) => stream.end(resolve))));
     console.log(bold(`\nSession saved: ${sessionDir}`));
