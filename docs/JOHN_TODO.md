@@ -1,0 +1,152 @@
+# What only John can do
+
+Prepared by the autonomous run of 2026-10-30. Nothing here has been attempted. Each list is in the order to do it.
+Values in angle brackets are placeholders: never paste real keys into this file or any other tracked file.
+
+## 1. Device checks (do these first)
+
+Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_ENV=development`) and Metro (`npx expo start`). Use two phones or one phone plus an emulator when a step needs a second user.
+
+### 1a. Sign-in, every provider
+
+| # | Steps | Expected result |
+|---|---|---|
+| 1 | Fresh install, open the app | Sign-in screen. No feed is visible before signing in. |
+| 2 | Email sign-up with a new address and a valid password | Age gate (18+), then the privacy notice, then the name prompt. After these, Home loads with no error. |
+| 3 | At the age gate, look for a way past it without confirming | There is none: the only alternatives to "I am 18 or older" are Log out and Delete account, with a hint explaining them. Log out returns to sign-in; signing in again shows the gate again. Delete account opens the same delete confirmation as Edit Profile and removes the account. No tab, feed or image loads before confirming. |
+| 4 | Sign out, sign in again with the same email and password | Goes straight to Home: age gate, notice and name are not asked again. |
+| 5 | Sign in with a wrong password, then with an email that has no account | Both show the same "Email or password is incorrect" message (ro/en), never Firebase's own English text. The app stays on the sign-in screen. |
+| 6 | Sign up with an invalid email or a too-short password | A validation message before any network call. |
+| 7 | Google sign-in on a development build (Expo Go only works through the auth.expo.io proxy) | Google consent screen, then the same first-run screens as step 2 for a new account. Your Google photo is shown as avatar. |
+| 8 | Google sign-in with the same Gmail address you used for an email/password account | You land in the same account (same posts). The other device's session is logged out (expected: this is the takeover fix). |
+| 9 | Apple sign-in (iOS only) | Not available yet: needs the $99 Apple Developer account. The button must not appear on Android. |
+| 10 | Kill the app while signed in, reopen | Still signed in, Home loads. |
+| 11 | Turn the backend off, reopen the app | Session error screen with Retry, not an empty feed. Retry after starting the backend works. |
+| 12 | Sign out as user A, sign in as user B on the same phone | B never sees A's feed, profile or notifications, not even for a moment. |
+| 13 | Delete account (Profile, Settings) | Confirmation, then signed out. Signing in again with the same account says the account was deleted. |
+| 14 | Sign-in screen, "Forgot password?", enter the email of a real account, tap Send | A neutral confirmation ("if an account exists, we sent an email"). The reset email arrives, in the app's language. |
+| 15 | The same with an email that has no account | Exactly the same confirmation as step 14. Nothing tells you whether the account exists. |
+| 16 | Tap Send again straight away | The button waits about 60 seconds and shows the time left. Leaving and reopening the screen keeps the wait; restarting the app ends it. |
+| 17 | Forgot password with an invalid email (no @), then with airplane mode on | Invalid email: a format message and no wait. Airplane mode: a network message, and you can try again at once (no wait). |
+| 18 | Complete a reset from the email, sign in with the new password | Sign-in works. The old password is refused with the step 5 message. |
+| 19 | Sign up with an email that already has an account | "Email already in use" (expected: Firebase does not hide this; accepted). |
+| 20 | Google sign-in, then cancel in the browser | Back on the sign-in screen with no error message. |
+| 21 | VoiceOver (iOS) and TalkBack (Android) on the sign-in screen and in forgot-password mode | Every field, link and button is read with a ro/en label; error and confirmation messages are announced. |
+| 22 | Type the email in forgot-password mode and press the keyboard's Send / Done key | It sends, the same as tapping the button. Email autofill is offered. |
+| 23 | Pre-registration takeover: phone A signs up with an email address you own but that has no DrinkMe account, and stays signed in. Then, as the real owner, sign up with that email on phone B (expect "email in use"), use "Forgot password?", reset from the email and sign in on phone B | Phone A is logged out on its next request (pull to refresh): the owner's fresh verified sign-in ends every older session. **If phone A keeps working, write it down and tell the next run**: a reset alone does not end server sessions (open item in SECURITY.md), so phone A would keep access for up to 30 days. |
+
+### 1b. Lists and images
+
+| # | Steps | Expected result |
+|---|---|---|
+| 1 | Post a drink with a camera photo (alcoholic on) | Upload succeeds; the post shows on Home and Profile with the image. |
+| 2 | Post a non-alcoholic drink with a gallery photo | Same, and the "non-alcoholic" label is right. |
+| 3 | Post with a 12 MP photo as **avatar** | Either it uploads, or a clear "image too large" message. No crash. |
+| 4 | Post a geotagged photo on iOS and on Android, then inspect the stored image (ask the next run to check it) | Tells us whether GPS data survives. Images are visible to other users. |
+| 5 | Scroll Home past 20 posts | "Load more" appears and loads the next page without duplicates. |
+| 6 | Explore: search a user (2+ letters), open their profile | Results show names, never email addresses. |
+| 7 | Open a post, add a comment, delete it | Comment appears and disappears; the count updates. |
+| 8 | Like and save a post, check Profile, Saved | Saved list shows it; unsaving removes it. |
+| 9 | Partner request from A to B, accept on B | B gets a request, accepting adds both sides; A's partner feed shows B's posts. |
+| 10 | Report a post from three different accounts that are at least 48 hours old and have accepted the privacy notice | After the third report the post disappears for everyone except its author and you (admin). The author sees a "hidden pending review" notice on it. Reports from newer accounts reach the queue but do not hide anything. |
+| 11 | Block a user | Their posts, comments and profile disappear for you, and yours for them. Blocked Users lists them; unblocking restores. |
+| 12 | Switch language ro/en (Settings) | Every new screen (age gate, notice, verify email, report sheet, suspension banner, hidden-content notice) is translated. |
+| 13 | With the app in Romanian, go through every tab, the sign-in screen, Create Post, Smart Bar (Inventory, Saved, the Recipes and Scanner "coming soon" previews), the location picker and Edit Profile | No English text left anywhere, apart from names and post text people typed. The tab reads "Smart Bar". Notifications read in Romanian too (for example "Ana a dat noroc băuturii tale Negroni.", not the English "cheered your drink" sentence); a deleted or hidden actor reads "Cineva". |
+| 14 | In Romanian on Android, look at a post or comment at least 7 days old | A short date such as "12 nov." instead of "acum N zile". Newer items read "acum 5 min", "acum o zi", "acum N zile". Check iOS too. |
+| 15 | VoiceOver / TalkBack over the icon-only buttons (cheer, save, comment, post menu, close, back, notification bell) | Each is read with a ro/en name and as a button; small icons are still easy to hit (44 px target). |
+
+### 1c. Moderation as admin
+
+There is no admin screen yet. Put your uid in `ADMIN_USER_IDS` in `server/.env`, restart the server, and confirm 18+ in the app with that account. Get an API token and run the calls in `server/README.md`, section "Moderation" (it shows how to get `$TOKEN` from your email and password; use shell variables, never paste the token anywhere). Use a second test account as the offender.
+
+| # | Steps | Expected result |
+|---|---|---|
+| 1 | `curl -s "$API/api/admin/reports?status=open" -H "Authorization: Bearer $TOKEN"` | Oldest report first, with `ageHours`, `overdue`, `openReporterCount`, `autoHideReporterCount`, `autoHidden`, and `overdueCount` at the top. |
+| 2 | The same call with the test account's token | 403. |
+| 3 | `curl -s -X POST "$API/api/admin/reports/<id>/resolve" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"action":"dismiss"}'` | The report is resolved; a post hidden by it reappears for everyone. A second call answers 409. |
+| 4 | Resolve another report with `{"action":"remove_content","suspend":true}` | The post or comment is gone; the answer has `suspension` with `applied: true` and a `suspendedUntil` 7 days ahead. |
+| 5 | On the offender's phone: try to post, comment, send a partner request, edit the profile and report | Each action is refused with the suspension message, and after the first refusal Home and Profile show a red suspension banner with the end date (or reopen the app). Reading, cheers, saves and blocks still work. |
+| 6 | `curl -s -X POST "$API/api/admin/users/<uid>/suspend" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'` | 409 `already_suspended` (a double tap changes nothing). With `{"permanent":true}` it becomes permanent. |
+| 7 | `curl -s -X POST "$API/api/admin/users/<uid>/unsuspend" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"void":true}'` | `suspended: false`; the banner goes once the app reloads the profile (reopen the app). A voided suspension does not count, so the next one is 7 days again. |
+| 8 | Suspend your own uid | 403 `cannot_suspend_admin`. |
+
+## 2. Turn on email verification (`REQUIRE_VERIFIED_EMAIL`) for the closed beta
+
+The takeover fix now works with the flag off. The flag adds "no access before the email is verified". Test on a real Firebase project before turning it on.
+
+1. Firebase console, Authentication, Settings, User account linking: confirm "Link accounts that use the same email" (one account per email). Write down what it says.
+2. Locally, add `REQUIRE_VERIFIED_EMAIL=true` to `server/.env` and restart the server. The log must not show `[auth] A token auth_time is ahead`.
+3. Phone A: sign up with an email address you control. Expected: the Verify Email screen, and nothing else in the app works.
+4. Tap Resend. Expected: a new email arrives and the button has a cooldown.
+5. Tap "I verified" before clicking the link. Expected: a message that the email is not verified yet.
+6. Click the link in the email, then tap "I verified". Expected: the age gate, then the normal first-run screens.
+7. Kill and reopen the app. Expected: you stay signed in.
+8. Takeover test, with a Gmail address you own and that has no DrinkMe account yet:
+   1. Phone A: sign up with that Gmail address and any password. Do not verify.
+   2. Phone B: sign in with Google using the same address.
+   3. In the Firebase console, open that user. Expected: the same uid, and the providers list shows only Google (the password was removed). Write down the result either way.
+   4. Phone A: pull to refresh, then try to sign in with the password. Expected: logged out, and the password no longer works.
+9. Firebase console: disable the test user. On a phone signed in as that user, sign out and in again. Expected: refused.
+10. On the Verify Email screen of a new unverified account, choose Delete account. Expected: the account is gone from the Firebase console and the app returns to sign-in.
+11. If every step matched, keep the flag on for the closed beta and set it on the hosted server too. Every running app is signed out once when the flag goes on: tell the testers.
+
+## 3. Key rotation and restriction
+
+### OpenAI key
+1. platform.openai.com, API keys: create a new secret key for "drinkme-server".
+2. Put it in `server/.env` as `OPENAI_API_KEY=<new key>` (and later in the host's variables). Never in the app's `.env`.
+3. Revoke the old key in the same page.
+4. Limits page: set a hard monthly budget (for example $20) and an email alert at 50%.
+5. AI stays off (`AI_ENABLED` unset) until the conditions in the run log under "T1-8 decisions" are met.
+
+### Google Maps key (`EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`)
+This key is inside the app bundle, so anyone can extract it. Restriction limits the damage.
+1. console.cloud.google.com, APIs and Services, Credentials, open the key.
+2. API restrictions: allow only "Places API" (and "Places API (New)" if the app uses it).
+3. Application restrictions: the app calls Places through plain HTTPS, not the Maps SDK, so an Android/iOS app restriction only works if each request sends `X-Android-Package` and `X-Android-Cert` (Android) or `X-Ios-Bundle-Identifier` (iOS). Ask the next run to add these headers after the first EAS build gives you the SHA-1, then turn on the restriction. The safer long-term fix is to call Places from the server.
+4. Quotas: cap Places requests per day (for example 1,000) so a leaked key cannot run up a bill.
+5. Billing: set a budget alert.
+
+### Firebase Authentication settings (from the forgot-password security review)
+Project drinkme-b2269, Firebase console. These are console settings, not code; the app's 60-second reset cooldown is only a convenience and stops nobody who calls Firebase directly.
+1. Authentication, Settings, User actions: confirm **Email enumeration protection** is on. Without it, the public web API key lets anyone check which emails have an account, whatever the app shows.
+2. Authentication, Settings, Password policy: require at least 8 characters with an uppercase letter, a digit and a special character, and choose **enforce** (not just notify). Firebase's hosted reset page otherwise accepts 6 characters. This may need the Identity Platform upgrade; write down if it does.
+3. Google Cloud console, Credentials, the Firebase web API key (`EXPO_PUBLIC_FIREBASE_API_KEY`): restrict it to the Identity Toolkit API and the Token Service API (add other Firebase APIs only if a later feature needs them).
+4. App Check (SEC-I): plan it **before the public launch**, not after. Scripted reset requests could otherwise use up the project's shared email quota.
+5. Accepted, no action: sign-up still says when an email is already in use (Firebase does not hide it).
+6. Open, needs your OK for a server change: a password reset does not end the 30-day server session. The fix is one Firebase call per sign-in (`tokensValidAfterTime`) and a session bump. Now more urgent, because a reset is what users do after a compromise. See 1a, step 23.
+
+### Other keys
+1. The Firebase web API key and Maps key appear in plain text in `D:\DrinkMeApp\CLAUDE.md`. Replace them with placeholders there.
+2. The app's root `.env` also defines `ANTHROPIC_API_KEY`. The app never uses it and it is not bundled (no `EXPO_PUBLIC_` prefix), but it does not belong there: move it out and rotate it if that file was ever shared.
+3. `JWT_SECRET`: generate a separate one for the hosted server (`node -e "console.log(require('crypto').randomBytes(64).toString('base64'))"`). Never reuse the local one.
+
+## 4. Real database, hosting and HTTPS
+
+1. Choose a host that builds the root `Dockerfile` (Railway or Render). HTTPS comes with the host's domain.
+2. Create a persistent volume and set `DB_FILE=/data/db/db.json` (its own folder on the volume).
+3. Set the variables: `NODE_ENV=production`, `JWT_SECRET`, `FIREBASE_SERVICE_ACCOUNT_KEY` (the whole JSON as one value), `CORS_ALLOWED_ORIGINS`, `ADMIN_USER_IDS=<your uid>`, `TRUST_PROXY_HOPS` (1 on most hosts: check with the host's docs), and `ALLOW_EMPTY_DB=true` for the very first start only. Leave `AI_ENABLED` and `REQUIRE_VERIFIED_EMAIL` unset until decided.
+4. Deploy, then open `https://<host>/healthz`. Expected: `{"status":"ok"}`.
+5. Remove `ALLOW_EMPTY_DB` and redeploy.
+6. Backups: schedule `npm run backup` once a day on the host (cron job or scheduled service) with `BACKUP_DIR` on a second volume or storage bucket. Check the next day that a file appeared under `daily/`. Set the host's own snapshot retention to 30 days or less. See `server/README.md`, "Backups"; after any restore, rotate `JWT_SECRET` as the runbook says.
+7. Set `EXPO_PUBLIC_API_URL=https://<host>` for the build profile in `eas.json`.
+8. Real database (DATA-1): before passing about 1,000 users, ask the next run to move from the JSON file to Postgres (Railway, Render or Supabase). Choose the provider and create the database; the code change is the run's job.
+
+## 5. Store accounts and policy checks
+
+1. Apple Developer Program ($99/year) and Google Play Console ($25 once), both under the same legal name as the privacy policy.
+2. **Apple guideline 4.8:** an iOS app with Google sign-in must also offer Sign in with Apple (or an equivalent). Enable Apple in Firebase once you have the account and ask the next run to finish it.
+3. Age rating: answer the questionnaires with "frequent alcohol references" (expect 17+ on iOS, Mature/18+ on Play). Set the Play target audience to 18+ only.
+4. Apple 1.2 (user-generated content): report, block, a way to contact you, and removal of offenders are all built. Put a support email in the store listing and in the app.
+5. Play "Alcohol" and Apple 1.4.3 rules: no encouraging excessive drinking, no sales. Check the store screenshots and description for this.
+6. Account deletion: in-app deletion is built; Play also needs a web page or email for deletion requests. Add the URL in the Data safety form.
+7. Privacy policy URL: host the privacy text (the in-app notice plus the backup and retention rules from `server/README.md`) on a public page.
+8. Fill in Apple privacy labels and the Play Data safety form: email, name, photos, user content, user id; used for app functionality; not sold; deletion available.
+9. First EAS build: `eas build --profile preview`; send the SHA-1 to the Maps key step above.
+
+## 6. Legal review
+
+1. Give a lawyer the in-app privacy notice (`src/context/LocalizationContext.tsx`, keys `onboarding.privacy*`, ro and en) and `server/README.md`, "Backups" and "Account deletion".
+2. Ask specifically about: GDPR basis and retention (30 days in backups), the 18+ self-declaration as age verification, alcohol advertising rules in Romania for user posts, Terms of Use (none exist yet), and data processors (Google/Firebase; OpenAI if AI is turned on).
+3. Ask for a Terms of Use text and a hosted privacy policy based on the notice.
+4. Register as a data controller where required, and keep a record of processing.

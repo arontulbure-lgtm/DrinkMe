@@ -1,12 +1,24 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer, DarkTheme, Theme } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, Theme, useNavigationContainerRef } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { LocalizationProvider } from './src/context/LocalizationContext';
+import ErrorBoundary from './src/components/ErrorBoundary';
+import { resetDrinkToggles } from './src/lib/drinkToggleChains';
+
+// Development only (device test sessions, docs/DEVICE_TEST_SESSION.md). __DEV__ is false in a release build,
+// so the bundler drops both requires and neither file is in it.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const devLogBridge: typeof import('./src/lib/devLogBridge') | null = __DEV__ ? require('./src/lib/devLogBridge') : null;
+const DevNoteButton: typeof import('./src/components/DevNoteButton').default | null = __DEV__
+  ? require('./src/components/DevNoteButton').default
+  : null;
+/* eslint-enable @typescript-eslint/no-require-imports */
+devLogBridge?.installDevLogBridge();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,17 +44,35 @@ const DrinkMeTheme: Theme = {
 };
 
 export default function App() {
+  const navigationRef = useNavigationContainerRef();
+  const reportScreen = devLogBridge
+    ? () => devLogBridge.setDevLogScreen(navigationRef.getCurrentRoute()?.name)
+    : undefined;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <LocalizationProvider>
-            <AuthProvider>
-              <NavigationContainer theme={DrinkMeTheme}>
-                <AppNavigator />
-                <StatusBar style="light" backgroundColor="#000000" />
-              </NavigationContainer>
-            </AuthProvider>
+            <ErrorBoundary
+              onReset={() => {
+                resetDrinkToggles();
+                queryClient.clear();
+              }}
+            >
+              <AuthProvider>
+                <NavigationContainer
+                  ref={navigationRef}
+                  theme={DrinkMeTheme}
+                  onReady={reportScreen}
+                  onStateChange={reportScreen}
+                >
+                  <AppNavigator />
+                  <StatusBar style="light" backgroundColor="#000000" />
+                </NavigationContainer>
+              </AuthProvider>
+            </ErrorBoundary>
+            {DevNoteButton && <DevNoteButton />}
           </LocalizationProvider>
         </QueryClientProvider>
       </SafeAreaProvider>

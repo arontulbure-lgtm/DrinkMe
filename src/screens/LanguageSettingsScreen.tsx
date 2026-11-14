@@ -7,12 +7,13 @@ import {
   SupportedLocale,
   useLocalization,
 } from '../context/LocalizationContext';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface Props {
-  navigation: {
-    goBack: () => void;
-  };
-}
+// Only show languages that have complete translations — hide stubs (es, zh, hi, ar, bn)
+const COMPLETE_LOCALES: SupportedLocale[] = ['en', 'ro'];
+const SHOWN_LOCALES = AVAILABLE_LOCALES.filter((l) => COMPLETE_LOCALES.includes(l.code));
+
+type Props = RootStackScreenProps<'LanguageSettings'>;
 
 export default function LanguageSettingsScreen({ navigation }: Props) {
   const { locale, setLocale, t } = useLocalization();
@@ -43,7 +44,13 @@ export default function LanguageSettingsScreen({ navigation }: Props) {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton} onPress={navigation.goBack}>
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={navigation.goBack}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+        >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('languageSettings.title')}</Text>
@@ -55,7 +62,7 @@ export default function LanguageSettingsScreen({ navigation }: Props) {
       </View>
 
       <FlatList
-        data={AVAILABLE_LOCALES}
+        data={SHOWN_LOCALES}
         keyExtractor={(item) => item.code}
         renderItem={renderItem}
         contentContainerStyle={styles.list}

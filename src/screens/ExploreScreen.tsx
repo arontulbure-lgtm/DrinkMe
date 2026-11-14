@@ -1,140 +1,162 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
-import { Drink, BaseUser } from '../types/api';
+import { flattenPages, getNextCursor } from '../lib/drinkCache';
+import { getPartnerLabelKey, usePartnerAction } from '../lib/usePartnerAction';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
+import {
+  ALCOHOLIC_DRINK_CATEGORIES,
+  BaseUser,
+  Drink,
+  DrinkCategory,
+  NON_ALCOHOLIC_DRINK_CATEGORIES,
+  Page,
+} from '../types/api';
 import DrinkPostCard from '../components/DrinkPostCard';
+import CommentDrawer from '../components/CommentDrawer';
+import PostActionsSheet from '../components/PostActionsSheet';
+import ListLoadState from '../components/ListLoadState';
+import LoadMoreButton from '../components/LoadMoreButton';
+import OfficialBadge from '../components/OfficialBadge';
 import { useLocalization } from '../context/LocalizationContext';
+import { TabScreenProps } from '../navigation/types';
 
-export default function ExploreScreen({ navigation }: any) {
+const TRENDING_LIMIT = 6;
+const SEARCH_MIN_LENGTH = 2;
+
+// 'all' and 'non-alcoholic' as before; every other chip is a post category the server filters on.
+type ExploreFilterId = 'all' | 'non-alcoholic' | DrinkCategory;
+
+export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>) {
   const [searchQuery, setSearchQuery] = useState('');
-  const { serverUserId, getJwtToken } = useAuth();
-  const queryClient = useQueryClient();
+  const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
+  const { serverUserId, profile } = useAuth();
   const { t } = useLocalization();
+  const isAgeConfirmed = profile?.ageConfirmed === true;
 
   const filters = useMemo(
-    () => [
+    (): { id: ExploreFilterId; label: string }[] => [
       { id: 'all', label: t('explore.filters.all') },
-      { id: 'cocktail', label: t('explore.filters.cocktail') },
-      { id: 'wine', label: t('explore.filters.wine') },
-      { id: 'beer', label: t('explore.filters.beer') },
+      ...(isAgeConfirmed
+        ? ALCOHOLIC_DRINK_CATEGORIES.map((id) => ({ id, label: t(`categories.${id}`) }))
+        : []),
       { id: 'non-alcoholic', label: t('explore.filters.nonAlcoholic') },
+      ...NON_ALCOHOLIC_DRINK_CATEGORIES.map((id) => ({ id, label: t(`categories.${id}`) })),
     ],
-    [t]
+    [isAgeConfirmed, t]
   );
 
-  const [activeFilter, setActiveFilter] = useState('all');
-  const hasSearchTerm = searchQuery.trim().length > 2;
+  const [activeFilter, setActiveFilter] = useState<ExploreFilterId>('all');
 
-  const { data: drinks = [] } = useQuery<Drink[]>({
-    queryKey: ['drinks.all'],
+  // Debounce search query by 300ms to avoid firing on every keystroke
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300);
+    return () => { if (debounceTimer.current) clearTimeout(debounceTimer.current); };
+  }, [searchQuery]);
+
+  const rawQuery = debouncedQuery;
+  const isUserQuery = rawQuery.startsWith('@');
+  const userQuery = isUserQuery ? rawQuery.replace(/^@+/, '').trim() : '';
+  const hasSearchTerm = rawQuery.length > 0;
+  // Lowercase, so "Gin" and "gin" share one cached result: the server matches either way.
+  const drinkSearchTerm = rawQuery.toLowerCase();
+  const isDrinkSearch = !isUserQuery && rawQuery.length >= SEARCH_MIN_LENGTH;
+
+  // The server filters before paging, so a match on a later page is found. Each chip has its own cache.
+  // Posts without a category (tags: []) show only under All, and Non-alcoholic when isAlcoholic is false.
+  const isNonAlcoholicFilter = activeFilter === 'non-alcoholic';
+  const categoryFilter: DrinkCategory | undefined =
+    activeFilter === 'all' || activeFilter === 'non-alcoholic' ? undefined : activeFilter;
+  const {
+    data: discoverPages,
+    refetch: refetchDiscover,
+    isError: isDiscoverError,
+    isFetching: isDiscoverFetching,
+    hasNextPage: hasMoreDiscover,
+    fetchNextPage: fetchMoreDiscover,
+    isFetchingNextPage: isFetchingMoreDiscover,
+  } = useInfiniteQuery({
+    queryKey: ['drinks.all', activeFilter],
     enabled: !!serverUserId,
-    queryFn: () => apiFetch<Drink[]>('/api/drinks'),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Drink>>('/api/drinks', {
+        query: {
+          scope: 'discover',
+          alcoholic: isNonAlcoholicFilter ? 'false' : undefined,
+          category: categoryFilter,
+          before: pageParam,
+        },
+      }),
+    getNextPageParam: getNextCursor,
   });
 
-  const { data: partnerDrinks = [] } = useQuery<Drink[]>({
-    queryKey: ['drinks.partners'],
+  const { data: trendingPage } = useQuery<Page<Drink>>({
+    queryKey: ['drinks.trending'],
     enabled: !!serverUserId,
-    queryFn: () => apiFetch<Drink[]>('/api/drinks/partners'),
+    queryFn: () =>
+      apiFetch<Page<Drink>>('/api/drinks', { query: { scope: 'discover', sort: 'trending', limit: TRENDING_LIMIT } }),
   });
 
   const { data: users = [] } = useQuery<BaseUser[]>({
-    queryKey: ['users.search', searchQuery],
-    enabled: !!serverUserId && hasSearchTerm,
-    queryFn: () => apiFetch<BaseUser[]>('/api/users/search', { query: { q: searchQuery } }),
+    queryKey: ['users.search', userQuery],
+    enabled: !!serverUserId && isUserQuery && userQuery.length >= 2,
+    queryFn: () => apiFetch<BaseUser[]>('/api/users/search', { query: { q: userQuery } }),
   });
 
-  const partnerIds = useMemo(() => new Set(partnerDrinks.map((drink) => drink.id)), [partnerDrinks]);
+  const {
+    data: searchPages,
+    refetch: refetchSearch,
+    isError: isSearchError,
+    isFetching: isSearchFetching,
+    hasNextPage: hasMoreSearch,
+    fetchNextPage: fetchMoreSearch,
+    isFetchingNextPage: isFetchingMoreSearch,
+  } = useInfiniteQuery({
+    queryKey: ['drinks.search', drinkSearchTerm],
+    enabled: !!serverUserId && isDrinkSearch,
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) => apiFetch<Page<Drink>>('/api/drinks', { query: { q: drinkSearchTerm, before: pageParam } }),
+    getNextPageParam: getNextCursor,
+  });
+
+  const applyLocalUser = useCallback(
+    (drink: Drink) => {
+      if (profile && serverUserId && drink.userId === serverUserId) {
+        return { ...drink, user: profile };
+      }
+      return drink;
+    },
+    [profile, serverUserId]
+  );
+
   const discoveryDrinks = useMemo(
-    () => drinks.filter((drink) => !partnerIds.has(drink.id)),
-    [drinks, partnerIds]
+    () => flattenPages(discoverPages).map(applyLocalUser),
+    [discoverPages, applyLocalUser]
   );
 
-  const matchesFilter = (drink: Drink, filter: string) => {
-    if (filter === 'all') return true;
-    const tags = drink.tags || [];
-    if (filter === 'non-alcoholic') {
-      return tags.includes('mocktail') || tags.includes('non-alcoholic') || drink.isAlcoholic === false;
-    }
-    return tags.includes(filter);
-  };
+  const matchingDrinks = useMemo(() => {
+    if (!isDrinkSearch) return [] as Drink[];
+    return flattenPages(searchPages).map(applyLocalUser);
+  }, [applyLocalUser, searchPages, isDrinkSearch]);
 
-  const filteredDrinks = useMemo(
-    () => discoveryDrinks.filter((drink) => matchesFilter(drink, activeFilter)),
-    [discoveryDrinks, activeFilter]
-  );
+  const trendingDrinks = trendingPage?.items ?? [];
 
-  const searchDrinks = useMemo(() => {
-    if (!hasSearchTerm) return [] as Drink[];
-    const query = searchQuery.trim().toLowerCase();
-    return discoveryDrinks.filter(
-      (drink) =>
-        drink.name.toLowerCase().includes(query) ||
-        (drink.description || '').toLowerCase().includes(query) ||
-        (drink.location || '').toLowerCase().includes(query)
-    );
-  }, [discoveryDrinks, hasSearchTerm, searchQuery]);
+  const shouldShowUserResults = isUserQuery && userQuery.length >= 2;
+  const shouldShowUserMinChars = hasSearchTerm && (isUserQuery ? userQuery.length < 2 : !isDrinkSearch);
+  const shouldShowDrinkResults = isDrinkSearch;
 
-  const trendingDrinks = useMemo(
-    () => [...discoveryDrinks].sort((a, b) => (b.cheersCount || 0) - (a.cheersCount || 0)).slice(0, 6),
-    [discoveryDrinks]
-  );
+  const { toggleCheer, toggleSave } = useDrinkToggles();
 
-  const cheerMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ cheered: boolean; cheersCount: number }>(`/api/drinks/${drinkId}/like`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-    },
-    onError: () => Alert.alert(t('errors.cheerFailed')),
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async (drinkId: number) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks', serverUserId] });
-    },
-    onError: () => Alert.alert(t('errors.partnerFailed')),
-  });
-
-  const partnerMutation = useMutation({
-    mutationFn: async (targetUserId: string) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ isPartner: boolean }>(`/api/drink-partners/${targetUserId}`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users.search', searchQuery] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-      queryClient.invalidateQueries({ queryKey: ['friends.count'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-    onError: () => Alert.alert(t('errors.saveFailed')),
-  });
+  const { pressPartner, pendingTargetId } = usePartnerAction();
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
@@ -154,7 +176,12 @@ export default function ExploreScreen({ navigation }: any) {
             autoCorrect={false}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={13}
+              accessibilityRole="button"
+              accessibilityLabel={t('explore.clearSearch')}
+            >
               <Ionicons name="close-circle" size={18} color="#6B7280" />
             </TouchableOpacity>
           )}
@@ -162,6 +189,19 @@ export default function ExploreScreen({ navigation }: any) {
       </View>
 
       <ScrollView style={styles.content}>
+        {!hasSearchTerm && (
+          <View style={styles.searchHints}>
+            <Text style={styles.searchHint}>{t('explore.tipUsers')}</Text>
+            <Text style={[styles.searchHint, styles.searchHintLast]}>{t('explore.tipPlaces')}</Text>
+          </View>
+        )}
+
+        {shouldShowUserMinChars && (
+          <View style={styles.searchHints}>
+            <Text style={[styles.searchHint, styles.searchHintLast]}>{t('explore.searchMinChars')}</Text>
+          </View>
+        )}
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filters}>
           {filters.map((filter) => {
             const isActive = filter.id === activeFilter;
@@ -170,6 +210,9 @@ export default function ExploreScreen({ navigation }: any) {
                 key={filter.id}
                 style={[styles.filterChip, isActive && styles.filterChipActive]}
                 onPress={() => setActiveFilter(filter.id)}
+                accessibilityRole="button"
+                accessibilityLabel={filter.label}
+                accessibilityState={{ selected: isActive }}
               >
                 <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
                   {filter.label}
@@ -179,79 +222,120 @@ export default function ExploreScreen({ navigation }: any) {
           })}
         </ScrollView>
 
-        {hasSearchTerm ? (
+        {shouldShowUserResults ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="people-outline" size={18} color="#8B5FBF" />
               <Text style={styles.sectionTitle}>{t('explore.sections.users')}</Text>
             </View>
-            {users.map((result) => {
-              const isSelf = result.id === serverUserId;
-              return (
-              <View key={result.id} style={styles.userResult}>
-                <TouchableOpacity
-                  style={styles.userInfoContainer}
-                  onPress={() => navigation.navigate('Profile', { userId: result.id })}
-                >
-                  <View style={styles.userAvatar}>
-                    <Text style={styles.userAvatarText}>
-                      {(result.firstName || result.email)[0]?.toUpperCase() || '?'}
-                    </Text>
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>
-                      {result.firstName ? `${result.firstName} ${result.lastName || ''}` : result.email}
-                    </Text>
-                    {result.city && <Text style={styles.userCity}>{result.city}</Text>}
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.partnerButton,
-                    result.isPartner && styles.partnerButtonActive,
-                    isSelf && styles.partnerButtonDisabled,
-                  ]}
-                  onPress={() => partnerMutation.mutate(result.id)}
-                  disabled={isSelf}
-                >
-                  <Text style={[styles.partnerButtonText, result.isPartner && styles.partnerButtonTextActive]}>
-                    {isSelf
-                      ? t('common.you')
-                      : result.isPartner
-                      ? t('profile.drinkPartners')
-                      : t('common.addPartner')}
-                  </Text>
-                </TouchableOpacity>
+            {users.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={40} color="#6B7280" />
+                <Text style={styles.emptyTitle}>{t('explore.sections.noUsersTitle')}</Text>
+                <Text style={styles.emptySubtitle}>{t('explore.sections.noUsersSubtitle')}</Text>
               </View>
-            );
-            })}
-
+            ) : (
+              users.map((result) => {
+                const isSelf = result.id === serverUserId;
+                const partnerStatus = result.partnerStatus ?? 'none';
+                const isPartnerFilled = partnerStatus === 'partner' || partnerStatus === 'incoming';
+                const displayName = result.firstName
+                  ? `${result.firstName} ${result.lastName || ''}`.trim()
+                  : t('common.unknownUser');
+                return (
+                  <View key={result.id} style={styles.userResult}>
+                    <TouchableOpacity
+                      style={styles.userInfoContainer}
+                      onPress={() =>
+                        isSelf
+                          ? navigation.navigate('Profile')
+                          : navigation.navigate('UserProfile', { userId: result.id })
+                      }
+                    >
+                      <View style={styles.userAvatar}>
+                        <Text style={styles.userAvatarText}>
+                          {displayName[0]?.toUpperCase() || '?'}
+                        </Text>
+                      </View>
+                      <View style={styles.userInfo}>
+                        <View style={styles.officialNameRow}>
+                          <Text style={[styles.userName, styles.officialNameShrink]} numberOfLines={1}>{displayName}</Text>
+                          <OfficialBadge official={result.official} />
+                        </View>
+                        {result.city ? <Text style={styles.userCity} numberOfLines={1}>{result.city}</Text> : null}
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.partnerButton,
+                        isPartnerFilled && styles.partnerButtonActive,
+                        partnerStatus === 'requested' && styles.partnerButtonRequested,
+                        isSelf && styles.partnerButtonDisabled,
+                      ]}
+                      onPress={() => pressPartner(result.id, partnerStatus)}
+                      disabled={isSelf || pendingTargetId === result.id}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={isSelf ? t('common.you') : t(getPartnerLabelKey(partnerStatus))}
+                    >
+                      <Text
+                        style={[
+                          styles.partnerButtonText,
+                          isPartnerFilled && styles.partnerButtonTextActive,
+                          partnerStatus === 'requested' && styles.partnerButtonTextRequested,
+                        ]}
+                      >
+                        {isSelf ? t('common.you') : t(getPartnerLabelKey(partnerStatus))}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        ) : shouldShowDrinkResults ? (
+          <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Ionicons name="search-outline" size={18} color="#8B5FBF" />
               <Text style={styles.sectionTitle}>
-                {t('explore.sections.searchResults', { query: searchQuery.trim() })}
+                {t('explore.sections.searchResults', { query: rawQuery })}
               </Text>
             </View>
-            {searchDrinks.length === 0 ? (
+            {searchPages === undefined ? (
+              <ListLoadState
+                isError={isSearchError}
+                isFetching={isSearchFetching}
+                message={t('explore.loadError')}
+                onRetry={() => refetchSearch()}
+              />
+            ) : matchingDrinks.length === 0 ? (
               <View style={styles.emptyState}>
                 <Ionicons name="wine-outline" size={48} color="#6B7280" />
                 <Text style={styles.emptyTitle}>{t('explore.sections.noDrinksTitle')}</Text>
                 <Text style={styles.emptySubtitle}>{t('explore.sections.noDrinksSubtitle')}</Text>
               </View>
             ) : (
-              searchDrinks.map((drink) => (
+              matchingDrinks.map((drink) => (
                 <DrinkPostCard
                   key={drink.id}
                   drink={drink}
-                  onCheer={() => cheerMutation.mutate(drink.id)}
-                  onComment={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
-                  onSave={() => saveMutation.mutate(drink.id)}
+                  onCheer={() => toggleCheer(drink)}
+                  onComment={() => setCommentDrinkId(drink.id)}
+                  onSave={() => toggleSave(drink)}
+                  onMore={() => setActionsDrink(drink)}
+                  onPress={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
+                  onPressAuthor={() =>
+                    drink.userId === serverUserId
+                      ? navigation.navigate('Profile')
+                      : navigation.navigate('UserProfile', { userId: drink.userId })
+                  }
                 />
               ))
             )}
+            {hasMoreSearch && <LoadMoreButton onPress={() => fetchMoreSearch()} isLoading={isFetchingMoreSearch} />}
           </View>
         ) : (
           <>
@@ -307,22 +391,49 @@ export default function ExploreScreen({ navigation }: any) {
                 <Ionicons name="menu" size={18} color="#8B5FBF" />
                 <Text style={styles.sectionTitle}>{t('explore.sections.discover')}</Text>
               </View>
-              {filteredDrinks.map((drink) => (
+              {discoverPages === undefined ? (
+                <ListLoadState
+                  isError={isDiscoverError}
+                  isFetching={isDiscoverFetching}
+                  message={t('explore.loadError')}
+                  onRetry={() => refetchDiscover()}
+                />
+              ) : discoveryDrinks.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="wine-outline" size={48} color="#6B7280" />
+                  <Text style={styles.emptyTitle}>{t('explore.sections.noDrinksTitle')}</Text>
+                  <Text style={styles.emptySubtitle}>{t('explore.sections.noDrinksSubtitle')}</Text>
+                </View>
+              ) : null}
+              {discoveryDrinks.map((drink) => (
                 <DrinkPostCard
                   key={drink.id}
                   drink={drink}
-                  onCheer={() => cheerMutation.mutate(drink.id)}
-                  onComment={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
-                  onSave={() => saveMutation.mutate(drink.id)}
+                  onCheer={() => toggleCheer(drink)}
+                  onComment={() => setCommentDrinkId(drink.id)}
+                  onSave={() => toggleSave(drink)}
+                  onMore={() => setActionsDrink(drink)}
+                  onPress={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
+                  onPressAuthor={() =>
+                    drink.userId === serverUserId
+                      ? navigation.navigate('Profile')
+                      : navigation.navigate('UserProfile', { userId: drink.userId })
+                  }
                 />
               ))}
+              {hasMoreDiscover && (
+                <LoadMoreButton onPress={() => fetchMoreDiscover()} isLoading={isFetchingMoreDiscover} />
+              )}
             </View>
           </>
         )}
       </ScrollView>
+
+      <CommentDrawer drinkId={commentDrinkId} onClose={() => setCommentDrinkId(null)} />
+      <PostActionsSheet drink={actionsDrink} onClose={() => setActionsDrink(null)} />
     </SafeAreaView>
   );
 }
@@ -364,6 +475,17 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  searchHints: {
+    marginBottom: 12,
+  },
+  searchHint: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  searchHintLast: {
+    marginBottom: 0,
   },
   filters: {
     paddingTop: 8,
@@ -465,6 +587,12 @@ const styles = StyleSheet.create({
   partnerButtonTextActive: {
     color: '#FFFFFF',
   },
+  partnerButtonRequested: {
+    borderColor: '#374151',
+  },
+  partnerButtonTextRequested: {
+    color: '#9CA3AF',
+  },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 48,
@@ -524,5 +652,12 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontSize: 13,
     lineHeight: 18,
+  },
+  officialNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  officialNameShrink: {
+    flexShrink: 1,
   },
 });

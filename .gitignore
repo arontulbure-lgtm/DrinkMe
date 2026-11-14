@@ -8,3 +8,33 @@ ios
 dist
 build
 .DS_Store
+
+# Sensitive and local files
+.env
+server/.env
+server/serviceAccount.json
+server/data/
+node_modules/
+dist/
+.expo/
+.expo-shared/
+coverage/
+*.log
+
+*firebase-adminsdk*.json
+**/serviceAccount*.json
+server/backups/
+.claude/worktrees/
+
+# Device test sessions (npm run test:ios): server, Metro and app logs
+logs/
+# Triage reports quote tester notes and error text: kept local, like the logs
+reports/test-sessions/
+
+# Firebase web config downloaded for npm run firebase:configure (kept out of git like the keys)
+firebase-web-config*.json
+
+# Secrets: every .env variant, and old keys parked outside git (D:\DrinkMeApp\_old_secrets is outside the repo; this covers a copy inside it)
+.env*
+!.env.example
+_old_secrets/

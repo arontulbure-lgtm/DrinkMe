@@ -1,19 +1,19 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Recipe } from '../types/api';
+import { RootStackScreenProps } from '../navigation/types';
+import { useLocalization } from '../context/LocalizationContext';
 
-interface Props {
-  route: { params: { product: string; recipes: Recipe[] } };
-  navigation: { goBack: () => void };
-}
+type Props = RootStackScreenProps<'RecipeResults'>;
 
+// Translation keys for the difficulty chip (recipeResults.difficulty.*).
 const difficultyLabels: Record<Recipe['difficulty'], string> = {
-  easy: 'Ușor',
-  medium: 'Medie',
-  hard: 'Dificil',
-  mocktail: 'Mocktail',
+  easy: 'recipeResults.difficulty.easy',
+  medium: 'recipeResults.difficulty.medium',
+  hard: 'recipeResults.difficulty.hard',
+  mocktail: 'recipeResults.difficulty.mocktail',
 };
 
 const difficultyColors: Record<Recipe['difficulty'], string> = {
@@ -24,13 +24,21 @@ const difficultyColors: Record<Recipe['difficulty'], string> = {
 };
 
 export default function RecipeResultsScreen({ route, navigation }: Props) {
+  const { t } = useLocalization();
   const { product, recipes } = route.params;
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <Ionicons name="close" size={22} color="#FFFFFF" onPress={navigation.goBack} />
-        <Text style={styles.headerTitle}>Rețete pentru {product}</Text>
+        <TouchableOpacity
+          onPress={navigation.goBack}
+          hitSlop={11}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.close')}
+        >
+          <Ionicons name="close" size={22} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{t('recipeResults.title', { product })}</Text>
         <View style={{ width: 22 }} />
       </View>
 
@@ -42,14 +50,14 @@ export default function RecipeResultsScreen({ route, navigation }: Props) {
               <View
                 style={[styles.difficultyChip, { backgroundColor: difficultyColors[recipe.difficulty] }]}
               >
-                <Text style={styles.difficultyText}>{difficultyLabels[recipe.difficulty]}</Text>
+                <Text style={styles.difficultyText}>{t(difficultyLabels[recipe.difficulty])}</Text>
               </View>
             </View>
 
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Ionicons name="list" size={16} color="#8B5FBF" />
-                <Text style={styles.sectionTitle}>Ingrediente</Text>
+                <Text style={styles.sectionTitle}>{t('recipeResults.ingredients')}</Text>
               </View>
               {recipe.ingredients.map((ingredient) => (
                 <Text key={ingredient.name} style={styles.ingredientText}>
@@ -61,7 +69,7 @@ export default function RecipeResultsScreen({ route, navigation }: Props) {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Ionicons name="construct" size={16} color="#8B5FBF" />
-                <Text style={styles.sectionTitle}>Instrucțiuni</Text>
+                <Text style={styles.sectionTitle}>{t('recipeResults.instructions')}</Text>
               </View>
               <Text style={styles.instructionsText}>{recipe.instructions}</Text>
             </View>
@@ -70,7 +78,7 @@ export default function RecipeResultsScreen({ route, navigation }: Props) {
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Ionicons name="leaf" size={16} color="#8B5FBF" />
-                  <Text style={styles.sectionTitle}>Garnish</Text>
+                  <Text style={styles.sectionTitle}>{t('recipeResults.garnish')}</Text>
                 </View>
                 <Text style={styles.instructionsText}>{recipe.garnish}</Text>
               </View>

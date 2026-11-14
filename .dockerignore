@@ -1,0 +1,10 @@
+# Allowlist: nothing enters the build context unless named here, so secrets
+# (.env, server/.env, serviceAccount.json), server/data and the client stay out.
+# A new server source file must be added here and in the Dockerfile.
+*
+!server/
+server/*
+!server/package.json
+!server/package-lock.json
+!server/server.js
+!server/scripts/

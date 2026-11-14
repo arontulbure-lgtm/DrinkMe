@@ -2,17 +2,20 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Story } from '../types/api';
+import { useLocalization } from '../context/LocalizationContext';
 
 interface StoriesSectionProps {
   stories: Story[];
+  isLoading?: boolean;
 }
 
-export default function StoriesSection({ stories }: StoriesSectionProps) {
+export default function StoriesSection({ stories, isLoading = false }: StoriesSectionProps) {
+  const { t } = useLocalization();
+
   const getDisplayName = (user?: Story['user']) => {
-    if (!user) return 'Unknown';
-    return user.firstName 
+    return user?.firstName
       ? `${user.firstName} ${user.lastName || ''}`
-      : user.email?.split('@')[0] || 'User';
+      : t('common.unknownUser');
   };
 
   const isRecentStory = (createdAt: string) => {
@@ -22,32 +25,44 @@ export default function StoriesSection({ stories }: StoriesSectionProps) {
     return hoursDiff <= 24; // Stories are visible for 24 hours
   };
 
-  const activeStories = stories.filter(story => isRecentStory(story.createdAt));
+  const activeStories = stories.filter((story) => isRecentStory(story.createdAt));
 
-  if (activeStories.length === 0) {
+  if (!isLoading && activeStories.length === 0) {
     return null;
   }
 
+  const displayedStories: (Story | null)[] = isLoading
+    ? Array.from({ length: 4 }, () => null)
+    : activeStories;
+
   return (
     <View style={styles.container}>
-      <Text style={styles.sectionTitle}>Stories</Text>
+      <Text style={styles.sectionTitle}>{t('stories.title')}</Text>
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
         style={styles.storiesContainer}
         contentContainerStyle={styles.storiesContent}
       >
-        {activeStories.map((story) => (
-          <TouchableOpacity key={story.id} style={styles.storyItem}>
+        {displayedStories.map((story, index) => (
+          <TouchableOpacity
+            key={story ? story.id : `story-skeleton-${index}`}
+            style={styles.storyItem}
+            disabled={!story}
+          >
             <View style={styles.storyRing}>
               <View style={styles.storyAvatar}>
-                <Text style={styles.storyAvatarText}>
-                  {getDisplayName(story.user)[0]?.toUpperCase() || '?'}
-                </Text>
+                {story ? (
+                  <Text style={styles.storyAvatarText}>
+                    {getDisplayName(story.user)[0]?.toUpperCase() || '?'}
+                  </Text>
+                ) : (
+                  <Text style={styles.storyAvatarText}>?</Text>
+                )}
               </View>
             </View>
             <Text style={styles.storyUsername} numberOfLines={1}>
-              {getDisplayName(story.user)}
+              {story ? getDisplayName(story.user) : t('stories.loading')}
             </Text>
           </TouchableOpacity>
         ))}
@@ -59,7 +74,7 @@ export default function StoriesSection({ stories }: StoriesSectionProps) {
               <Ionicons name="add" size={24} color="#FFFFFF" />
             </View>
           </View>
-          <Text style={styles.addStoryText}>Your Story</Text>
+          <Text style={styles.addStoryText}>{t('stories.yourStory')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

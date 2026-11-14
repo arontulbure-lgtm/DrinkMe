@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { Alert, View, ActivityIndicator } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { useLocalization } from '../context/LocalizationContext';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
-import { Recipe } from '../types/api';
+import { RootStackParamList, TabParamList } from './types';
 
 // Import screens
 import AuthScreen from '../screens/AuthScreen';
@@ -17,29 +19,18 @@ import DrinkDetailScreen from '../screens/DrinkDetailScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import RecipeResultsScreen from '../screens/RecipeResultsScreen';
 import LanguageSettingsScreen from '../screens/LanguageSettingsScreen';
-
-type TabParamList = {
-  Home: undefined;
-  Explore: undefined;
-  Scanner: undefined;
-  SmartBar: undefined;
-  Profile: undefined;
-};
-
-type RootStackParamList = {
-  Auth: undefined;
-  Main: undefined;
-  CreatePost: undefined;
-  DrinkDetail: { drinkId: number };
-  EditProfile: undefined;
-  RecipeResults: { product: string; recipes: Recipe[] };
-  LanguageSettings: undefined;
-};
+import PartnersListScreen from '../screens/PartnersListScreen';
+import SessionErrorScreen from '../screens/SessionErrorScreen';
+import VerifyEmailScreen from '../screens/VerifyEmailScreen';
+import AgeGateScreen from '../screens/AgeGateScreen';
+import OnboardingScreen, { PRIVACY_NOTICE_VERSION } from '../screens/OnboardingScreen';
+import BlockedUsersScreen from '../screens/BlockedUsersScreen';
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
 function TabNavigator() {
+  const { t } = useLocalization();
   return (
     <Tab.Navigator
       id={undefined}
@@ -76,26 +67,72 @@ function TabNavigator() {
         headerTintColor: '#FFFFFF',
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Explore" component={ExploreScreen} />
-      <Tab.Screen name="Scanner" component={ScannerScreen} />
-      <Tab.Screen name="SmartBar" component={SmartBarScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Home" component={HomeScreen} options={{ title: t('tabs.home') }} />
+      <Tab.Screen name="Explore" component={ExploreScreen} options={{ title: t('tabs.explore') }} />
+      <Tab.Screen name="Scanner" component={ScannerScreen} options={{ title: t('tabs.scanner') }} />
+      <Tab.Screen name="SmartBar" component={SmartBarScreen} options={{ title: t('tabs.smartBar') }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t('tabs.profile') }} />
     </Tab.Navigator>
   );
 }
 
 export function AppNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, sessionStatus, profile, serverUserId, accountDeletedNotice, clearAccountDeletedNotice, signInAgainNotice, clearSignInAgainNotice } = useAuth();
+  const { t } = useLocalization();
+  // Only for this session: "Later" on the name prompt is not stored. The age gate and the notice have no
+  // such way out.
+  const [skippedNameUid, setSkippedNameUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) setSkippedNameUid(null);
+  }, [isAuthenticated]);
+
+  // Without this, signing in to a deleted account would just return to the sign-in screen with no reason.
+  useEffect(() => {
+    if (!accountDeletedNotice) return;
+    clearAccountDeletedNotice();
+    Alert.alert(t('deleteAccount.action'), t('deleteAccount.done'));
+  }, [accountDeletedNotice, clearAccountDeletedNotice, t]);
+
+  useEffect(() => {
+    if (!signInAgainNotice) return;
+    clearSignInAgainNotice();
+    Alert.alert(t('verifyEmail.signInAgain'));
+  }, [signInAgainNotice, clearSignInAgainNotice, t]);
 
   if (isLoading) {
-    return null; // You can add a loading screen here
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#8B5FBF" />
+      </View>
+    );
+  }
+
+  // profile is set only once the session is ready, so an unknown answer never shows the gate.
+  // A hard gate: the server refuses everything but the first-run routes before the 18+ confirmation, so
+  // neither the tabs nor the stack are mounted until then. Leaving means logging out or deleting the account.
+  if (isAuthenticated && sessionStatus === 'ready' && profile && profile.ageConfirmed !== true) {
+    return <AgeGateScreen />;
+  }
+
+  // After the age gate.
+  if (
+    isAuthenticated &&
+    sessionStatus === 'ready' &&
+    profile &&
+    ((profile.privacyNoticeVersion ?? 0) < PRIVACY_NOTICE_VERSION || (profile.needsName === true && skippedNameUid !== serverUserId))
+  ) {
+    return <OnboardingScreen onLater={() => setSkippedNameUid(serverUserId)} />;
   }
 
   return (
     <Stack.Navigator id={undefined} screenOptions={{ headerShown: false }}>
       {!isAuthenticated ? (
         <Stack.Screen name="Auth" component={AuthScreen} />
+      ) : sessionStatus === 'error' ? (
+        <Stack.Screen name="SessionError" component={SessionErrorScreen} />
+      ) : sessionStatus === 'verification_required' ? (
+        <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
       ) : (
         <>
           <Stack.Screen name="Main" component={TabNavigator} />
@@ -103,11 +140,7 @@ export function AppNavigator() {
             name="CreatePost"
             component={CreatePostScreen}
             options={{
-              presentation: 'modal',
-              headerShown: true,
-              headerStyle: { backgroundColor: '#000000' },
-              headerTintColor: '#FFFFFF',
-              title: 'Creează postare',
+              headerShown: false,
             }}
           />
           <Stack.Screen
@@ -129,6 +162,21 @@ export function AppNavigator() {
             name="LanguageSettings"
             component={LanguageSettingsScreen}
             options={{ headerShown: false, presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="PartnersList"
+            component={PartnersListScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="UserProfile"
+            component={ProfileScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="BlockedUsers"
+            component={BlockedUsersScreen}
+            options={{ headerShown: false }}
           />
         </>
       )}

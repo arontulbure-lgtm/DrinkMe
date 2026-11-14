@@ -1,8 +1,13 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { Drink } from '../types/api';
+
 import { useLocalization } from '../context/LocalizationContext';
+import { formatTimeAgo } from '../lib/formatTimeAgo';
+import ModerationNotice from './ModerationNotice';
+import OfficialBadge from './OfficialBadge';
+import MediaImage from './MediaImage';
 
 interface DrinkPostCardProps {
   drink: Drink;
@@ -12,6 +17,9 @@ interface DrinkPostCardProps {
   isLiked?: boolean;
   isSaved?: boolean;
   cheersCount?: number;
+  onPressAuthor?: () => void;
+  onMore?: () => void;
+  onPress?: () => void;
 }
 
 export default function DrinkPostCard({
@@ -19,6 +27,9 @@ export default function DrinkPostCard({
   onCheer,
   onComment,
   onSave,
+  onPressAuthor,
+  onMore,
+  onPress,
   isLiked = false,
   isSaved = false,
   cheersCount = 0,
@@ -26,18 +37,7 @@ export default function DrinkPostCard({
   const { t } = useLocalization();
   const displayName = drink.user?.firstName
     ? `${drink.user.firstName} ${drink.user.lastName || ''}`
-    : drink.user?.email?.split('@')[0] || 'Unknown User';
-
-  const formatTimeAgo = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-    return `${Math.floor(diffInMinutes / 1440)}d ago`;
-  };
+    : t('common.unknownUser');
 
   const renderStars = (rating: number) => (
     <View style={styles.starsContainer}>
@@ -55,26 +55,62 @@ export default function DrinkPostCard({
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <View style={styles.userInfo}>
+        <TouchableOpacity
+          style={styles.userInfo}
+          activeOpacity={onPressAuthor ? 0.8 : 1}
+          onPress={onPressAuthor}
+          disabled={!onPressAuthor}
+        >
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
+            {drink.user?.avatar ? (
+              <MediaImage uri={drink.user.avatar} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
+            )}
           </View>
           <View style={styles.userDetails}>
-            <Text style={styles.username}>{displayName}</Text>
-            <Text style={styles.timestamp}>{formatTimeAgo(drink.createdAt)}</Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.username, styles.usernameShrink]} numberOfLines={1}>{displayName}</Text>
+              <OfficialBadge official={drink.user?.official} />
+            </View>
+            <Text style={styles.timestamp}>
+              {formatTimeAgo(drink.createdAt, t)}
+              {drink.editedAt ? ` · ${t('post.edited')}` : ''}
+            </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         {drink.location && (
           <View style={styles.locationContainer}>
             <Ionicons name="location-outline" size={16} color="#9CA3AF" />
-            <Text style={styles.location}>{drink.location}</Text>
+            <Text style={styles.location} numberOfLines={1}>{drink.location}</Text>
           </View>
+        )}
+        {onMore && (
+          <TouchableOpacity
+            style={styles.moreButton}
+            onPress={onMore}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={t('post.actions')}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
         )}
       </View>
 
-      <View style={styles.content}>
+      {/* The server sends this flag only to the owner and admins of a post hidden after reports. */}
+      {drink.hiddenPendingReview && <ModerationNotice messageKey="moderation.hiddenPost" style={styles.hiddenNotice} />}
+
+      <TouchableOpacity
+        style={styles.content}
+        activeOpacity={onPress ? 0.8 : 1}
+        onPress={onPress}
+        disabled={!onPress}
+        accessibilityRole="button"
+        accessibilityLabel={t('post.open', { name: drink.name })}
+      >
         {drink.imageUrl ? (
-          <Image source={{ uri: drink.imageUrl }} style={styles.image} />
+          <MediaImage uri={drink.imageUrl} style={styles.image} />
         ) : null}
         <Text style={styles.drinkName}>{drink.name}</Text>
         <View style={styles.ratingContainer}>
@@ -82,7 +118,7 @@ export default function DrinkPostCard({
           <Text style={styles.ratingText}>{drink.rating.toFixed(1)}</Text>
         </View>
         <Text style={styles.description}>{drink.description}</Text>
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionButton} onPress={onCheer}>
@@ -99,7 +135,7 @@ export default function DrinkPostCard({
         {onComment && (
           <TouchableOpacity style={styles.actionButton} onPress={onComment}>
             <Ionicons name="chatbubble-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.actionText}>Comment</Text>
+            <Text style={styles.actionText}>{t('common.comment')}</Text>
           </TouchableOpacity>
         )}
 
@@ -109,7 +145,7 @@ export default function DrinkPostCard({
             size={24}
             color={isSaved ? '#8B5FBF' : '#FFFFFF'}
           />
-          <Text style={styles.actionText}>{isSaved ? 'Saved' : 'Save'}</Text>
+          <Text style={styles.actionText}>{isSaved ? t('common.saved') : t('common.save')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -143,11 +179,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    overflow: 'hidden',
   },
   avatarText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   userDetails: {
     flex: 1,
@@ -165,14 +206,19 @@ const styles = StyleSheet.create({
   locationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
   },
   location: {
     fontSize: 12,
     color: '#9CA3AF',
     marginLeft: 4,
+    flexShrink: 1,
   },
   content: {
     marginBottom: 16,
+  },
+  hiddenNotice: {
+    marginBottom: 12,
   },
   image: {
     width: '100%',
@@ -220,5 +266,19 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     color: '#FFFFFF',
+  },
+  moreButton: {
+    width: 32,
+    height: 32,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  usernameShrink: {
+    flexShrink: 1,
   },
 });

@@ -1,0 +1,7 @@
+# gitleaks: reviewed false positives (2026-11-14). Synthetic test canaries, and the SHA-256 of the old public
+# default JWT secret that server.js refuses. Fingerprints only (commit:file:rule:line), no secret values.
+8baf8742121921916188f97c3e1069711b180e12:server/test/firebase-auth-check.test.js:generic-api-key:10
+3fe9237d0d50b038caf670d6a62fa884c7bc9138:server/test/firebase-configure.test.js:generic-api-key:16
+3fe9237d0d50b038caf670d6a62fa884c7bc9138:server/test/firebase-configure.test.js:generic-api-key:18
+68c46171cfea122ba86901a48bc333d7747ede5c:server/test/dev-log-bridge.test.js:generic-api-key:122
+01ac11aec0d04ebc1ad81f7776141881ee52bf2e:server/server.js:generic-api-key:27

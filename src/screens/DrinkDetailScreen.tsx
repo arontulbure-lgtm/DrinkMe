@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,76 +6,102 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Image,
+  ActivityIndicator,
   TextInput,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../lib/api';
-import { Drink, Comment } from '../types/api';
-import { useAuth } from '../context/AuthContext';
-import DrinkPostCard from '../components/DrinkPostCard';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiFetch, getCommentErrorKey, isAgeRequiredError, isNotFoundError, isStorageFullError, retryUnlessNotFound } from '../lib/api';
+import { flattenPages, getNextCursor, removeDrinkIfNotFound } from '../lib/drinkCache';
+import { Drink, Comment, Page, isDrinkCategory } from '../types/api';
+import ListLoadState from '../components/ListLoadState';
+import LoadMoreButton from '../components/LoadMoreButton';
+import ModerationNotice from '../components/ModerationNotice';
+import OfficialBadge from '../components/OfficialBadge';
+import PostActionsSheet from '../components/PostActionsSheet';
+import { useConfirmAge } from '../lib/useConfirmAge';
+import { useDrinkToggles } from '../lib/useDrinkToggles';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
+import { formatTimeAgo } from '../lib/formatTimeAgo';
+import { RootStackScreenProps } from '../navigation/types';
+import MediaImage from '../components/MediaImage';
 
-interface Props {
-  route: { params: { drinkId: number } };
-  navigation: { goBack: () => void; navigate: (screen: string, params?: any) => void };
-}
+type Props = RootStackScreenProps<'DrinkDetail'>;
 
 export default function DrinkDetailScreen({ route, navigation }: Props) {
   const { drinkId } = route.params;
-  const { getJwtToken } = useAuth();
+  const { getJwtToken, profile, serverUserId } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useLocalization();
+  const refreshIfSuspended = useRefreshIfSuspended();
   const [commentText, setCommentText] = useState('');
+  const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
+  const [actionsComment, setActionsComment] = useState<Comment | null>(null);
+  const { promptConfirmAge, isConfirming } = useConfirmAge();
 
-  const { data: drink, isLoading } = useQuery<Drink>({
+  const {
+    data: drink,
+    error: drinkError,
+    isError: isDrinkError,
+    isFetching: isDrinkFetching,
+    refetch: refetchDrink,
+  } = useQuery<Drink>({
     queryKey: ['drinks.detail', drinkId],
     queryFn: () => apiFetch<Drink>(`/api/drinks/${drinkId}`),
+    retry: retryUnlessNotFound,
   });
+  // Also over cached data: a post held in the cache can have been deleted since.
+  const isDrinkGone = isNotFoundError(drinkError);
+  const isAgeRequired = isAgeRequiredError(drinkError);
 
-  const { data: comments = [] } = useQuery<Comment[]>({
+  const {
+    data: commentPages,
+    refetch: refetchComments,
+    isError: isCommentsError,
+    isFetching: isCommentsFetching,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['drinks.comments', drinkId],
-    queryFn: () => apiFetch<Comment[]>(`/api/drinks/${drinkId}/comments`),
+    enabled: !isDrinkGone && !isAgeRequired,
+    retry: retryUnlessNotFound,
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
+      apiFetch<Page<Comment>>(`/api/drinks/${drinkId}/comments`, { query: { before: pageParam } }),
+    getNextPageParam: getNextCursor,
   });
+  const comments = flattenPages(commentPages);
 
-  const cheerMutation = useMutation({
-    mutationFn: async () => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ cheered: boolean; cheersCount: number }>(`/api/drinks/${drinkId}/like`, {
-        method: 'POST',
-        headers,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.detail', drinkId] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.partners'] });
-      queryClient.invalidateQueries({ queryKey: ['drinks.all'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    },
-    onError: () => Alert.alert(t('drinkDetail.title'), t('createPost.error')),
-  });
+  // Mutation callbacks still run after this screen is gone, and goBack pops whichever route is focused.
+  const leaveScreen = () => {
+    if (navigation.isFocused()) navigation.goBack();
+  };
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<{ saved: boolean }>(`/api/drinks/${drinkId}/save`, {
-        method: 'POST',
-        headers,
-      });
+  const getDrinkActionErrorKey = (error: unknown) => {
+    if (isAgeRequiredError(error)) return 'ageGate.required';
+    return isStorageFullError(error) ? 'common.serviceUnavailable' : 'createPost.error';
+  };
+
+  // The screen has nothing left to show once a cheer, save or comment finds the post gone.
+  const leaveIfDrinkGone = (error: unknown) => {
+    if (!removeDrinkIfNotFound(queryClient, error, drinkId, serverUserId)) return false;
+    Alert.alert(t('drinkDetail.title'), t('post.notFound'));
+    leaveScreen();
+    return true;
+  };
+
+  // Same alerts as before: this screen leaves when the post is gone.
+  const { toggleCheer, toggleSave } = useDrinkToggles({
+    onError: (error) => {
+      if (leaveIfDrinkGone(error)) return;
+      Alert.alert(t('drinkDetail.title'), t(getDrinkActionErrorKey(error)));
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drinks.detail', drinkId] });
-      queryClient.invalidateQueries({ queryKey: ['users.savedDrinks'] });
-    },
-    onError: () => Alert.alert(t('drinkDetail.title'), t('createPost.error')),
   });
 
   const commentMutation = useMutation({
@@ -90,11 +116,16 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
       });
     },
     onSuccess: () => {
+      if (!isCurrentAuthUser(serverUserId)) return;
       setCommentText('');
       queryClient.invalidateQueries({ queryKey: ['drinks.comments', drinkId] });
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
-    onError: () => Alert.alert(t('drinkDetail.title'), t('errors.commentFailed')),
+    onError: (error) => {
+      if (leaveIfDrinkGone(error)) return;
+      refreshIfSuspended(error);
+      Alert.alert(t('drinkDetail.title'), t(getCommentErrorKey(error)));
+    },
   });
 
   const handleSubmitComment = () => {
@@ -102,21 +133,6 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
     if (!trimmed) return;
     commentMutation.mutate(trimmed);
   };
-
-  const formatTimeAgo = useMemo(
-    () =>
-      (dateString: string) => {
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-
-        if (diffInMinutes < 1) return 'Just now';
-        if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-        if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-        return `${Math.floor(diffInMinutes / 1440)}d ago`;
-      },
-    []
-  );
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
@@ -127,15 +143,64 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
       >
         <View style={{ flex: 1 }}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={navigation.goBack} style={styles.headerButton}>
+            <TouchableOpacity
+              onPress={navigation.goBack}
+              style={styles.headerButton}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.back')}
+            >
               <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{t('drinkDetail.title')}</Text>
-            <View style={{ width: 32 }} />
+            {drink && !isDrinkGone && !isAgeRequired ? (
+              <TouchableOpacity
+                onPress={() => setActionsDrink(drink)}
+                style={styles.headerButton}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={t('post.actions')}
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 32 }} />
+            )}
           </View>
 
           <ScrollView contentContainerStyle={styles.content}>
-            {isLoading || !drink ? (
+            {isDrinkGone ? (
+              <View style={styles.loadingState}>
+                <Ionicons name="alert-circle-outline" size={32} color="#6B7280" />
+                <Text style={styles.loadingText}>{t('post.notFound')}</Text>
+              </View>
+            ) : isAgeRequired ? (
+              // Defence in depth: the hard age gate means an unconfirmed user never reaches this screen.
+              <View style={styles.loadingState}>
+                <Ionicons name="lock-closed-outline" size={32} color="#6B7280" />
+                <Text style={styles.loadingText}>{t('ageGate.required')}</Text>
+                <TouchableOpacity
+                  style={styles.ageConfirmButton}
+                  onPress={promptConfirmAge}
+                  disabled={isConfirming}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('ageGate.bannerAction')}
+                >
+                  {isConfirming ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.primaryActionText}>{t('ageGate.bannerAction')}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : !drink && isDrinkError ? (
+              <ListLoadState
+                isError={isDrinkError}
+                isFetching={isDrinkFetching}
+                message={t('post.loadError')}
+                onRetry={() => refetchDrink()}
+              />
+            ) : !drink ? (
               <View style={styles.loadingState}>
                 <Ionicons name="hourglass" size={32} color="#6B7280" />
                 <Text style={styles.loadingText}>{t('drinkDetail.loading')}</Text>
@@ -151,7 +216,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     </View>
                   </View>
                   {drink.imageUrl ? (
-                    <Image source={{ uri: drink.imageUrl }} style={styles.heroImage} />
+                    <MediaImage uri={drink.imageUrl} style={styles.heroImage} />
                   ) : null}
                   {drink.location && (
                     <View style={styles.locationRow}>
@@ -160,11 +225,16 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                     </View>
                   )}
                   <Text style={styles.heroDescription}>{drink.description}</Text>
+                  {drink.editedAt ? <Text style={styles.editedLabel}>{t('post.editedLabel')}</Text> : null}
+                  {drink.hiddenPendingReview && (
+                    <ModerationNotice messageKey="moderation.hiddenPost" style={styles.hiddenPostNotice} />
+                  )}
                   {drink.tags?.length ? (
                     <View style={styles.tagsRow}>
                       {drink.tags.map((tag) => (
                         <View key={tag} style={styles.tagChip}>
-                          <Text style={styles.tagText}>{tag}</Text>
+                          {/* A known category shows its label; any other stored tag shows as it is. */}
+                          <Text style={styles.tagText}>{isDrinkCategory(tag) ? t(`categories.${tag}`) : tag}</Text>
                         </View>
                       ))}
                     </View>
@@ -172,62 +242,93 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                 </View>
 
                 <View style={styles.actionsRow}>
+                  {/* Same state fields as DrinkPostCard; useDrinkToggles patches them optimistically. */}
                   <TouchableOpacity
                     style={styles.primaryAction}
-                    onPress={() => cheerMutation.mutate()}
-                    disabled={cheerMutation.isPending}
+                    onPress={() => toggleCheer(drink)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: drink.isLiked === true }}
+                    accessibilityLabel={t(drink.isLiked ? 'drinkDetail.uncheerA11y' : 'drinkDetail.cheerA11y', {
+                      count: drink.cheersCount ?? 0,
+                    })}
                   >
-                    <FontAwesome5 name="glass-cheers" size={18} color="#FFFFFF" />
-                    <Text style={styles.primaryActionText}>{t('drinkDetail.like')}</Text>
+                    <FontAwesome5 name="glass-cheers" size={18} color={drink.isLiked ? '#FCD34D' : '#FFFFFF'} />
+                    <Text style={styles.primaryActionText}>
+                      {drink.isLiked ? t('drinkDetail.cheered') : t('drinkDetail.like')}
+                      {' · '}
+                      {t('common.cheersCount', { count: drink.cheersCount ?? 0 })}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.secondaryAction}
-                    onPress={() => saveMutation.mutate()}
-                    disabled={saveMutation.isPending}
+                    onPress={() => toggleSave(drink)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: drink.isSaved === true }}
+                    accessibilityLabel={t(drink.isSaved ? 'drinkDetail.unsaveA11y' : 'drinkDetail.saveA11y')}
                   >
-                    <Ionicons name="bookmark" size={20} color="#8B5FBF" />
-                    <Text style={styles.secondaryActionText}>{t('drinkDetail.save')}</Text>
+                    <Ionicons name={drink.isSaved ? 'bookmark' : 'bookmark-outline'} size={20} color="#8B5FBF" />
+                    <Text style={styles.secondaryActionText}>{drink.isSaved ? t('common.saved') : t('common.save')}</Text>
                   </TouchableOpacity>
-                </View>
-
-                <View style={styles.cardWrapper}>
-                  <DrinkPostCard
-                    drink={drink}
-                    onCheer={() => cheerMutation.mutate()}
-                    onComment={() => {}}
-                    onSave={() => saveMutation.mutate()}
-                    isLiked={drink.isLiked}
-                    isSaved={drink.isSaved}
-                    cheersCount={drink.cheersCount}
-                  />
                 </View>
 
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>{t('drinkDetail.comments')}</Text>
-                  {comments.length === 0 ? (
+                  {commentPages === undefined ? (
+                    <ListLoadState
+                      isError={isCommentsError}
+                      isFetching={isCommentsFetching}
+                      message={t('drinkDetail.commentsLoadError')}
+                      onRetry={() => refetchComments()}
+                    />
+                  ) : comments.length === 0 ? (
                     <Text style={styles.emptyComments}>{t('drinkDetail.noComments')}</Text>
                   ) : (
-                    comments.map((comment) => (
-                      <View key={comment.id} style={styles.commentItem}>
-                        <View style={styles.commentAvatar}>
-                          <Text style={styles.commentAvatarText}>
-                            {comment.user?.firstName?.[0]?.toUpperCase() || comment.user?.email?.[0] || '?'}
-                          </Text>
-                        </View>
-                        <View style={styles.commentBody}>
-                          <View style={styles.commentHeader}>
-                            <Text style={styles.commentAuthor}>
-                              {comment.user?.firstName
-                                ? `${comment.user.firstName} ${comment.user.lastName || ''}`
-                                : comment.user?.email}
-                            </Text>
-                            <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt)}</Text>
+                    comments.map((comment) => {
+                      const commentUser = comment.userId === serverUserId && profile ? profile : comment.user;
+                      return (
+                        <View key={comment.id} style={styles.commentItem}>
+                          <View style={styles.commentAvatar}>
+                            {commentUser?.avatar ? (
+                              <MediaImage uri={commentUser.avatar} style={styles.commentAvatarImage} />
+                            ) : (
+                              <Text style={styles.commentAvatarText}>
+                                {commentUser?.firstName?.[0]?.toUpperCase() || '?'}
+                              </Text>
+                            )}
                           </View>
-                          <Text style={styles.commentText}>{comment.content}</Text>
+                          <View style={styles.commentBody}>
+                            <View style={styles.commentHeader}>
+                              <View style={styles.commentAuthorRow}>
+                                <Text style={[styles.commentAuthor, styles.commentAuthorShrink]} numberOfLines={1}>
+                                  {commentUser?.firstName
+                                    ? `${commentUser.firstName} ${commentUser.lastName || ''}`
+                                    : t('common.unknownUser')}
+                                </Text>
+                                <OfficialBadge official={commentUser?.official} />
+                              </View>
+                              <View style={styles.commentHeaderEnd}>
+                                <Text style={styles.commentTimestamp}>{formatTimeAgo(comment.createdAt, t)}</Text>
+                                <TouchableOpacity
+                                  style={styles.commentMoreButton}
+                                  onPress={() => setActionsComment(comment)}
+                                  hitSlop={6}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={t('comment.actions')}
+                                >
+                                  <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                            <Text style={styles.commentText}>{comment.content}</Text>
+                            {comment.hiddenPendingReview && (
+                              <ModerationNotice messageKey="moderation.hiddenComment" style={styles.hiddenCommentNotice} />
+                            )}
+                          </View>
                         </View>
-                      </View>
-                    ))
+                      );
+                    })
                   )}
+                  {hasNextPage && <LoadMoreButton onPress={() => fetchNextPage()} isLoading={isFetchingNextPage} />}
                 </View>
 
                 <View style={styles.section}>
@@ -238,7 +339,7 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
                   </View>
                   <TouchableOpacity
                     style={styles.tipButton}
-                    onPress={() => navigation.navigate('Scanner')}
+                    onPress={() => navigation.navigate('Main', { screen: 'Scanner' })}
                   >
                     <Ionicons name="camera" size={18} color="#FFFFFF" />
                     <Text style={styles.tipButtonText}>{t('drinkDetail.scan')}</Text>
@@ -248,25 +349,43 @@ export default function DrinkDetailScreen({ route, navigation }: Props) {
             )}
           </ScrollView>
 
-          <View style={styles.commentInputContainer}>
-            <TextInput
-              style={styles.commentInput}
-              placeholder={t('common.commentPlaceholder')}
-              placeholderTextColor="#6B7280"
-              value={commentText}
-              onChangeText={setCommentText}
-              multiline
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, (!commentText.trim() || commentMutation.isPending) && styles.sendButtonDisabled]}
-              onPress={handleSubmitComment}
-              disabled={!commentText.trim() || commentMutation.isPending}
-            >
-              <Ionicons name="send" size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+          {drink && !isDrinkGone && !isAgeRequired && (
+            <View style={styles.commentInputContainer}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder={t('common.commentPlaceholder')}
+                placeholderTextColor="#6B7280"
+                value={commentText}
+                onChangeText={setCommentText}
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, (!commentText.trim() || commentMutation.isPending) && styles.sendButtonDisabled]}
+                onPress={handleSubmitComment}
+                disabled={!commentText.trim() || commentMutation.isPending}
+                hitSlop={2}
+                accessibilityRole="button"
+                accessibilityLabel={t('comment.send')}
+                accessibilityState={{ disabled: !commentText.trim() || commentMutation.isPending }}
+              >
+                <Ionicons name="send" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
+      <PostActionsSheet
+        drink={actionsDrink}
+        comment={actionsComment}
+        onClose={() => {
+          setActionsDrink(null);
+          setActionsComment(null);
+        }}
+        onDeleted={leaveScreen}
+        onBlocked={(blockedUserId) => {
+          if (blockedUserId === drink?.userId) leaveScreen();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -414,9 +533,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-  cardWrapper: {
-    paddingHorizontal: 16,
-  },
   section: {
     paddingHorizontal: 16,
     paddingVertical: 24,
@@ -471,6 +587,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  commentAvatarImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
   commentAvatarText: {
     color: '#FFFFFF',
     fontWeight: '600',
@@ -495,6 +616,12 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 14,
     lineHeight: 20,
+  },
+  hiddenCommentNotice: {
+    marginTop: 6,
+  },
+  hiddenPostNotice: {
+    marginTop: 12,
   },
   commentInputContainer: {
     flexDirection: 'row',
@@ -525,5 +652,38 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  commentHeaderEnd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  commentMoreButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ageConfirmButton: {
+    backgroundColor: '#8B5FBF',
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editedLabel: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  commentAuthorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  commentAuthorShrink: {
+    flexShrink: 1,
   },
 });

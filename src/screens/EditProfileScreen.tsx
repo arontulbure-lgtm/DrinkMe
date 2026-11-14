@@ -2,27 +2,32 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { isCurrentAuthUser, useAuth } from '../context/AuthContext';
+import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError, isNameReservedError } from '../lib/api';
+import { invalidateAuthorQueries } from '../lib/drinkCache';
+import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
+import DeleteAccountModal from '../components/DeleteAccountModal';
+import { RootStackScreenProps } from '../navigation/types';
 
-interface Props {
-  navigation: { goBack: () => void };
-}
+type Props = RootStackScreenProps<'EditProfile'>;
 
 export default function EditProfileScreen({ navigation }: Props) {
-  const { serverUserId } = useAuth();
+  const { profile, serverUserId, setProfile } = useAuth();
+  const queryClient = useQueryClient();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [city, setCity] = useState('');
   const [bio, setBio] = useState('');
   const { t } = useLocalization();
-
-  const { data: profileData, isLoading } = useQuery<BaseUser>({
+  const refreshIfSuspended = useRefreshIfSuspended();
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const { data: profileData, isLoading, isError } = useQuery<BaseUser>({
     queryKey: ['users.detail', serverUserId],
-    enabled: !!serverUserId,
+    // profile is set after the token exchange, so the owner never caches the public view.
+    enabled: !!serverUserId && !!profile,
     queryFn: () => apiFetch<BaseUser>(`/api/users/${serverUserId}`),
   });
 
@@ -43,19 +48,36 @@ export default function EditProfileScreen({ navigation }: Props) {
         body: JSON.stringify({ firstName, lastName, city, bio }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      if (!updated || !isCurrentAuthUser(serverUserId)) return;
+      setProfile(updated);
+      queryClient.setQueryData<BaseUser>(['users.detail', serverUserId], updated);
+      invalidateAuthorQueries(queryClient);
       Alert.alert(t('editProfile.title'), t('editProfile.success'));
       navigation.goBack();
     },
-    onError: () => {
-      Alert.alert(t('editProfile.title'), t('editProfile.error'));
+    onError: (error) => {
+      refreshIfSuspended(error);
+      const messageKey = isAccountSuspendedError(error)
+        ? ACCOUNT_SUSPENDED_ERROR_KEY
+        : isNameReservedError(error) ? 'editProfile.nameReserved' : 'editProfile.error';
+      Alert.alert(t('editProfile.title'), t(messageKey));
     },
   });
+
+  // Saving before the profile has loaded would send an empty form and wipe the stored fields.
+  const isSaveDisabled = updateMutation.isPending || isLoading || !profileData;
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={navigation.goBack} style={styles.headerButton}>
+        <TouchableOpacity
+          onPress={navigation.goBack}
+          style={styles.headerButton}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+        >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('editProfile.title')}</Text>
@@ -89,7 +111,7 @@ export default function EditProfileScreen({ navigation }: Props) {
           <Text style={styles.label}>{t('editProfile.city')}</Text>
           <TextInput
             style={styles.input}
-            placeholder="București"
+            placeholder={t('editProfile.cityPlaceholder')}
             placeholderTextColor="#6B7280"
             value={city}
             onChangeText={setCity}
@@ -108,16 +130,42 @@ export default function EditProfileScreen({ navigation }: Props) {
           />
         </View>
 
+        {isError && !profileData ? <Text style={styles.loadError}>{t('profile.loadError')}</Text> : null}
+
         <TouchableOpacity
-          style={[styles.saveButton, (updateMutation.isPending || isLoading) && styles.saveButtonDisabled]}
+          style={[styles.saveButton, isSaveDisabled && styles.saveButtonDisabled]}
           onPress={() => updateMutation.mutate()}
-          disabled={updateMutation.isPending || isLoading}
+          disabled={isSaveDisabled}
         >
           <Text style={styles.saveButtonText}>
             {updateMutation.isPending ? t('editProfile.saving') : t('editProfile.save')}
           </Text>
         </TouchableOpacity>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>{t('block.accountSection')}</Text>
+          <TouchableOpacity
+            style={styles.accountRow}
+            onPress={() => navigation.navigate('BlockedUsers')}
+            accessibilityRole="button"
+            accessibilityLabel={t('block.listTitle')}
+          >
+            <Text style={styles.accountRowText}>{t('block.listTitle')}</Text>
+            <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.accountRow}
+            onPress={() => setIsDeleteModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('deleteAccount.action')}
+          >
+            <Text style={styles.deleteRowText}>{t('deleteAccount.action')}</Text>
+            <Ionicons name="chevron-forward" size={18} color="#EF4444" />
+          </TouchableOpacity>
+        </View>
       </ScrollView>
+
+      <DeleteAccountModal visible={isDeleteModalVisible} onClose={() => setIsDeleteModalVisible(false)} />
     </SafeAreaView>
   );
 }
@@ -187,5 +235,27 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  loadError: {
+    color: '#EF4444',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  accountRow: {
+    backgroundColor: '#1F2937',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  accountRowText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+  },
+  deleteRowText: {
+    color: '#EF4444',
+    fontSize: 16,
   },
 });
