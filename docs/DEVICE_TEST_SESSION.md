@@ -168,8 +168,47 @@ Adapted from `docs/JOHN_TODO.md` section 1. Write a 📝 note at each step whose
 
 Moderation as admin (`docs/JOHN_TODO.md` section 1c) uses curl from the PC and can run in the same session.
 
+## F. Firebase project
+**The app's project is `drinkmeapp-a8fea`** (owner decision 2026-11-14). The older project `drinkme-b2269`, named in `CLAUDE.md` and older docs, is no longer used. Every session preflight prints a line `Firebase project: <id> (app and server)`, or a ✗ with both ids when the app and the server point to different projects.
+
+**Users and UIDs:** <https://console.firebase.google.com/project/drinkmeapp-a8fea/authentication/users> (in general `console.firebase.google.com/project/<project-id>/authentication/users`). The "User UID" column is what `official:set` and `ADMIN_USER_IDS` need. Sign-in methods: `…/authentication/providers`. Project settings (web config, service accounts): `…/settings/general` and `…/settings/serviceaccounts/adminsdk`.
+
+### F1. Switching the app and server to the project (once)
+1. Firebase console → Project settings (gear) → **Your apps** → the Web app (create one if none: "</>" button, no hosting) → **SDK setup and configuration** → **Config**. Copy the `firebaseConfig = { … }` block into a file **`D:\DrinkMeApp\DrinkMeFinal\firebase-web-config.json`**. Either JSON or the pasted JavaScript block works; `measurementId` is ignored.
+2. Project settings → **Service accounts** → **Generate new private key**. Save it as **`D:\DrinkMeApp\DrinkMeFinal\server\serviceAccount-drinkmeapp-a8fea.json`** (or anywhere outside the project folder).
+3. Stop any running session, then:
+   ```powershell
+   cd D:\DrinkMeApp\DrinkMeFinal
+   npm run firebase:configure -- firebase-web-config.json server\serviceAccount-drinkmeapp-a8fea.json
+   ```
+   It sets only the six `EXPO_PUBLIC_FIREBASE_*` lines in `.env` and the `FIREBASE_SERVICE_ACCOUNT_KEY` line in `server/.env` (to that file's path). It keeps a copy of each old file (`.env.before-firebase-<time>`), and prints only the two project ids and **MATCH**. It refuses, changing nothing, if the two files come from different projects or if a file inside the project folder would not be git-ignored. Both file names above are git-ignored, as are `server/serviceAccount*.json` and `*firebase-adminsdk*.json`.
+4. `npm run official:check` → `drinkmeapp-a8fea` twice and **MATCH**.
+5. Start a session. Sign up again in the app: accounts of the old project do not exist in the new one.
+
+### F2. Old development data
+`server/data/db.json` still holds users, posts and comments of `drinkme-b2269` accounts (on 2026-11-13: 2 users, 1 post). Those uids never sign in again, so that data is orphaned. Nothing reads it for the new accounts, apart from showing the old posts in feeds and search. Two options, both yours to run:
+- **Keep it** (default): old test posts stay visible under their old names. Harmless for development; it never reaches production, which gets its own database (`docs/JOHN_TODO.md` section 4).
+- **Start empty:** stop every session, then rename `server\data\db.json` to `db.json.old-project` in Explorer; the next server start creates an empty database. Renaming instead of deleting keeps it recoverable. Claude Code does not touch `server/data/`. Ask for a `dev:reset-db` command if you want this as one step with checks.
+
+## G. Google sign-in setup
+**State on 2026-11-14:** the Google provider is enabled in Firebase (`drinkmeapp-a8fea`). In Expo Go the button is disabled on purpose ("not available in Expo Go"), and that is correct: Expo Go cannot receive Google's answer for DrinkMe.
+
+**The current code will not work in a development build either.** `AuthScreen.tsx` signs in through the browser with only the *Web* client ID and the return address `drinkme://`. Google accepts only https (or localhost) return addresses for a Web client, and swapping the code for tokens needs that client's secret, which must never ship in an app. So a development build would show a Google "redirect_uri_mismatch" or "invalid request" error. The fix needs your decision before code changes:
+- **Recommended:** native Google sign-in with `@react-native-google-signin/google-signin` (free edition; Expo config plugin; works in development and store builds, not in Expo Go). It returns an ID token that goes to Firebase as `GoogleAuthProvider.credential(idToken)`, so the server side is unchanged. New dependency: needs your OK.
+- Alternative without a new dependency: `expo-auth-session/providers/google` with separate Android and iOS client IDs. Google has turned custom return addresses off by default for new Android clients, so this is the more fragile path.
+
+**Client IDs needed (all from project `drinkmeapp-a8fea`):**
+
+| Client | Where it comes from | What it needs | Where it goes |
+|---|---|---|---|
+| **Web client ID** | Firebase → Authentication → Sign-in method → Google → **Web SDK configuration** → "Web client ID" (the same client shows in Google Cloud → APIs & Services → Credentials as "Web client (auto created by Google Service)") | nothing; created when Google was enabled | `.env`: `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` (already read by `app.config.ts` → `extra.googleWebClientId`). **The current value belongs to the old project (`476694000030-…`); replace it.** It is the audience Firebase accepts for ID tokens. |
+| **Android client** | Google Cloud console (project drinkmeapp-a8fea) → APIs & Services → Credentials → Create credentials → OAuth client ID → **Android** | package `com.aroncarola.drinkmefinal` + the **SHA-1** of the signing key: debug builds on this PC `keytool -list -v -keystore %USERPROFILE%\.android\debug.keystore -alias androiddebugkey -storepass android -keypass android` (needs a JDK, installed); EAS builds `eas credentials` → Android → SHA-1; Play Store later: Play Console → App integrity → App signing SHA-1 (one client or fingerprint each) | With the native library: nothing in code (Google matches package + SHA-1). With expo-auth-session: `.env` `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`. Also add the SHA-1 to the Android app in Firebase → Project settings → Your apps (add an Android app with that package if missing) |
+| **iOS client** | Same page → OAuth client ID → **iOS** | bundle ID `com.aroncarola.drinkmefinal` | `.env` `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`; its "iOS URL scheme" (`com.googleusercontent.apps.…`) goes into `app.config.ts` (`iosUrlScheme` of the library's plugin). Needs the Apple Developer account for a device build anyway. |
+
+Google Cloud also asks for the **OAuth consent screen** (app name, support email, privacy policy URL) before others than the test users can sign in. The privacy policy URL depends on where the legal pages are hosted (D-06, `docs/legal/OPEN_DECISIONS.md`).
+
 ## 5. Setting up the official DrinkMe account
-Do this during a session (the emulator is easiest), with the email/password flow. The three `official:` commands read your `.env` files but print only what is shown below, never a key or any other line.
+Do this during a session (the emulator is easiest), with the email/password flow, after section F. The three `official:` commands read your `.env` files but print only what is shown below, never a key or any other line.
 
 1. **Sign up in the app** with **drinkmesocialapp@gmail.com**: confirm 18+, accept the privacy notice, and **skip** the name prompt ("Later"). A name with "DrinkMe" in it is refused until step 5 (`name_reserved`); that is expected.
 2. In a second PowerShell window (the session keeps running):
