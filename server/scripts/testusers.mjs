@@ -55,6 +55,23 @@ async function create() {
   console.log(`Project ${project}. Passwords saved in ${path.relative(ROOT, TEST_USERS_FILE)} (git-ignored), not printed.`);
 }
 
+// Sets each saved test account's Firebase password back to the one in the file (after a test typed a
+// different one). Only addresses isDeletableTestEmail accepts; never prints a password.
+async function reset() {
+  const { project, auth: firebase } = await auth();
+  const { users } = JSON.parse(fs.readFileSync(TEST_USERS_FILE, 'utf8'));
+  for (const user of users.filter((item) => isDeletableTestEmail(item.email))) {
+    try {
+      const found = await firebase.getUserByEmail(user.email);
+      await firebase.updateUser(found.uid, { password: user.password });
+      console.log(`reset ${user.email}`);
+    } catch (err) {
+      console.log(`${user.email}: ${err.code ?? err.name}`);
+    }
+  }
+  console.log(`Project ${project}.`);
+}
+
 async function remove() {
   const { project, auth: firebase } = await auth();
   const toDelete = new Map();
@@ -76,7 +93,7 @@ async function remove() {
 const isEntryPoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isEntryPoint) {
   const command = process.argv[2];
-  (command === 'create' ? create() : command === 'delete' ? remove() : Promise.reject(new Error('Usage: npm run testusers:create | testusers:delete')))
+  (command === 'create' ? create() : command === 'reset' ? reset() : command === 'delete' ? remove() : Promise.reject(new Error('Usage: npm run testusers:create | testusers:delete')))
     .catch((err) => {
       console.error(err.message);
       process.exit(1);

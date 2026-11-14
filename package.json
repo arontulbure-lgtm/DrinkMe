@@ -20,6 +20,7 @@
     "env:remove": "node server/scripts/env-remove.mjs",
     "firebase:auth-check": "node server/scripts/firebase-auth-check.mjs",
     "testusers:create": "node server/scripts/testusers.mjs create",
+    "testusers:reset": "node server/scripts/testusers.mjs reset",
     "testusers:delete": "node server/scripts/testusers.mjs delete",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
