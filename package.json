@@ -18,6 +18,7 @@
     "official:set": "node server/scripts/official.mjs set",
     "firebase:configure": "node server/scripts/firebase-configure.mjs",
     "env:remove": "node server/scripts/env-remove.mjs",
+    "firebase:auth-check": "node server/scripts/firebase-auth-check.mjs",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {
