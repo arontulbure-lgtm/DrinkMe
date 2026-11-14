@@ -464,6 +464,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
             onComment={() => setCommentDrinkId(drink.id)}
             onSave={() => toggleSave(drink)}
             onMore={() => setActionsDrink(drink)}
+            onPress={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
             isLiked={drink.isLiked}
             isSaved={drink.isSaved}
             cheersCount={drink.cheersCount}

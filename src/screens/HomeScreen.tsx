@@ -242,6 +242,7 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                 onComment={() => setCommentDrinkId(drink.id)}
                 onSave={() => toggleSave(drink)}
                 onMore={() => setActionsDrink(drink)}
+                onPress={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
                 isLiked={drink.isLiked}
                 isSaved={drink.isSaved}
                 cheersCount={drink.cheersCount}

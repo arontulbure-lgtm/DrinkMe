@@ -323,6 +323,7 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                   onComment={() => setCommentDrinkId(drink.id)}
                   onSave={() => toggleSave(drink)}
                   onMore={() => setActionsDrink(drink)}
+                  onPress={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}
@@ -412,6 +413,7 @@ export default function ExploreScreen({ navigation }: TabScreenProps<'Explore'>)
                   onComment={() => setCommentDrinkId(drink.id)}
                   onSave={() => toggleSave(drink)}
                   onMore={() => setActionsDrink(drink)}
+                  onPress={() => navigation.navigate('DrinkDetail', { drinkId: drink.id })}
                   isLiked={drink.isLiked}
                   isSaved={drink.isSaved}
                   cheersCount={drink.cheersCount}

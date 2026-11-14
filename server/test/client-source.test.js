@@ -134,3 +134,38 @@ describe('DrinkDetail cheer and save buttons', () => {
     }
   });
 });
+
+// 4. Feed cards had no onPress on the body, so a post (and its detail) could be opened only from the
+//    Explore Trending tiles, not from Home, Profile, Explore results or Smart Bar Saved (Android device
+//    test, 2026-11-14, issue 3).
+describe('feed cards open the post detail', () => {
+  test('DrinkPostCard accepts onPress and wraps the body in a pressable button', () => {
+    const card = read('src/components/DrinkPostCard.tsx');
+    assert.match(card, /onPress\?: \(\) => void;/);
+    const start = card.lastIndexOf('<TouchableOpacity', card.indexOf('style={styles.content}'));
+    assert.ok(start > 0, 'the content area is a TouchableOpacity');
+    const body = card.slice(start, card.indexOf('</TouchableOpacity>', start));
+    assert.match(body, /onPress=\{onPress\}/);
+    assert.match(body, /accessibilityRole="button"/);
+    assert.match(body, /accessibilityLabel=\{t\('post\.open', \{ name: drink\.name \}\)\}/);
+    assert.match(body, /styles\.drinkName/);
+    assert.doesNotMatch(body, /onCheer|onSave|onComment|onMore|onPressAuthor/);
+  });
+
+  test('every <DrinkPostCard usage navigates to DrinkDetail on press', () => {
+    const users = CLIENT_FILES.filter((rel) => /<DrinkPostCard\b/.test(read(rel)));
+    assert.ok(users.length >= 4, 'Home, Profile, Explore and Smart Bar render DrinkPostCard');
+    for (const rel of users) {
+      const text = read(rel);
+      const usages = text.split(/<DrinkPostCard\b/).slice(1).map((rest) => rest.slice(0, rest.indexOf('/>')));
+      for (const usage of usages) {
+        assert.match(usage, /\bonPress=\{\(\) => navigation\.navigate\('DrinkDetail', \{ drinkId: drink\.id \}\)\}/, rel);
+      }
+    }
+  });
+
+  test('the open-post label exists in en and ro', () => {
+    const loc = read('src/context/LocalizationContext.tsx');
+    assert.equal(loc.match(/^\s+open: '(Open post|Deschide postarea) \{\{name\}\}',$/gm)?.length, 2);
+  });
+});

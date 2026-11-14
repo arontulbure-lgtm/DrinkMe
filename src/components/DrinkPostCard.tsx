@@ -19,6 +19,7 @@ interface DrinkPostCardProps {
   cheersCount?: number;
   onPressAuthor?: () => void;
   onMore?: () => void;
+  onPress?: () => void;
 }
 
 export default function DrinkPostCard({
@@ -28,6 +29,7 @@ export default function DrinkPostCard({
   onSave,
   onPressAuthor,
   onMore,
+  onPress,
   isLiked = false,
   isSaved = false,
   cheersCount = 0,
@@ -99,7 +101,14 @@ export default function DrinkPostCard({
       {/* The server sends this flag only to the owner and admins of a post hidden after reports. */}
       {drink.hiddenPendingReview && <ModerationNotice messageKey="moderation.hiddenPost" style={styles.hiddenNotice} />}
 
-      <View style={styles.content}>
+      <TouchableOpacity
+        style={styles.content}
+        activeOpacity={onPress ? 0.8 : 1}
+        onPress={onPress}
+        disabled={!onPress}
+        accessibilityRole="button"
+        accessibilityLabel={t('post.open', { name: drink.name })}
+      >
         {drink.imageUrl ? (
           <MediaImage uri={drink.imageUrl} style={styles.image} />
         ) : null}
@@ -109,7 +118,7 @@ export default function DrinkPostCard({
           <Text style={styles.ratingText}>{drink.rating.toFixed(1)}</Text>
         </View>
         <Text style={styles.description}>{drink.description}</Text>
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionButton} onPress={onCheer}>

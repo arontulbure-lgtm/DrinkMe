@@ -127,6 +127,7 @@ const translations = {
     },
     post: {
       actions: 'Post options',
+      open: 'Open post {{name}}',
       delete: 'Delete post',
       deleteConfirm: 'Delete this post and its comments? This cannot be undone.',
       deleteFailed: 'Could not delete the post. Please try again.',
@@ -639,6 +640,7 @@ const translations = {
     },
     post: {
       actions: 'Opțiuni postare',
+      open: 'Deschide postarea {{name}}',
       delete: 'Șterge postarea',
       deleteConfirm: 'Ștergi această postare și comentariile ei? Acțiunea nu poate fi anulată.',
       deleteFailed: 'Nu am putut șterge postarea. Încearcă din nou.',
