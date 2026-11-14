@@ -19,7 +19,7 @@ Branch: `auto/run-2026-10-30` (committed in logical chunks on this branch; never
   - Medium: Cheer/Save on the post detail showed no state (75d1097).
   - Medium: feed cards did not open the post detail (2b30d1b).
   - Lows are listed in the release notes, not fixed.
-- **4. Merge:** `docs/RELEASE_NOTES_run-2026-10-30.md`; PR and merge status below.
+- **4. Merge:** `docs/RELEASE_NOTES_run-2026-10-30.md`. Pushed; PR #2 (https://github.com/arontulbure-lgtm/DrinkMe/pull/2) merged into main with a merge commit (442321b, 2026-11-14 14:20 UTC). No GitHub checks are configured; all local checks were green. Branch auto/run-2026-10-30 kept. Local main pulled; new working branch auto/run-2026-11-14 created from main (this note is its first commit, not pushed).
 
 ### Session 8 (2026-11-14): Firebase project switch tooling, Google sign-in readiness, second triage, done
 - **Your decision:** the app's Firebase project is `drinkmeapp-a8fea` (path B).
