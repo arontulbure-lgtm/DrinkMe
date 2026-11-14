@@ -117,3 +117,28 @@ describe('npm run firebase:configure, end to end on a temp copy', () => {
     assert.equal(fs.readFileSync(path.join(root, '.env'), 'utf8'), before);
   });
 });
+
+describe('env:remove (removeEnvLine and the command)', () => {
+  test('removes every line for the name, keeps the rest byte for byte', async () => {
+    const { removeEnvLine } = await import('../scripts/env-file.mjs');
+    const text = `A=1\r\nANTHROPIC_API_KEY=${SECRET}\r\n# ANTHROPIC_API_KEY=commented\r\nB=2\r\nANTHROPIC_API_KEY=again`;
+    const result = removeEnvLine(text, 'ANTHROPIC_API_KEY');
+    assert.equal(result.removed, 2);
+    assert.equal(result.text, 'A=1\r\n# ANTHROPIC_API_KEY=commented\r\nB=2\r\n');
+    assert.equal(removeEnvLine('A=1\n', 'X').removed, 0);
+  });
+
+  test('the command prints no value and refuses non-.env files', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drinkme-envrm-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = path.join(dir, '.env');
+    fs.writeFileSync(file, `KEEP=1\nANTHROPIC_API_KEY=${SECRET}\n`);
+    const run = (args) => spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'env-remove.mjs'), ...args], { encoding: 'utf8' });
+    const result = run(['ANTHROPIC_API_KEY', file]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(!`${result.stdout}${result.stderr}`.includes(SECRET));
+    assert.equal(fs.readFileSync(file, 'utf8'), 'KEEP=1\n');
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'X=1\n');
+    assert.equal(run(['X', path.join(dir, 'notes.txt')]).status, 1);
+  });
+});

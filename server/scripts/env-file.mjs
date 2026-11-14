@@ -48,6 +48,25 @@ export function setEnvLines(text, entries) {
   return { ok: true, text: out, changed };
 }
 
+/**
+ * Removes every line that assigns NAME (with its line ending). Comments and other lines stay byte for byte.
+ * @returns {{ text: string, removed: number }}
+ */
+export function removeEnvLine(text, name) {
+  const parts = text.split(/(\r?\n)/);
+  const kept = [];
+  let removed = 0;
+  for (let i = 0; i < parts.length; i += 2) {
+    const match = ENV_LINE.exec(parts[i]);
+    if (match && match[1] === name) {
+      removed += 1;
+      continue; // drops the line and its ending
+    }
+    kept.push(parts[i], parts[i + 1] ?? '');
+  }
+  return { text: kept.join(''), removed };
+}
+
 /** Writes through a temp file and a rename, so a crash never leaves a half-written .env. */
 export function writeFileAtomic(file, text) {
   const temp = `${file}.tmp-${process.pid}`;

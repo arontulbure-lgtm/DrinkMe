@@ -17,6 +17,7 @@
     "official:find": "node server/scripts/official.mjs find",
     "official:set": "node server/scripts/official.mjs set",
     "firebase:configure": "node server/scripts/firebase-configure.mjs",
+    "env:remove": "node server/scripts/env-remove.mjs",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {
