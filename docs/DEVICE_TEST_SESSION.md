@@ -235,3 +235,11 @@ Do this during a session (the emulator is easiest), with the email/password flow
 ## 6. After the session
 Ask Claude Code: **"Run the log-triage agent on the latest test session."**
 It reads the newest `logs/sessions/` folder and writes `reports/test-sessions/<date-time>.md`: a ranked table of problems (crash, error, warning, failed request, visual) with the screen, the steps before it and the source file, plus a fix list with one task per problem. Then ask Claude Code to fix the items you choose.
+
+## 7. Scripted tests on the emulator (for Claude Code)
+Used for the automated retest of 2026-11-14; you can run the same pieces by hand.
+- `npm run testusers:create` makes test1..test3@drinkme.test in `drinkmeapp-a8fea`, with random passwords that are saved only in `logs/testusers.local.json` (git-ignored, never printed). `npm run testusers:reset` sets those passwords again. `npm run testusers:delete` deletes them, plus any `drinkmesocialapp+e2e…@gmail.com` account made by an automated sign-up, and never any other account. Their data on the development server stays until deleted in the app.
+- `node scripts/adb-ui.mjs dump | tap "<text>" | type "<text>" | typepw <email> | swipe up | wait "<text>" | shot <file>` drives the app over adb (uiautomator). In Git Bash set `MSYS_NO_PATHCONV=1` before passing `/regex/` patterns.
+- `npm run firebase:auth-check` prints the project's Auth settings (Email/Password, enumeration protection, password policy, authorized domains, email sender) without any key; `-- --enable-enumeration-protection` turns that protection on if it is off.
+- An in-app sign-up must use an allowed email domain (gmail.com, outlook.com, …; see `AuthScreen.tsx`). Automated runs use `drinkmesocialapp+e2e…@gmail.com`, which lands in the official mailbox.
+- Known limit: auto-hide after 3 reports cannot be shown with fresh accounts (reporters must be 48 h old); the server tests cover it.
