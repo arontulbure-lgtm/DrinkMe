@@ -19,6 +19,8 @@
     "firebase:configure": "node server/scripts/firebase-configure.mjs",
     "env:remove": "node server/scripts/env-remove.mjs",
     "firebase:auth-check": "node server/scripts/firebase-auth-check.mjs",
+    "testusers:create": "node server/scripts/testusers.mjs create",
+    "testusers:delete": "node server/scripts/testusers.mjs delete",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {
