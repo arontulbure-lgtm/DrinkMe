@@ -30,3 +30,6 @@ server/backups/
 logs/
 # Triage reports quote tester notes and error text: kept local, like the logs
 reports/test-sessions/
+
+# Firebase web config downloaded for npm run firebase:configure (kept out of git like the keys)
+firebase-web-config*.json

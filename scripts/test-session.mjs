@@ -31,6 +31,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { redactText } from '../server/dev-log-bridge.js';
+import { EXPECTED_PROJECT_ID, envValue, loadServiceAccount } from '../server/scripts/official.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SERVER_DIR = path.join(ROOT, 'server');
@@ -200,6 +201,20 @@ const askYesNo = (question) => new Promise((resolve) => {
   process.stdin.resume();
 });
 
+/** The Firebase project ids of the app (.env) and of the server's service account, or an error text. */
+function firebaseProjects() {
+  try {
+    const rootEnv = path.join(ROOT, '.env');
+    const app = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID
+      || (fs.existsSync(rootEnv) ? envValue(fs.readFileSync(rootEnv, 'utf8'), 'EXPO_PUBLIC_FIREBASE_PROJECT_ID') : undefined);
+    const serverEnv = path.join(SERVER_DIR, '.env');
+    const server = loadServiceAccount(fs.existsSync(serverEnv) ? fs.readFileSync(serverEnv, 'utf8') : '', SERVER_DIR).project_id;
+    return { app: app || '(not set)', server: server || '(not set)' };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 /** A .env name that looks like a secret and is not one of the app's EXPO_PUBLIC_ settings. Names only. */
 export const isSecretLookingName = (name) => (
   !name.startsWith('EXPO_PUBLIC_') && /KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|AUTH/i.test(name)
@@ -247,6 +262,18 @@ export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
   for (const name of FIREBASE_CLIENT_NAMES) {
     const isSet = Boolean(process.env[name]) || clientEnvFiles.some((file) => file.isSet(name));
     check(isSet, `${name} is set`, 'Add it to .env in the project root (values from the Firebase console, Project settings).');
+  }
+  // Which Firebase project the app signs in to, and which one the server checks tokens against. Project
+  // ids are not secrets; nothing else from either file or the key is printed.
+  const projectCheck = firebaseProjects();
+  if (projectCheck.error) {
+    check(false, 'Firebase project', projectCheck.error);
+  } else {
+    const same = projectCheck.app === projectCheck.server;
+    check(same, same
+      ? `Firebase project: ${projectCheck.app} (app and server)${projectCheck.app === EXPECTED_PROJECT_ID ? '' : yellow(`  expected ${EXPECTED_PROJECT_ID}`)}`
+      : `Firebase project: app ${projectCheck.app}, server ${projectCheck.server} (MISMATCH)`,
+    'Sign-in fails until both use the same project: npm run firebase:configure (docs/DEVICE_TEST_SESSION.md, "Firebase project").');
   }
   // Expo loads every name in the root .env files into Metro's process. Only EXPO_PUBLIC_ names reach the
   // app, but a server or personal secret has no business there. Names only, never values.

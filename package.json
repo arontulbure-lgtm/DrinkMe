@@ -16,6 +16,7 @@
     "official:check": "node server/scripts/official.mjs check",
     "official:find": "node server/scripts/official.mjs find",
     "official:set": "node server/scripts/official.mjs set",
+    "firebase:configure": "node server/scripts/firebase-configure.mjs",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {
