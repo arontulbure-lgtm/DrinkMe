@@ -69,3 +69,28 @@ describe('Home feed empty state', () => {
     assert.doesNotMatch(button, /navigate\('Explore'\)/);
   });
 });
+
+describe('AuthScreen keyboard does not cover the submit button', () => {
+  test('the form sits in a KeyboardAvoidingView and a ScrollView that lets taps dismiss the keyboard', () => {
+    const auth = read('src/screens/AuthScreen.tsx');
+    const ret = auth.slice(auth.lastIndexOf("<SafeAreaView edges={['top', 'left', 'right']}"));
+    assert.match(ret, /<KeyboardAvoidingView[\s\S]*?behavior=\{Platform\.OS === 'ios' \? 'padding' : 'height'\}/);
+    assert.match(ret, /<ScrollView[\s\S]*?keyboardShouldPersistTaps="handled"/);
+    // Both wrappers enclose the email field and the submit buttons.
+    const kav = ret.indexOf('<KeyboardAvoidingView');
+    const scroll = ret.indexOf('<ScrollView');
+    assert.ok(kav >= 0 && scroll > kav, 'ScrollView inside KeyboardAvoidingView');
+    assert.ok(ret.indexOf('onPress={handleEmailAuth}') > scroll, 'submit button inside the ScrollView');
+    assert.ok(ret.indexOf('onPress={handleSendReset}') > scroll, 'reset button inside the ScrollView');
+    assert.ok(ret.indexOf('</ScrollView>') > ret.indexOf('onPress={handleEmailAuth}'));
+  });
+
+  test('the password field submits sign-in / sign-up from the keyboard action', () => {
+    const auth = read('src/screens/AuthScreen.tsx');
+    const at = auth.indexOf("placeholder={t('auth.passwordPlaceholder')}");
+    assert.ok(at > 0);
+    const input = auth.slice(auth.lastIndexOf('<TextInput', at), auth.indexOf('/>', at));
+    assert.match(input, /returnKeyType="go"/);
+    assert.match(input, /onSubmitEditing=\{isLoading \? undefined : handleEmailAuth\}/);
+  });
+});

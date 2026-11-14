@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, ActivityIndicator, AccessibilityInfo,
+  KeyboardAvoidingView, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -331,6 +332,18 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+      {/* Edge-to-edge Android does not resize the window for the keyboard, so the form moves
+          itself and scrolls; taps outside the fields dismiss the keyboard. */}
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoider}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.content}>
         <Text style={styles.logo}>{t('auth.title')}</Text>
         <Text style={styles.subtitle}>
@@ -436,6 +449,8 @@ export default function AuthScreen() {
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
+                returnKeyType="go"
+                onSubmitEditing={isLoading ? undefined : handleEmailAuth}
                 accessibilityLabel={t('auth.passwordPlaceholder')}
               />
 
@@ -487,13 +502,17 @@ export default function AuthScreen() {
           )}
         </View>
       </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
-  content: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+  keyboardAvoider: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+  content: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 24 },
   logo: {
     fontSize: 38, fontWeight: 'bold', color: '#8B5FBF',
     textAlign: 'center', marginBottom: 8,
