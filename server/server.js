@@ -12,6 +12,15 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { textMentionsAlcohol } from './ai/alcoholWords.js';
+import { createLocalProvider } from './ai/localProvider.js';
+import { createBarcodeLookup, isValidEan } from './ai/openFoodFacts.js';
+import { createOpenAiProvider } from './ai/openaiProvider.js';
+import { createPhotoStore } from './ai/photoStore.js';
+import { AiProviderError, resolveAiProviderName } from './ai/provider.js';
+import { generateRecipeBatch, recipeId as recipeIdFor } from './ai/recipeEngine.js';
+import { checkRecipe } from './ai/recipeSafety.js';
+import { normalizeRecipe, validateScanResult } from './ai/schemas.js';
 
 dotenv.config();
 
@@ -365,7 +374,7 @@ const defaultUrlencodedParser = express.urlencoded({ extended: true, limit: DEFA
 const postBodyParser   = express.json({ limit: POST_BODY_LIMIT });
 const avatarBodyParser = express.json({ limit: AVATAR_BODY_LIMIT });
 const isImageUploadRoute = (req) => (
-  req.method === 'POST' && (req.path === '/api/drinks' || /^\/api\/users\/[^/]+\/avatar$/.test(req.path))
+  req.method === 'POST' && (req.path === '/api/drinks' || req.path === '/api/ai/scan' || /^\/api\/users\/[^/]+\/avatar$/.test(req.path))
 );
 app.use((req, res, next) => (isImageUploadRoute(req) ? next() : defaultJsonParser(req, res, next)));
 app.use((req, res, next) => (isImageUploadRoute(req) ? next() : defaultUrlencodedParser(req, res, next)));
@@ -410,8 +419,10 @@ const sanitizePhotoURL = (value) => {
   return value;
 };
 
-// AI stays off unless AI_ENABLED is exactly 'true'. A key on its own does not turn it on.
-const AI_ENABLED = process.env.AI_ENABLED === 'true';
+// AI provider (server/ai/provider.js): AI_PROVIDER = local | openai | off, default off. With AI_PROVIDER unset,
+// the legacy AI_ENABLED=true means openai. A key on its own does not turn anything on.
+const AI_PROVIDER_NAME = resolveAiProviderName(process.env);
+const AI_ENABLED = AI_PROVIDER_NAME === 'openai';
 const AI_REQUEST_TIMEOUT_MS = 30_000;
 const AI_MAX_RETRIES = 1; // timeouts are retried too, so one request can wait twice the timeout
 
@@ -422,6 +433,33 @@ if (AI_ENABLED && !process.env.OPENAI_API_KEY) {
 const openai = AI_ENABLED && process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: AI_REQUEST_TIMEOUT_MS, maxRetries: AI_MAX_RETRIES })
   : null;
+
+// The provider behind the /api/ai/* routes. null when AI_PROVIDER=off (or openai without a key).
+const parsePositiveMs = (raw, fallback) => (/^\d{3,6}$/.test(raw ?? '') ? Number(raw) : fallback);
+const aiProvider = (() => {
+  if (AI_PROVIDER_NAME === 'local') {
+    if (isProduction && !process.env.AI_SERVICE_TOKEN) {
+      console.warn('[ai] AI_PROVIDER=local without AI_SERVICE_TOKEN in production: the ai-service must not be reachable from outside.');
+    }
+    return createLocalProvider({
+      url: process.env.AI_SERVICE_URL,
+      token: process.env.AI_SERVICE_TOKEN || undefined,
+      timeoutMs: parsePositiveMs(process.env.AI_SERVICE_TIMEOUT_MS, 60_000),
+    });
+  }
+  if (AI_PROVIDER_NAME === 'openai' && openai) return createOpenAiProvider({ client: openai });
+  return null;
+})();
+console.log(`[ai] Provider: ${aiProvider ? AI_PROVIDER_NAME : 'off'}`);
+
+// Scan photos are kept only for users who opted in (see server/ai/photoStore.js).
+const AI_PHOTO_RETENTION_DAYS = /^\d{1,3}$/.test(process.env.AI_PHOTO_RETENTION_DAYS ?? '') ? Number(process.env.AI_PHOTO_RETENTION_DAYS) : 90;
+const aiPhotoStore = createPhotoStore({
+  dir: process.env.AI_PHOTO_DIR?.trim() || path.join(DATA_DIR, 'ai-scans'),
+  retentionDays: AI_PHOTO_RETENTION_DAYS,
+});
+// OFF_API_URL is for tests only (a local stub); production always uses Open Food Facts.
+const lookupBarcode = createBarcodeLookup(!isProduction && process.env.OFF_API_URL ? { baseUrl: process.env.OFF_API_URL } : {});
 
 // ── Default seed data — EMPTY (no dummy users for production) ─────────────────
 const DEFAULT_USERS = [];
@@ -443,6 +481,8 @@ const avatarHashByUser  = new Map(); // not persisted: rebuilt from the stored a
 const cheersByUser      = new Map();
 const savedByUser       = new Map();
 const smartBarByUser    = new Map();
+// userId → [saved AI recipe] (newest first). See the AI section.
+const savedRecipesByUser = new Map();
 const partnersByUser    = new Map();
 const notificationsByUser = new Map();
 const commentsByDrink   = new Map();
@@ -469,7 +509,7 @@ const DB_READ_RETRY_CODES     = new Set([...DB_RENAME_RETRY_CODES, 'EMFILE']);
 const DB_COUNTER_KEYS = ['nextDrinkId', 'nextNotificationId', 'nextCommentId', 'nextReportId', 'nextAuditId', 'dbSchemaVersion', 'recoveryStartedAt'];
 const DB_LIST_KEYS    = ['drinks', 'users', 'reports', 'pendingAccountDeletions', 'auditLog'];
 const DB_MAP_KEYS     = [
-  'cheersByUser', 'savedByUser', 'smartBarByUser',
+  'cheersByUser', 'savedByUser', 'smartBarByUser', 'savedRecipesByUser',
   'partnersByUser', 'notificationsByUser', 'commentsByDrink', 'limitEventsByUser', 'blocksByUser',
   'partnerRequestsByUser',
 ];
@@ -538,6 +578,7 @@ function saveDb() {
         Array.from(savedByUser.entries()).map(([k, v]) => [k, Array.from(v)])
       ),
       smartBarByUser: Object.fromEntries(smartBarByUser.entries()),
+      savedRecipesByUser: Object.fromEntries(savedRecipesByUser.entries()),
       partnersByUser: Object.fromEntries(
         Array.from(partnersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
       ),
@@ -883,6 +924,13 @@ function loadDb() {
       }
       // Logged-out requests used to save an entry under the key "null"; drop it on the next save.
       partnersByUser.delete('null');
+    }
+
+    // Restore savedRecipesByUser (lists only; a bad entry is dropped, never fatal)
+    if (isPlainObject(data.savedRecipesByUser)) {
+      for (const [k, v] of Object.entries(data.savedRecipesByUser)) {
+        if (Array.isArray(v)) savedRecipesByUser.set(k, v.filter(isPlainObject));
+      }
     }
 
     // Restore notificationsByUser
@@ -2612,6 +2660,8 @@ const deleteUserDataCascade = (uid) => {
   }
   savedByUser.delete(uid);
   smartBarByUser.delete(uid);
+  savedRecipesByUser.delete(uid);
+  aiPhotoStore.deleteForUser(uid);
   notificationsByUser.delete(uid);
   limitEventsByUser.delete(uid);
 
@@ -4798,35 +4848,9 @@ const normalizeAiRecipe = (recipe) => {
   };
 };
 
-// The model can call anything a mocktail, so the text of a mocktail-only answer is checked too. This is a
-// safety net with known limits: a drink it does not list gets through, and "non-alcoholic beer" is dropped.
-// All of these are matched after toAlcoholCheckText, so they are written without diacritics.
-const AI_ALCOHOL_WORDS = [
-  'whisky', 'whiskey', 'whiskies', 'whiskeys', 'bourbon', 'scotch', 'vodka', 'vodkas', 'gin', 'gins', 'rum', 'rums',
-  'tequila', 'tequilas', 'mezcal', 'brandy', 'brandies', 'cognac', 'armagnac', 'liqueur', 'liqueurs', 'liquor', 'liquors',
-  'spirit', 'spirits', 'wine', 'wines', 'beer', 'beers', 'lager', 'lagers', 'stout', 'porter', 'ipa', 'pale ale', 'brown ale',
-  'cider', 'ciders', 'hard seltzer', 'champagne', 'prosecco', 'cava', 'sake', 'soju', 'mead', 'vermouth', 'bitters', 'amaro',
-  'campari', 'aperol', 'absinthe', 'sambuca', 'ouzo', 'grappa', 'pastis', 'kahlua', 'baileys', 'cointreau', 'triple sec',
-  'curacao', 'schnapps', 'sherry', 'madeira', 'marsala', 'jagermeister', 'limoncello', 'amaretto', 'pisco', 'cachaca',
-  'alcohol', 'alcoholic', 'alcoholice',
-  'tuica', 'tuici', 'palinca', 'palinci', 'horinca', 'rachiu', 'rachiuri', 'rakia', 'vin', 'vinuri', 'bere', 'beri',
-  'lichior', 'lichioruri', 'coniac', 'coniacuri', 'votca', 'vodca', 'rom', 'sampanie', 'spumant', 'cidru', 'vermut',
-  'visinata', 'afinata', 'tarie', 'tarii', 'alcool', 'alcoolic', 'alcoolica', 'alcoolice',
-];
-const toAlcoholWordPattern = (word) => word.replace(/ /g, '[\\s-]+');
-const AI_ALCOHOL_PATTERN = new RegExp(
-  `(?<![\\p{L}\\p{N}])(?:${AI_ALCOHOL_WORDS.map(toAlcoholWordPattern).join('|')})(?![\\p{L}\\p{N}])`,
-  'u'
-);
-// Removed before the check, because they name no alcoholic drink. "nonalcoholic" needs no entry: it is one word.
-const AI_ALCOHOL_FREE_PHRASES = /(?<![\p{L}\p{N}])(?:(?:non|no|zero|without|fara)[\s-]+(?:alcoholic|alcohol|alcoolica|alcoolice|alcoolic|alcool)|(?:alcohol|alcool)[\s-]*free|ginger[\s-]+beer|root[\s-]+beer|bere[\s-]+de[\s-]+ghimbir|(?:wine|beer)[\s-]*glass(?:es)?|pahar(?:e)?[\s-]+de[\s-]+(?:vin|bere)|(?:wine|cider)[\s-]+vinegar|otet[\s-]+de[\s-]+vin)(?![\p{L}\p{N}])/gu;
-
-// Removes accents and invisible format characters, so neither can hide a word.
-const toAlcoholCheckText = (value) => value.normalize('NFKD').replace(/[\p{M}\p{Cf}]/gu, '').toLowerCase();
-
-const mentionsAlcohol = ({ title, ingredients, garnish, instructions }) => AI_ALCOHOL_PATTERN.test(
-  toAlcoholCheckText([title, ...ingredients.map((ingredient) => ingredient.name), garnish ?? '', instructions].join('\n'))
-    .replace(AI_ALCOHOL_FREE_PHRASES, ' ')
+// The model can call anything a mocktail, so the text of a mocktail-only answer is checked too (see ai/alcoholWords.js).
+const mentionsAlcohol = ({ title, ingredients, garnish, instructions }) => textMentionsAlcohol(
+  [title, ...ingredients.map((ingredient) => ingredient.name), garnish ?? '', instructions].join('\n')
 );
 
 // inputText also names JSON, because the json_object format may check the input messages for that word.
@@ -4895,6 +4919,311 @@ app.post('/api/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, asyn
     res.json({ recipes: await generateAiRecipes(instructions, inputText, { mocktailsOnly }) });
   } catch (error) { next(error); }
 });
+
+// ── AI v1: scanner, barcode fallback, recipes, saved recipes ──────────────────
+// Contracts: .claude/skills/drinkme-ai-service, recipe-schema, ingredient-taxonomy. The provider's output is
+// never trusted: scans go through validateScanResult, recipes through normalizeRecipe + checkRecipe (S1-S13).
+// Photos stay in memory unless the user opted in (aiPhotoOptIn). Request bodies are never logged.
+const AI_NOTICE_VERSION = 1;
+const AI_SCHEMA_VERSION = '1';
+const AI_V1_RATE_LIMIT_PER_HOUR = /^\d{1,4}$/.test(process.env.AI_RATE_LIMIT_PER_HOUR ?? '') ? Number(process.env.AI_RATE_LIMIT_PER_HOUR) : 30;
+const BARCODE_RATE_LIMIT_PER_HOUR = 60;
+const SAVED_RECIPES_MAX = 200;
+const AI_BASICS_MAX_COUNT = 12;
+const AI_BASIC_MAX_LENGTH = 40;
+const AI_SMART_BAR_MAX_INPUTS = 60;
+const AI_SCAN_NAME_MAX_LENGTH = 120;
+const AI_HEALTH_CACHE_MS = 10_000;
+const AI_LANGUAGES = ['en', 'ro'];
+const AI_DEFAULT_BASICS = { en: ['ice', 'water', 'sugar', 'salt'], ro: ['gheață', 'apă', 'zahăr', 'sare'] };
+const AI_SCAN_CATEGORIES = new Set(['spirit', 'liqueur', 'wine', 'sparkling_wine', 'beer', 'cider', 'vermouth_aperitif', 'bitters',
+  'syrup', 'juice', 'soda_mixer', 'energy_drink', 'dairy_cream', 'fresh_fruit', 'herb_spice', 'water']);
+
+const toAiLanguage = (value) => (AI_LANGUAGES.includes(value) ? value : 'en');
+
+const aiV1Limiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: AI_V1_RATE_LIMIT_PER_HOUR,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `ai:${req.userId}`,
+  message: { error: 'Too many AI requests. Try again later.', code: 'ai_rate_limit' },
+});
+const barcodeLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: BARCODE_RATE_LIMIT_PER_HOUR,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `barcode:${req.userId}`,
+  message: { error: 'Too many barcode lookups. Try again later.', code: 'ai_rate_limit' },
+});
+
+const hasAcceptedAiNotice = (user) => Number.isInteger(user?.aiNoticeVersion) && user.aiNoticeVersion >= AI_NOTICE_VERSION;
+
+const requireAiProvider = (req, res, next) => (
+  aiProvider ? next() : res.status(503).json({ error: 'AI features are unavailable', code: 'ai_disabled' })
+);
+const requireAiNotice = (req, res, next) => (
+  hasAcceptedAiNotice(userIndex.get(req.userId))
+    ? next()
+    : res.status(403).json({ error: 'Please read and accept the AI notice first', code: 'ai_notice_required' })
+);
+
+// One model request per user at a time: the GPU serves everyone, so a second tap waits for nothing.
+const aiBusyUsers = new Set();
+const oneAiRequestPerUser = (req, res, next) => {
+  if (aiBusyUsers.has(req.userId)) {
+    return res.status(409).json({ error: 'Another AI request is still running', code: 'ai_busy' });
+  }
+  const userId = req.userId;
+  aiBusyUsers.add(userId);
+  const release = () => aiBusyUsers.delete(userId);
+  res.on('finish', release);
+  res.on('close', release);
+  next();
+};
+
+const AI_ERRORS = {
+  ai_unavailable: [503, 'The AI service is not available right now. Try again later.'],
+  ai_timeout: [504, 'The AI took too long. Try again.'],
+  ai_invalid_output: [502, 'The AI could not produce a valid answer. Try again.'],
+  ai_bad_request: [400, 'The AI could not read this input.'],
+  barcode_unavailable: [503, 'Barcode lookup is not available right now. Try again later.'],
+};
+const sendAiError = (res, err) => {
+  const code = AI_ERRORS[err?.code] ? err.code : 'ai_unavailable';
+  if (!(err instanceof AiProviderError) && !AI_ERRORS[err?.code]) console.warn('[ai] Unexpected error:', err?.name);
+  const [status, error] = AI_ERRORS[code];
+  res.status(status).json({ error, code });
+};
+
+let aiHealthCache = { at: 0, ok: false };
+const isAiHealthy = async () => {
+  if (!aiProvider) return false;
+  if (Date.now() - aiHealthCache.at < AI_HEALTH_CACHE_MS) return aiHealthCache.ok;
+  const { ok } = await aiProvider.health();
+  aiHealthCache = { at: Date.now(), ok };
+  return ok;
+};
+
+const getAiSettings = (user, language) => ({
+  basics: Array.isArray(user?.aiBasics) ? user.aiBasics : AI_DEFAULT_BASICS[language],
+  basicsCustomized: Array.isArray(user?.aiBasics),
+  photoOptIn: user?.aiPhotoOptIn === true,
+});
+
+// The app's feature flag: real AI screens only while available is true.
+app.get('/api/ai/status', requireAuth, async (req, res, next) => {
+  try {
+    const language = toAiLanguage(req.query.language);
+    const user = userIndex.get(req.userId);
+    const available = await isAiHealthy();
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      schemaVersion: AI_SCHEMA_VERSION,
+      available,
+      provider: aiProvider ? AI_PROVIDER_NAME : 'off',
+      scan: available,
+      recipes: available,
+      barcode: true,
+      noticeVersion: AI_NOTICE_VERSION,
+      noticeAccepted: hasAcceptedAiNotice(user),
+      settings: getAiSettings(user, language),
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/ai/notice', requireAuth, (req, res) => {
+  if (req.body?.version !== AI_NOTICE_VERSION) return res.status(400).json({ error: 'Invalid version' });
+  const user = userIndex.get(req.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (hasAcceptedAiNotice(user)) return res.json({ noticeAccepted: true, noticeVersion: AI_NOTICE_VERSION });
+  const previous = { version: user.aiNoticeVersion, at: user.aiNoticeAt };
+  user.aiNoticeVersion = AI_NOTICE_VERSION;
+  user.aiNoticeAt = new Date().toISOString();
+  if (!saveDbOrRespond(res)) {
+    if (previous.version === undefined) delete user.aiNoticeVersion; else user.aiNoticeVersion = previous.version;
+    if (previous.at === undefined) delete user.aiNoticeAt; else user.aiNoticeAt = previous.at;
+    return;
+  }
+  res.json({ noticeAccepted: true, noticeVersion: AI_NOTICE_VERSION });
+});
+
+// { basics?: string[] | null (null = defaults), photoOptIn?: boolean }. Turning the opt-in off deletes kept photos.
+app.put('/api/ai/settings', requireAuth, (req, res) => {
+  const user = userIndex.get(req.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { basics, photoOptIn, language } = req.body || {};
+  if (photoOptIn !== undefined && typeof photoOptIn !== 'boolean') return res.status(400).json({ error: 'Invalid photoOptIn' });
+  let cleanBasics;
+  if (basics === null) {
+    cleanBasics = null;
+  } else if (basics !== undefined) {
+    if (!Array.isArray(basics) || basics.length > AI_BASICS_MAX_COUNT || !basics.every((b) => typeof b === 'string')) {
+      return res.status(400).json({ error: 'Invalid basics' });
+    }
+    const seen = new Set();
+    cleanBasics = [];
+    for (const basic of basics) {
+      const clean = sanitizeText(basic, AI_BASIC_MAX_LENGTH);
+      if (!clean) return res.status(400).json({ error: 'Invalid basics' });
+      const key = clean.toLowerCase();
+      if (!seen.has(key)) { seen.add(key); cleanBasics.push(clean); }
+    }
+  }
+  if (cleanBasics !== undefined && cleanBasics !== null && isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
+  const previous = { basics: user.aiBasics, photoOptIn: user.aiPhotoOptIn };
+  if (cleanBasics === null) delete user.aiBasics;
+  else if (cleanBasics !== undefined) user.aiBasics = cleanBasics;
+  if (photoOptIn !== undefined) user.aiPhotoOptIn = photoOptIn;
+  if (!saveDbOrRespond(res)) {
+    if (previous.basics === undefined) delete user.aiBasics; else user.aiBasics = previous.basics;
+    if (previous.photoOptIn === undefined) delete user.aiPhotoOptIn; else user.aiPhotoOptIn = previous.photoOptIn;
+    return;
+  }
+  if (photoOptIn === false && previous.photoOptIn === true) aiPhotoStore.deleteForUser(req.userId);
+  res.json(getAiSettings(user, toAiLanguage(language)));
+});
+
+const handleAiScan = async (req, res) => {
+  try {
+    const image = validateImage(req.body?.imageBase64, AI_IMAGE_RULES);
+    if (image.error) return res.status(image.status).json({ error: image.error });
+    const [, mimeType, imageBase64] = image.dataUrl.match(/^data:(image\/[a-z]+);base64,(.*)$/s);
+    const language = toAiLanguage(req.body?.language);
+    const result = validateScanResult(await aiProvider.scan({ imageBase64, mimeType, language }));
+    if (!result) throw new AiProviderError('ai_invalid_output');
+    if (userIndex.get(req.userId)?.aiPhotoOptIn === true) {
+      aiPhotoStore.save(req.userId, Buffer.from(imageBase64, 'base64'), mimeType.split('/')[1], result);
+    }
+    res.json({ schemaVersion: AI_SCHEMA_VERSION, source: 'photo', ...result });
+  } catch (err) {
+    sendAiError(res, err);
+  }
+};
+app.post('/api/ai/scan', requireAuth, requireAiProvider, requireAiNotice, aiV1Limiter, oneAiRequestPerUser, postBodyParser, handleAiScan);
+
+// Not AI: works whenever the user is signed in and 18+, even with AI_PROVIDER=off. Only the number leaves the server.
+app.post('/api/ai/barcode', requireAuth, barcodeLimiter, async (req, res) => {
+  const ean = typeof req.body?.ean === 'string' ? req.body.ean.trim() : '';
+  if (!isValidEan(ean)) return res.status(400).json({ error: 'Invalid barcode', code: 'barcode_invalid' });
+  try {
+    const found = await lookupBarcode(ean, toAiLanguage(req.body?.language));
+    if (!found) return res.status(404).json({ error: 'Product not found', code: 'barcode_not_found' });
+    const result = validateScanResult(found);
+    if (!result) return res.status(404).json({ error: 'Product not found', code: 'barcode_not_found' });
+    res.json({ schemaVersion: AI_SCHEMA_VERSION, source: 'barcode', ...result });
+  } catch (err) {
+    sendAiError(res, err);
+  }
+});
+
+// Turns the confirmed scan item from the app into the recipe input. Every field is re-checked here.
+const toScanInput = (item) => {
+  if (!isPlainObject(item) || !AI_SCAN_CATEGORIES.has(item.category)) return null;
+  const brand = sanitizeOptional(item.brand, AI_SCAN_NAME_MAX_LENGTH);
+  const product = sanitizeOptional(item.product, AI_SCAN_NAME_MAX_LENGTH);
+  const style = sanitizeOptional(item.style, AI_SCAN_NAME_MAX_LENGTH);
+  const name = sanitizeText([brand, product].filter(Boolean).join(' ') || style || item.category.replace(/_/g, ' '), AI_SCAN_NAME_MAX_LENGTH);
+  if (!name) return null;
+  return { input: { name, category: item.category }, aliases: [product, brand, style].filter(Boolean) };
+};
+
+// { mode: 'scan', item, language, newSession } or { mode: 'smart_bar', language, newSession }.
+app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, aiV1Limiter, oneAiRequestPerUser, async (req, res) => {
+  const { mode, item, newSession } = req.body || {};
+  const language = toAiLanguage(req.body?.language);
+  if (mode !== 'scan' && mode !== 'smart_bar') return res.status(400).json({ error: 'Invalid mode' });
+  if (newSession !== undefined && typeof newSession !== 'boolean') return res.status(400).json({ error: 'Invalid newSession' });
+  let inputs;
+  let scannedAliases = [];
+  if (mode === 'scan') {
+    const scan = toScanInput(item);
+    if (!scan) return res.status(400).json({ error: 'Invalid item' });
+    if (scan.input.category === 'water') {
+      return res.status(400).json({ error: "It's water: no recipes for plain water.", code: 'water_no_recipes' });
+    }
+    inputs = [scan.input];
+    scannedAliases = scan.aliases;
+  } else {
+    inputs = ensureSmartBar(req.userId)
+      .map((barItem) => sanitizeText(typeof barItem?.name === 'string' ? barItem.name : '', AI_SCAN_NAME_MAX_LENGTH))
+      .filter(Boolean)
+      .slice(0, AI_SMART_BAR_MAX_INPUTS)
+      .map((name) => ({ name }));
+    if (inputs.length === 0) return res.status(400).json({ error: 'Your Smart Bar is empty', code: 'smart_bar_empty' });
+  }
+  try {
+    const batch = await generateRecipeBatch({
+      provider: aiProvider,
+      userId: req.userId,
+      adult: isAgeConfirmed(req.userId),
+      mode,
+      language,
+      inputs,
+      scannedAliases,
+      basics: getAiSettings(userIndex.get(req.userId), language).basics,
+      newSession: newSession === true,
+    });
+    res.json({ schemaVersion: AI_SCHEMA_VERSION, recipes: batch.recipes, exhausted: batch.exhausted });
+  } catch (err) {
+    sendAiError(res, err);
+  }
+});
+
+const ensureSavedRecipes = (userId) => {
+  if (!savedRecipesByUser.has(userId)) savedRecipesByUser.set(userId, []);
+  return savedRecipesByUser.get(userId);
+};
+
+app.get('/api/recipes/saved', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ items: savedRecipesByUser.get(req.userId) ?? [] });
+});
+
+// The app sends back a recipe it received; it is validated and safety-checked again, so a modified client
+// cannot store something the generator would have refused.
+app.post('/api/recipes/saved', requireAuth, (req, res) => {
+  const raw = req.body?.recipe;
+  const recipe = normalizeRecipe(raw, toAiLanguage(raw?.language));
+  const verdict = checkRecipe(recipe, { adult: isAgeConfirmed(req.userId), mocktailsOnly: false, language: recipe?.language });
+  if (!verdict.recipe) return res.status(400).json({ error: 'Invalid recipe', code: 'recipe_invalid' });
+  const alsoNeed = (Array.isArray(raw?.youWillAlsoNeed) ? raw.youWillAlsoNeed : [])
+    .filter((name) => typeof name === 'string')
+    .map((name) => sanitizeText(name, 80))
+    .filter(Boolean)
+    .slice(0, 12);
+  const id = recipeIdFor(verdict.recipe);
+  const list = ensureSavedRecipes(req.userId);
+  const existing = list.find((saved) => saved.id === id);
+  if (existing) return res.json(existing);
+  if (list.length >= SAVED_RECIPES_MAX) {
+    return res.status(429).json({ error: 'You have saved the maximum number of recipes. Remove one to save another.', code: 'recipe_limit' });
+  }
+  if (isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
+  const saved = { ...verdict.recipe, youWillAlsoNeed: alsoNeed, id, savedAt: new Date().toISOString() };
+  list.unshift(saved);
+  if (!saveDbOrRespond(res)) {
+    list.shift();
+    return;
+  }
+  res.status(201).json(saved);
+});
+
+app.delete('/api/recipes/saved/:recipeId', requireAuth, (req, res) => {
+  const list = savedRecipesByUser.get(req.userId) ?? [];
+  const index = list.findIndex((saved) => saved.id === req.params.recipeId);
+  if (index === -1) return res.status(404).json({ error: 'Recipe not found' });
+  const [removed] = list.splice(index, 1);
+  if (!saveDbOrRespond(res)) {
+    list.splice(index, 0, removed);
+    return;
+  }
+  res.status(204).end();
+});
+
+aiPhotoStore.purgeExpired();
+setInterval(() => aiPhotoStore.purgeExpired(), 6 * 60 * 60 * 1000).unref();
 
 // ── Dev log bridge (NODE_ENV=development only) ────────────────────────────────
 // The app (only when __DEV__) sends its errors, warnings, failed API calls, screen changes and tester

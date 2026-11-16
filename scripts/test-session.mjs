@@ -542,6 +542,21 @@ async function main() {
     issuesLog.write(`${new Date().toISOString()} ${stripAnsi(line)}\n`);
   };
 
+  // AI_PROVIDER=local (in the shell or server/.env): start and health-check the ai-service before the server, so
+  // GET /api/ai/status is right from the app's first request. A failure only disables the AI screens.
+  const aiLocal = process.env.AI_PROVIDER === 'local' || readEnvFile(path.join(SERVER_DIR, '.env')).equals('AI_PROVIDER', 'local');
+  meta.aiProvider = aiLocal ? 'local' : 'not local';
+  if (aiLocal) {
+    try {
+      const { ensureAiService } = await import('./ai-service.mjs');
+      const health = await ensureAiService();
+      meta.aiService = { status: health.status, models: health.models, ocr: health.ocr };
+    } catch (err) {
+      meta.aiService = { status: 'down' };
+      console.error(yellow(bold(`ai-service is not available (${err.message}). The app will show the AI screens as unavailable.`)));
+    }
+  }
+
   // API server.
   const server = spawn(process.execPath, ['server.js'], {
     cwd: SERVER_DIR,

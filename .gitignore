@@ -38,3 +38,11 @@ firebase-web-config*.json
 .env*
 !.env.example
 _old_secrets/
+
+# Local AI: venv, caches and datasets live on D:\AI (never in git); Python bytecode
+__pycache__/
+*.pyc
+.pytest_cache/
+ai-service/eval/**/*.jpg
+ai-service/eval/**/*.png
+ai-service/eval/**/*.webp

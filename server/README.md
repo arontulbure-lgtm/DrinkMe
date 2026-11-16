@@ -82,9 +82,17 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | POST | `/api/notifications/read` | signed in | Marks all read |
 | GET, POST | `/api/smart-bar` | signed in | |
 | DELETE | `/api/smart-bar/:itemId` | signed in | |
-| POST | `/api/smart-bar/generate-recipes` | signed in | AI, 503 `ai_disabled` unless `AI_ENABLED=true` |
-| POST | `/api/detect-product` | signed in | AI, upload field `image` |
-| POST | `/api/generate-recipes` | signed in | AI |
+| POST | `/api/smart-bar/generate-recipes` | signed in | Legacy OpenAI route, 503 `ai_disabled` unless the provider is `openai` |
+| POST | `/api/detect-product` | signed in | Legacy OpenAI route, upload field `image` |
+| POST | `/api/generate-recipes` | signed in | Legacy OpenAI route |
+| GET | `/api/ai/status` | signed in | `?language=en\|ro`. The app's AI flag: `available`, `provider`, `noticeAccepted`, `settings` (basics, photo opt-in) |
+| POST | `/api/ai/notice` | signed in | `{ version: 1 }` accepts the AI notice; scan and recipes need it (403 `ai_notice_required`) |
+| PUT | `/api/ai/settings` | signed in | `{ basics?: string[] \| null, photoOptIn?: boolean }`; turning the opt-in off deletes kept photos |
+| POST | `/api/ai/scan` | signed in, AI notice | JSON `{ imageBase64, language }` (JPEG/PNG/WebP, 7 MB). See Local AI |
+| POST | `/api/ai/barcode` | signed in | `{ ean, language }`, Open Food Facts lookup; works with AI off |
+| POST | `/api/ai/recipes` | signed in, AI notice | `{ mode: 'scan'\|'smart_bar', item?, language, newSession? }` → `{ recipes, exhausted }` |
+| GET, POST | `/api/recipes/saved` | signed in | Saved AI recipes (max 200); POST `{ recipe }` re-validates it |
+| DELETE | `/api/recipes/saved/:recipeId` | signed in | |
 | GET | `/api/admin/reports` | admin | `?status=open\|resolved`, see Moderation |
 | POST | `/api/admin/reports/:id/resolve` | admin | See Moderation |
 | POST | `/api/admin/users/:id/suspend` | admin | See Moderation |
@@ -108,8 +116,15 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `OFFICIAL_USER_IDS` | empty | server | Comma-separated Firebase uids of the official DrinkMe account, parsed like `ADMIN_USER_IDS`. Gives `official: true` (the app's "Official" badge), the right to use the brand name in the profile name, and no auto-hide by reports. Not an admin, and must never also be in `ADMIN_USER_IDS` (it could not be suspended; startup warns). Ids are logged as counts only; startup also warns while `ALLOW_INSECURE_DEV_AUTH=true`. See Official account below |
 | `PARTNER_CONSENT_REQUIRED` | on | server | Off only for exactly `false`, an emergency rollback that makes partner lists effectively public (see below) |
 | `REQUIRE_VERIFIED_EMAIL` | off | server | On only for exactly `true`; needs Firebase. See the rollout note |
-| `AI_ENABLED` | off | server | AI routes run only when exactly `true` |
-| `OPENAI_API_KEY` | none | server | Required for AI, not enough on its own |
+| `AI_PROVIDER` | `off` | server | `local` (ai-service + Ollama), `openai` or `off`. Unset + `AI_ENABLED=true` means `openai` (legacy) |
+| `AI_ENABLED` | off | server | Legacy switch for the OpenAI provider, used only while `AI_PROVIDER` is unset |
+| `OPENAI_API_KEY` | none | server | Needed for `openai`, not enough on its own |
+| `AI_SERVICE_URL` | `http://127.0.0.1:8088` | server | ai-service base URL (`AI_PROVIDER=local`) |
+| `AI_SERVICE_TOKEN` | none | server + ai-service | Shared secret sent as `X-AI-Service-Token`. Required whenever the ai-service is not on the same machine |
+| `AI_SERVICE_TIMEOUT_MS` | `60000` | server | Recipe timeout; scans use at most 20 s |
+| `AI_RATE_LIMIT_PER_HOUR` | `30` | server | Scans + recipe batches per user per hour on `/api/ai/*` |
+| `AI_PHOTO_DIR` | `server/data/ai-scans` | server | Only for users who opted in to keeping scan photos |
+| `AI_PHOTO_RETENTION_DAYS` | `90` | server | Kept photos are deleted after this, on opt-out and with the account |
 | `ALLOW_INSECURE_DEV_AUTH` | off | server | `true` makes sign-in trust the client uid when no Firebase key is set. Ignored in production |
 | `BACKUP_DIR` | `server/backups` | backup script | Where `npm run backup` writes. Use separate storage in production |
 | `BACKUP_SOURCE` | `json-file` | backup script | Backup adapter. Only `json-file` exists |
@@ -277,8 +292,15 @@ curl -s -X POST "$API/api/admin/users/<uid>/unsuspend" -H "Authorization: Bearer
 ```
 All four answer `{ userId, suspended, suspendedUntil, suspendedPermanently, suspensionCount }`. The uid of a reported profile is the report's `targetId`; for a post or comment it is `target.userId`.
 
-## Enabling AI
-AI needs `AI_ENABLED=true`, `OPENAI_API_KEY`, and the client flags in `ScannerScreen.tsx` and `SmartBarScreen.tsx`. Only users who confirmed 18+ reach the AI routes, and the server still gives mocktail recipes to anyone unconfirmed as defence in depth. Do not enable AI where real users can reach it until all of these are done:
+## Local AI (AI_PROVIDER=local)
+Scanner and recipes run on a local model through the ai-service (`ai-service/`, Python FastAPI + Ollama). Setup, paths
+and models: `docs/ai/LOCAL_SETUP.md`; contracts: `.claude/skills/drinkme-ai-service/SKILL.md`. Start it with
+`npm run ai:start` (repo root) and set `AI_PROVIDER=local` in `server/.env`; `npm run test:android` starts it for you.
+Every recipe passes the safety rules S1-S13 in `server/ai/recipeSafety.js` whichever provider made it. Photos are
+processed in memory and never stored or logged unless the user opted in.
+
+## Enabling the OpenAI provider (legacy)
+AI needs `AI_PROVIDER=openai` (or the legacy `AI_ENABLED=true`), `OPENAI_API_KEY`, and the client flags in `ScannerScreen.tsx` and `SmartBarScreen.tsx`. Only users who confirmed 18+ reach the AI routes, and the server still gives mocktail recipes to anyone unconfirmed as defence in depth. Do not enable AI where real users can reach it until all of these are done:
 - A global daily AI cap and a hard monthly budget in the OpenAI dashboard.
 - A privacy disclosure and data agreement for photos sent to OpenAI.
 - One real OpenAI call; only a local mock has been used so far.

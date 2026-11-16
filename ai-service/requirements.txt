@@ -1,0 +1,9 @@
+# Installed into D:\AI\venvs\drinkme-ai by `npm run ai:setup` (pip cache on D:\AI\cache\pip).
+fastapi==0.163.1
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+pydantic==2.14.3
+pillow==13.0.0
+rapidocr-onnxruntime==1.4.4
+python-multipart
+pytest==9.2.0

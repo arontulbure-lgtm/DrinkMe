@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "models": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Models",
+      "type": "object"
+    },
+    "modelsPresent": {
+      "title": "Modelspresent",
+      "type": "boolean"
+    },
+    "ocr": {
+      "title": "Ocr",
+      "type": "boolean"
+    },
+    "ollama": {
+      "title": "Ollama",
+      "type": "boolean"
+    },
+    "schemaVersion": {
+      "const": "1",
+      "default": "1",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "degraded"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "models",
+    "ollama",
+    "modelsPresent",
+    "ocr"
+  ],
+  "title": "HealthResponse",
+  "type": "object"
+}
