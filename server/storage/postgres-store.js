@@ -15,21 +15,42 @@ export const STATE_TABLE = 'drinkme_state';
 export const HISTORY_TABLE = 'drinkme_state_history';
 export const DEFAULT_HISTORY_MAX_ROWS = 30;
 export const DEFAULT_HISTORY_MIN_INTERVAL_MS = 60 * 60 * 1000;
-// Same hard ceiling as the file backups (DB_BACKUP_HARD_MAX_DAYS in server.js): the app promises that a
-// deleted account leaves every backup within 30 days.
-export const DEFAULT_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// The app promises that a deleted account leaves every backup within 30 days. 28 days of age plus at most
+// one day until the daily purge (server.js runs it every 24 hours, and every write prunes too) stays inside.
+export const DEFAULT_HISTORY_MAX_AGE_MS = 28 * 24 * 60 * 60 * 1000;
 // Write-behind retry waits. The last one repeats until the write succeeds or a newer snapshot replaces it.
 export const DEFAULT_RETRY_WAITS_MS = [250, 500, 1000, 2000, 5000, 10000, 30000];
-// Arbitrary constant for pg_advisory_xact_lock, so two processes cannot create the tables at once.
+// Arbitrary constants for advisory locks: the schema creation (transaction-scoped), and the one server
+// instance per database (session-scoped, held on a dedicated connection while the server runs).
 const SCHEMA_LOCK_KEY = 4_163_271_905;
+export const INSTANCE_LOCK_KEY = 4_163_271_906;
+
+// sslmode values in DATABASE_URL. pg lets the URL's sslmode override the ssl option, so DATABASE_SSL=require
+// cannot be combined with a mode that allows plain text or skips the certificate check.
+const SSLMODES_WEAKER_THAN_REQUIRE = ['disable', 'allow', 'prefer', 'no-verify'];
+// Modes that encrypt and verify the server certificate (pg 8 treats require like verify-full).
+const VERIFYING_SSLMODES = ['verify-full', 'verify-ca', 'require'];
+
+/** The URL's sslmode (lowercase), null when absent, or undefined when the URL cannot be parsed. */
+export function sslmodeOf(databaseUrl) {
+  try {
+    const value = new URL(databaseUrl).searchParams.get('sslmode');
+    return value === null ? null : value.trim().toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Reads DB_DRIVER, DATABASE_URL and DATABASE_SSL. Never throws. `problems` holds setting names and the
  * rule they break, never their values, so it can go straight to exitOnInvalidProductionConfig.
+ * With production: true, Postgres mode also needs a verified TLS connection (DATABASE_SSL=require, or
+ * sslmode verify-full / verify-ca / require in the URL), or DATABASE_SSL=disable set on purpose (warned).
  * @param {Record<string, string | undefined>} env
- * @returns {{ driver: string, databaseUrl: string, ssl: 'require' | 'disable' | null, problems: string[], warnings: string[] }}
+ * @param {{ production?: boolean }} [options]
+ * @returns {{ driver: string, databaseUrl: string, ssl: 'require' | 'disable' | null, sslmode: string | null | undefined, problems: string[], warnings: string[] }}
  */
-export function readDbDriverConfig(env) {
+export function readDbDriverConfig(env, { production = false } = {}) {
   const problems = [];
   const warnings = [];
   const rawDriver = (env.DB_DRIVER ?? '').trim();
@@ -41,13 +62,27 @@ export function readDbDriverConfig(env) {
   const ssl = rawSsl === '' ? null : rawSsl;
   if (ssl !== null && ssl !== 'require' && ssl !== 'disable') problems.push('DATABASE_SSL (must be require or disable)');
 
+  let sslmode = null;
   if (driver === 'postgres') {
     if (!databaseUrl) problems.push('DATABASE_URL (required when DB_DRIVER=postgres)');
     else if (!/^postgres(?:ql)?:\/\//i.test(databaseUrl)) problems.push('DATABASE_URL (must start with postgres:// or postgresql://)');
+    else {
+      sslmode = sslmodeOf(databaseUrl);
+      if (sslmode === undefined) problems.push('DATABASE_URL (not a valid URL)');
+      else if (ssl === 'require' && SSLMODES_WEAKER_THAN_REQUIRE.includes(sslmode)) {
+        problems.push('DATABASE_SSL (require conflicts with a weaker sslmode in DATABASE_URL, which pg would use instead)');
+      } else if (production) {
+        if (ssl === 'disable') {
+          warnings.push('DATABASE_SSL=disable: the Postgres connection is not encrypted. Use this only on a private network.');
+        } else if (ssl !== 'require' && !VERIFYING_SSLMODES.includes(sslmode)) {
+          problems.push('DATABASE_SSL (production needs require, or sslmode=verify-full in DATABASE_URL; disable only on a private network)');
+        }
+      }
+    }
   } else if (driver === 'json' && databaseUrl) {
     warnings.push('DATABASE_URL is set but DB_DRIVER is not postgres: using the JSON file.');
   }
-  return { driver, databaseUrl, ssl, problems, warnings };
+  return { driver, databaseUrl, ssl, sslmode, problems, warnings };
 }
 
 /** The pg `ssl` option for a DATABASE_SSL value. null leaves it to the URL (sslmode=...). */
@@ -94,6 +129,10 @@ const defaultSleep = (ms) => new Promise((resolve) => {
  * (the last wait repeats) until it succeeds or a newer snapshot supersedes it, so nothing is dropped
  * while the process lives. Snapshots are written in the order they were enqueued.
  *
+ * Each snapshot gets a sequence number. A written snapshot contains every change of the ones before it,
+ * so "snapshot n is stored" means writtenSeq >= n. flush() waits for the snapshots enqueued before it
+ * only, so steady traffic cannot keep it waiting.
+ *
  * @param {{
  *   write: (snapshot: any) => Promise<void>,
  *   retryWaitsMs?: number[],
@@ -103,20 +142,21 @@ const defaultSleep = (ms) => new Promise((resolve) => {
  */
 export function createWriteBehindQueue({ write, retryWaitsMs = DEFAULT_RETRY_WAITS_MS, sleep = defaultSleep, log = console }) {
   let latest;          // the newest snapshot not yet handed to write()
+  let latestSeq = 0;
   let hasLatest = false;
   let running = false; // a pump is active (a write in flight or a retry wait)
-  let enqueuedCount = 0;
+  let enqueuedSeq = 0;
+  let writtenSeq = 0;
   let writtenCount = 0;
   let failedAttempts = 0;
-  let idleWaiters = [];
+  let waiters = [];    // [{ seq, resolve }]
   let wakeRetry = null; // ends a retry wait early (flush, or a newer snapshot after a failure)
 
   const isIdle = () => !running && !hasLatest;
-  const notifyIdle = () => {
-    if (!isIdle()) return;
-    const waiters = idleWaiters;
-    idleWaiters = [];
-    for (const resolve of waiters) resolve(true);
+  const notifyWritten = () => {
+    const ready = waiters.filter((waiter) => waiter.seq <= writtenSeq);
+    waiters = waiters.filter((waiter) => waiter.seq > writtenSeq);
+    for (const waiter of ready) waiter.resolve(true);
   };
 
   const interruptibleSleep = (ms) => new Promise((resolve) => {
@@ -134,21 +174,25 @@ export function createWriteBehindQueue({ write, retryWaitsMs = DEFAULT_RETRY_WAI
   async function pump() {
     running = true;
     let snapshot;
+    let snapshotSeq = 0;
     let failures = 0;
     try {
       while (hasLatest || failures > 0) {
         if (hasLatest) {
           // A newer snapshot always wins over one that is still failing: it contains every change.
           snapshot = latest;
+          snapshotSeq = latestSeq;
           latest = undefined;
           hasLatest = false;
         }
         try {
           await write(snapshot);
           writtenCount += 1;
+          writtenSeq = Math.max(writtenSeq, snapshotSeq);
           if (failures > 0) log.warn(`[db] Postgres write succeeded after ${failures} failed attempt(s).`);
           failures = 0;
           snapshot = undefined;
+          notifyWritten();
         } catch (err) {
           failures += 1;
           failedAttempts += 1;
@@ -162,43 +206,49 @@ export function createWriteBehindQueue({ write, retryWaitsMs = DEFAULT_RETRY_WAI
       }
     } finally {
       running = false;
-      notifyIdle();
+      notifyWritten();
     }
   }
 
   return {
-    /** Queues a snapshot. Never throws and never waits. */
+    /** Queues a snapshot and returns its sequence number. Never throws and never waits. */
     enqueue(snapshot) {
+      enqueuedSeq += 1;
       latest = snapshot;
+      latestSeq = enqueuedSeq;
       hasLatest = true;
-      enqueuedCount += 1;
       if (!running) {
         pump().catch((err) => log.error(`[db] Postgres write queue stopped (${describePgError(err)}).`));
       }
+      return enqueuedSeq;
     },
     /**
-     * Resolves true once every enqueued snapshot is written, or false after timeoutMs. A pending retry
-     * wait is cut short, so a flush tries the write at once.
+     * Resolves true once every snapshot enqueued so far is written, or false after timeoutMs. A pending
+     * retry wait is cut short, so a flush tries the write at once.
      */
     flush(timeoutMs = 10_000) {
-      if (isIdle()) return Promise.resolve(true);
+      const seq = enqueuedSeq;
+      if (writtenSeq >= seq) return Promise.resolve(true);
       wakeRetry?.();
       return new Promise((resolve) => {
         // Not unref'd: a shutdown flush must keep the process alive until it ends, even with nothing
         // else left (retry waits are unref'd).
         const timer = setTimeout(() => {
-          idleWaiters = idleWaiters.filter((item) => item !== onIdle);
+          waiters = waiters.filter((item) => item !== waiter);
           resolve(false);
         }, timeoutMs);
-        const onIdle = (value) => {
-          clearTimeout(timer);
-          resolve(value);
+        const waiter = {
+          seq,
+          resolve: (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
         };
-        idleWaiters.push(onIdle);
+        waiters.push(waiter);
       });
     },
     isIdle,
-    stats: () => ({ enqueued: enqueuedCount, written: writtenCount, failedAttempts, pending: !isIdle() }),
+    stats: () => ({ enqueued: enqueuedSeq, written: writtenCount, failedAttempts, pending: !isIdle() }),
   };
 }
 
@@ -233,7 +283,7 @@ export async function openPostgresStore({
   const pool = makePool({
     connectionString,
     ...(sslOptionFor(ssl) !== undefined && { ssl: sslOptionFor(ssl) }),
-    max: 3,
+    max: 4, // one is the instance lock while the server runs
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
     application_name: 'drinkme-server',
@@ -260,7 +310,30 @@ export async function openPostgresStore({
     }
   };
 
+  let lockClient = null;
+
   const store = {
+    /**
+     * Takes the session advisory lock that allows one DrinkMe server (or migration) per database, on a
+     * connection of its own kept for the life of the process. Resolves false when another holds it.
+     * If that connection drops, Postgres releases the lock; this is logged.
+     */
+    async acquireInstanceLock() {
+      const client = await pool.connect();
+      let locked = false;
+      try {
+        const { rows } = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [INSTANCE_LOCK_KEY]);
+        locked = rows[0]?.locked === true;
+      } finally {
+        if (!locked) client.release();
+      }
+      if (locked) {
+        lockClient = client;
+        client.on?.('error', (err) => log.error(`[db] Lost the Postgres connection holding the instance lock (${describePgError(err)}). Another server could now start on this database.`));
+      }
+      return locked;
+    },
+
     /** Creates the two tables if missing. Idempotent and safe to run from two processes at once. */
     async ensureSchema() {
       await withTransaction(async (client) => {
@@ -352,6 +425,15 @@ export async function openPostgresStore({
     },
 
     async close() {
+      if (lockClient) {
+        try {
+          await lockClient.query('SELECT pg_advisory_unlock($1)', [INSTANCE_LOCK_KEY]);
+        } catch {
+          // the lock ends with the connection anyway
+        }
+        lockClient.release();
+        lockClient = null;
+      }
       await pool.end();
     },
   };

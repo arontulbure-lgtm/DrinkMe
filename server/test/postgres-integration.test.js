@@ -285,6 +285,102 @@ test('backup adapter postgres writes a JSON database file', { skip: skipReason, 
   assert.deepEqual(JSON.parse(fs.readFileSync(created[0], 'utf8')), FIXTURE);
 });
 
+test('one server per database: a held instance lock stops a second start and a migration', { skip: skipReason, timeout: TEST_TIMEOUT_MS }, async (t) => {
+  await resetTables();
+  const holder = await (await getPool()).connect();
+  try {
+    const { rows } = await holder.query('SELECT pg_try_advisory_lock(4163271906) AS locked');
+    assert.equal(rows[0].locked, true);
+    const { output } = await assertRefusesToStart(postgresEnv());
+    assert.match(output, /another DrinkMe server \(or a migration\) is using this Postgres database/);
+    assertNoSecret(output);
+  } finally {
+    await holder.query('SELECT pg_advisory_unlock(4163271906)');
+    holder.release();
+  }
+  // A running server holds it: the migration is refused and writes nothing.
+  const server = await startServer(postgresEnv());
+  t.after(() => server.stop());
+  await waitFor(async () => (await readState()) !== null, 'the first state row');
+  const before = await readState();
+  const dir = makeTempDir(t);
+  fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify(FIXTURE));
+  const refused = runScript('migrate-to-postgres.mjs', ['source.json', '--force'], dir);
+  assert.equal(refused.status, 2, refused.output);
+  assert.match(refused.output, /Stop it first/);
+  assert.deepEqual(await readState(), before);
+});
+
+test('durable saves: with Postgres blocked, suspend and account deletion answer 503 and are undone', { skip: skipReason, timeout: TEST_TIMEOUT_MS }, async (t) => {
+  await resetTables();
+  const server = await startServer(postgresEnv({ ADMIN_USER_IDS: 'pg-admin' }));
+  t.after(() => server.stop());
+  const adminToken = await signIn(server.baseUrl, 'pg-admin');
+  const targetToken = await signIn(server.baseUrl, 'pg-target');
+  await waitFor(async () => {
+    const state = await readState();
+    return state?.users?.some((u) => u.id === 'pg-target' && u.ageConfirmedAt);
+  }, 'both users stored');
+
+  // Block every write: the test holds an exclusive lock on the state table.
+  const blocker = await (await getPool()).connect();
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    await blocker.query('ROLLBACK');
+    blocker.release();
+  };
+  t.after(release);
+  await blocker.query('BEGIN');
+  await blocker.query('LOCK TABLE drinkme_state IN ACCESS EXCLUSIVE MODE');
+
+  const suspend = await postJson(`${server.baseUrl}/api/admin/users/pg-target/suspend`, {}, adminToken);
+  assert.equal(suspend.status, 503);
+  const deletion = await postJson(`${server.baseUrl}/api/users/pg-target/delete-account`, {}, targetToken);
+  assert.equal(deletion.status, 503);
+  // Undone in memory: the account still works and is not suspended.
+  const profile = await getJson(`${server.baseUrl}/api/users/pg-target`, targetToken);
+  assert.equal(profile.status, 200);
+  assert.equal(profile.body.suspendedUntil, undefined);
+
+  await release();
+  // The undone state is queued after the blocked one, so it is what Postgres ends up with.
+  await waitFor(async () => {
+    const state = await readState();
+    const target = state?.users?.find((u) => u.id === 'pg-target');
+    return target && !(target.suspensions?.length > 0)
+      && !state.pendingAccountDeletions.some((entry) => entry.uid === 'pg-target')
+      && !state.auditLog.some((entry) => entry.action === 'admin.user_suspended' || entry.action === 'account.deletion_requested');
+  }, 'the undone state in drinkme_state');
+
+  // With Postgres back, the same requests work and are stored before the answer.
+  const suspended = await postJson(`${server.baseUrl}/api/admin/users/pg-target/suspend`, {}, adminToken);
+  assert.equal(suspended.status, 200);
+  const stored = (await readState()).users.find((u) => u.id === 'pg-target');
+  assert.equal(stored.suspensions.length, 1, 'stored before the 200');
+});
+
+test('a stored state that will not load is copied to the history before the server starts empty', { skip: skipReason, timeout: TEST_TIMEOUT_MS }, async (t) => {
+  await resetTables();
+  // Creates the tables, then the test replaces the row with a document of the wrong shape.
+  const first = await startServer(postgresEnv());
+  await waitFor(async () => (await readState()) !== null, 'the first state row');
+  await first.stop();
+  const corrupt = { users: 'not a list', dbSchemaVersion: 2 };
+  await (await getPool()).query('UPDATE drinkme_state SET data = $1::jsonb WHERE id = 1', [JSON.stringify(corrupt)]);
+  const historyBefore = await historyCount();
+
+  const server = await startServer(postgresEnv());
+  t.after(() => server.stop());
+  assert.match(server.getOutput(), /Copied the stored Postgres state to drinkme_state_history/);
+  assert.match(server.getOutput(), /invalid shape: users\), a copy is in drinkme_state_history, starting empty/);
+  assert.equal(await historyCount(), historyBefore + 1);
+  const { rows } = await (await getPool()).query('SELECT data FROM drinkme_state_history ORDER BY id DESC LIMIT 1');
+  assert.deepEqual(rows[0].data, corrupt);
+  assert.deepEqual(fs.readdirSync(path.dirname(server.dbFile)).filter((name) => name.includes('.corrupt-')), [], 'no file copy in Postgres mode');
+});
+
 test('production refuses an empty Postgres without ALLOW_EMPTY_DB, naming settings only', { skip: skipReason, timeout: TEST_TIMEOUT_MS }, async () => {
   await resetTables();
   const { privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -299,7 +395,10 @@ test('production refuses an empty Postgres without ALLOW_EMPTY_DB, naming settin
       type: 'service_account', project_id: 'drinkme-pg-test', private_key: privateKey, client_email: 'pg@drinkme-pg-test.example.test',
     }),
     ALLOW_EMPTY_DB: '',
+    // The test container has no TLS; production accepts that only when it is said explicitly (warned).
+    DATABASE_SSL: 'disable',
   }));
+  assert.match(output, /DATABASE_SSL=disable: the Postgres connection is not encrypted/);
   assert.match(output, /refusing to start in production\. Fix: DATABASE_URL \(no DrinkMe state in this database/);
   assertNoSecret(output);
   assert.equal(await readState(), null, 'nothing was written');

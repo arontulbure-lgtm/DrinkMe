@@ -84,7 +84,7 @@ export async function openStoreFromEnv(env = process.env) {
 /** Writes text to file atomically (temp file, rename), mode 0600. Refuses to replace a file unless overwrite. */
 export async function writeFileAtomically(file, text, { overwrite = false } = {}) {
   if (!overwrite && fs.existsSync(file)) throw scriptError('the output file exists (use --force to replace it)', 'EEXIST');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); // exports hold personal data
   const tmpFile = `${file}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
   try {
     const handle = await fs.promises.open(tmpFile, 'wx', 0o600);

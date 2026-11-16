@@ -104,7 +104,7 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `DB_FILE` | `server/data/db.json` | server, backup script | Database file. Absolute in production, in a directory of its own (temp files and in-server backups go next to it) |
 | `DB_DRIVER` | `json` | server, backup script | `json` (the file in `DB_FILE`) or `postgres` (the same document in Postgres). Anything else stops the server. See Database: JSON or Postgres |
 | `DATABASE_URL` | none | server, db scripts, backup script | `postgres://` or `postgresql://` URL. Required when `DB_DRIVER=postgres`. Never logged |
-| `DATABASE_SSL` | unset | server, db scripts, backup script | `require` (TLS, certificate verified) or `disable`. Unset leaves it to `sslmode` in the URL |
+| `DATABASE_SSL` | unset | server, db scripts, backup script | `require` (TLS, certificate verified) or `disable`. Unset leaves it to `sslmode` in the URL. pg lets the URL's `sslmode` win, so `require` with `sslmode=disable`, `allow`, `prefer` or `no-verify` stops the server. Production needs `require`, or `sslmode=verify-full`/`verify-ca`/`require` in the URL, or `disable` set on purpose (warned; private network only) |
 | `ALLOW_EMPTY_DB` | off | server | `true` lets production start with no database (no file, or no Postgres state row) or after a corrupt one. First deploy only |
 | `CORRUPT_BACKUP_RETENTION_DAYS` | `21` | server | Days to keep `.corrupt-*` and `.pre-migration-*` backups, `1` to `21`. Larger whole numbers are capped at `21`, anything else uses `21`, both with a warning |
 | `ADMIN_USER_IDS` | empty | server | Comma-separated Firebase uids allowed on `/api/admin/*`. Empty: every admin route returns 403 (production logs a warning). Ids are never logged |
@@ -139,7 +139,8 @@ With production rules, the server exits at startup and names the setting to fix,
 - `JWT_SECRET` meets the rules above. The old hardcoded default is refused in every environment.
 - `FIREBASE_SERVICE_ACCOUNT_KEY` gives a working service account.
 - `DB_FILE`, if set, is absolute.
-- `DB_DRIVER` is `json` or `postgres`, and with `postgres`, `DATABASE_URL` is a `postgres://` URL and `DATABASE_SSL` is empty, `require` or `disable` (outside production these stop the server too).
+- `DB_DRIVER` is `json` or `postgres`, and with `postgres`, `DATABASE_URL` is a `postgres://` URL and `DATABASE_SSL` is empty, `require` or `disable` and agrees with the URL's `sslmode` (outside production these stop the server too).
+- With `postgres`, the connection is TLS with a verified certificate (`DATABASE_SSL=require`, or `sslmode=verify-full`, `verify-ca` or `require` in the URL), unless `DATABASE_SSL=disable` is set on purpose (a warning; private networks only).
 - The database file exists (Postgres mode: the `drinkme_state` row exists), unless `ALLOW_EMPTY_DB=true`.
 - The database file holds valid data, unless `ALLOW_EMPTY_DB=true`. An invalid file is copied to `<DB_FILE>.corrupt-<timestamp>` first.
 
@@ -157,12 +158,13 @@ DATA-1 stepping stone. `DB_DRIVER` picks where the database lives; everything el
 |---|---|---|
 | Where | `DB_FILE` | Table `drinkme_state` (one row, the whole document as JSONB), created at start if missing |
 | Save | Atomic file write before the route answers. A failed save answers 503 and is rolled back | Serialised at once, written behind: one write in flight, newer snapshots replace queued ones, failed writes retried with backoff (0.25 s up to 30 s, repeating) and logged by error code only |
-| Durability | A crash loses nothing that was answered | A crash or kill can lose the last moments of changes (normally well under a second; longer while Postgres is unreachable). SIGTERM/SIGINT write the queue before exit (8 s limit, within Docker's 10 s stop). Routes cannot answer 503 for a failed Postgres write: the change stays in memory and is retried |
+| Durability | A crash loses nothing that was answered | A crash or kill can lose the last moments of changes (normally well under a second; longer while Postgres is unreachable). SIGTERM/SIGINT write the queue before exit (8 s limit, within Docker's 10 s stop). Most routes cannot answer 503 for a failed Postgres write: the change stays in memory and is retried. Exceptions, stored before the answer (up to 10 s, then 503 and undone): the pending account deletion (also before the Firebase user is deleted), session generation bumps at sign-in, and admin suspensions (direct, unsuspend, and `suspend: true` on a resolve) |
 | Size guard (507) | 450,000,000 bytes | 200,000,000 bytes of compact JSON (a jsonb value is capped at about 256 MiB) |
-| In-server backups | `.corrupt-*` / `.pre-migration-*` next to `DB_FILE` | Table `drinkme_state_history`: at most one snapshot per hour, the newest 30 kept (all of them, still within 30 days, while a recovery hold may be on), none older than 30 days. A rare `.corrupt-*` / `.pre-migration-*` copy still goes to `DB_FILE`'s folder |
+| In-server backups | `.corrupt-*` / `.pre-migration-*` next to `DB_FILE` | Table `drinkme_state_history`: at most one snapshot per hour, the newest 30 kept (all of them while a recovery hold may be on), none older than 28 days (pruned by every write, at start and every 24 hours, so none outlives 30 days). A stored state that will not load is copied there before the server starts empty. A rare `.pre-migration-*` copy still goes to `DB_FILE`'s folder |
+| Provider backups | Host or volume snapshots: 30 days or less | The managed Postgres provider's own backups and point-in-time recovery: set their retention to 30 days or less (deleted accounts must leave every backup within 30 days) |
 | Scheduled backups | `npm run backup` copies the file | `npm run backup` (adapter `postgres`, the default in this mode) exports a JSON database file |
 
-Run one server instance per database: two would overwrite each other's document. Not stored exactly: JSONB reorders object keys, and a NUL character or a lone UTF-16 surrogate is stored as U+FFFD (logged as a count). This is not the final design: the next step is a relational schema (a table per collection).
+One server instance per database: the server holds a Postgres advisory lock while it runs, and a second server (or `db:migrate-to-postgres`) refuses to start while it is held. Two would overwrite each other's document. Not stored exactly: JSONB reorders object keys, and a NUL character or a lone UTF-16 surrogate is stored as U+FFFD (logged as a count). This is not the final design: the next step is a relational schema (a table per collection).
 
 Migrate (stop the server first, so nothing is written to the file afterwards):
 ```bash
@@ -332,7 +334,7 @@ docker build -t drinkme-api .
 docker run -p 8080:8080 -e JWT_SECRET -e FIREBASE_SERVICE_ACCOUNT_KEY -e CORS_ALLOWED_ORIGINS -e TRUST_PROXY_HOPS -e ADMIN_USER_IDS -e OFFICIAL_USER_IDS -v drinkme-data:/app/server/data drinkme-api
 ```
 
-The image uses Node 22, production dependencies only, a non-root user, `NODE_ENV=production` and `PORT=8080`. `.dockerignore` is an allowlist: only `server/package.json`, `server/package-lock.json`, `server/server.js`, `server/app-check.js`, `server/storage/` and `server/scripts/` enter the build, so a new server source file must be added there and in the `Dockerfile`.
+The image uses Node 22, production dependencies only, a non-root user, `NODE_ENV=production` and `PORT=8080`. `.dockerignore` is an allowlist: only `server/package.json`, `server/package-lock.json`, `server/server.js`, `server/app-check.js`, `server/storage/` and the production scripts (`backup.js`, `postgres-cli.mjs`, `migrate-to-postgres.mjs`, `export-from-postgres.mjs`) enter the build; owner and developer tools (`testapi`, `testusers`, `firebase-configure`, `official`, `env-remove`, `test-postgres`, `docker-smoke`) stay out, so a new server source file must be added there and in the `Dockerfile`.
 
 Deploy variables:
 - `JWT_SECRET`, as described above.
@@ -342,7 +344,7 @@ Deploy variables:
 - `ADMIN_USER_IDS`: The uids of the people who review reports.
 - `OFFICIAL_USER_IDS`: The uid of the official DrinkMe account, once the owner has created it.
 - `ALLOW_EMPTY_DB=true`: For the first start only, then remove it.
-- `DB_DRIVER=postgres` and `DATABASE_URL` (optionally `DATABASE_SSL=require`) to keep the data in Postgres instead of a volume; see Database: JSON or Postgres. With Postgres, no volume is needed for the data.
+- `DB_DRIVER=postgres`, `DATABASE_URL` and `DATABASE_SSL=require` (or `sslmode=verify-full` in the URL) to keep the data in Postgres instead of a volume; see Database: JSON or Postgres. With Postgres, no volume is needed for the data. Set the provider's own backups and point-in-time recovery to 30 days or less.
 - Storage: Mount a volume writable by uid 1000 at `/app/server/data`, or set an absolute `DB_FILE` in a directory of its own. Without a volume, data is lost on redeploy.
 - Backups: schedule `npm run backup` daily in the same image (for example `docker run ... drinkme-api npm run backup` with the same volume and `-e BACKUP_DIR` pointing at separate storage), and keep host or volume snapshots 30 days or less.
 

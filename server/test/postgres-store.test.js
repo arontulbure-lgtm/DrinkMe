@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { test } from 'node:test';
 
 import {
-  countDbRecords, createWriteBehindQueue, describePgError, openPostgresStore, readDbDriverConfig, sslOptionFor, toJsonbSafeText,
+  DEFAULT_HISTORY_MAX_AGE_MS, countDbRecords, createWriteBehindQueue, describePgError, openPostgresStore, readDbDriverConfig,
+  sslOptionFor, sslmodeOf, toJsonbSafeText,
 } from '../storage/postgres-store.js';
 import { assertRefusesToStart } from './helpers/harness.js';
 
@@ -39,6 +40,45 @@ test('DB_DRIVER defaults to json; postgres needs a postgres:// DATABASE_URL; nam
   assert.deepEqual(sslOptionFor('require'), { rejectUnauthorized: true });
   assert.equal(sslOptionFor('disable'), false);
   assert.equal(sslOptionFor(null), undefined);
+});
+
+test('sslmode in DATABASE_URL: a weaker mode conflicts with DATABASE_SSL=require; production needs verified TLS', () => {
+  const base = 'postgres://u:hunter2@db.example.test:5432/drinkme';
+  const config = (url, ssl, production = false) => readDbDriverConfig(
+    { DB_DRIVER: 'postgres', DATABASE_URL: url, ...(ssl !== undefined && { DATABASE_SSL: ssl }) },
+    { production },
+  );
+  assert.equal(sslmodeOf(`${base}?sslmode=Verify-Full`), 'verify-full');
+  assert.equal(sslmodeOf(base), null);
+  assert.equal(sslmodeOf('postgres://[bad'), undefined);
+  for (const weak of ['disable', 'allow', 'prefer', 'no-verify']) {
+    const { problems } = config(`${base}?sslmode=${weak}`, 'require');
+    assert.equal(problems.length, 1, weak);
+    assert.match(problems[0], /^DATABASE_SSL \(require conflicts with a weaker sslmode/);
+    assert.ok(!problems[0].includes('hunter2'));
+  }
+  for (const strong of ['require', 'verify-ca', 'verify-full']) {
+    assert.deepEqual(config(`${base}?sslmode=${strong}`, 'require').problems, [], strong);
+  }
+  // Outside production nothing more is required.
+  assert.deepEqual(config(base, undefined).problems, []);
+  assert.deepEqual(config(`${base}?sslmode=prefer`, undefined).problems, []);
+  // Production: DATABASE_SSL=require, or a verifying sslmode, or an explicit disable (warned).
+  assert.deepEqual(config(base, 'require', true).problems, []);
+  for (const strong of ['require', 'verify-ca', 'verify-full']) assert.deepEqual(config(`${base}?sslmode=${strong}`, undefined, true).problems, []);
+  for (const url of [base, `${base}?sslmode=prefer`, `${base}?sslmode=no-verify`, `${base}?sslmode=disable`]) {
+    const { problems } = config(url, undefined, true);
+    assert.deepEqual(problems, ['DATABASE_SSL (production needs require, or sslmode=verify-full in DATABASE_URL; disable only on a private network)'], url);
+  }
+  const disabled = config(base, 'disable', true);
+  assert.deepEqual(disabled.problems, []);
+  assert.match(disabled.warnings.join(' '), /not encrypted\. Use this only on a private network/);
+  // The JSON driver ignores the URL's sslmode.
+  assert.deepEqual(readDbDriverConfig({ DATABASE_URL: `${base}?sslmode=disable`, DATABASE_SSL: 'require' }, { production: true }).problems, []);
+});
+
+test('the history ceiling defaults to 28 days', () => {
+  assert.equal(DEFAULT_HISTORY_MAX_AGE_MS, 28 * 24 * 60 * 60 * 1000);
 });
 
 test('describePgError gives a code, never a message', () => {
@@ -98,6 +138,39 @@ test('write-behind: flush waits for the pending write and is immediate when idle
   await flushing;
   assert.equal(flushed, true);
   assert.equal(queue.isIdle(), true);
+});
+
+test('write-behind: flush waits only for snapshots enqueued before it, so steady traffic cannot hold it', async () => {
+  const { calls, write } = controlledWriter();
+  const queue = createWriteBehindQueue({ write, log: silentLog });
+  assert.equal(queue.enqueue('a'), 1);
+  let flushed = null;
+  const flushing = queue.flush(5000).then((value) => { flushed = value; });
+  await tick();
+  assert.equal(queue.enqueue('b'), 2); // after the flush started
+  calls[0].resolve(); // 'a' stored: the flush is done although 'b' is still pending
+  await flushing;
+  assert.equal(flushed, true);
+  assert.equal(queue.isIdle(), false);
+  await tick();
+  calls[1].resolve();
+  assert.equal(await queue.flush(1000), true);
+});
+
+test('write-behind: a durable save fails (false) while writes fail, and succeeds once a write goes through', async () => {
+  let failing = true;
+  const writes = [];
+  const write = async (snapshot) => {
+    if (failing) throw Object.assign(new Error('down'), { code: '57P01' });
+    writes.push(snapshot);
+  };
+  const queue = createWriteBehindQueue({ write, retryWaitsMs: [5], log: silentLog });
+  queue.enqueue('pending-deletion');
+  assert.equal(await queue.flush(60), false, 'not stored in time: the caller answers 503 and rolls back');
+  queue.enqueue('rolled-back'); // what server.js queues after its undo
+  failing = false;
+  assert.equal(await queue.flush(2000), true);
+  assert.deepEqual(writes, ['rolled-back'], 'the newer (undone) state wins; the failing snapshot is never written after it');
 });
 
 test('write-behind: a failed write is retried with backoff; a newer snapshot supersedes it', async () => {
@@ -248,6 +321,12 @@ test('an invalid DB_DRIVER or a missing DATABASE_URL stops the server, naming se
     assert.match(fatalLine(production.output), pattern);
     assert.doesNotMatch(production.output, /hunter2/);
   }
+});
+
+test('production refuses Postgres without verified TLS before connecting, naming settings only', { timeout: 60_000 }, async () => {
+  const { output } = await assertRefusesToStart(productionEnv({ DB_DRIVER: 'postgres', DATABASE_URL: 'postgres://user:hunter2@127.0.0.1:1/drinkme?sslmode=prefer' }));
+  assert.match(fatalLine(output), /DATABASE_SSL \(production needs require, or sslmode=verify-full in DATABASE_URL/);
+  assert.doesNotMatch(output, /hunter2|ECONNREFUSED/);
 });
 
 test('Postgres that cannot be reached stops the server with an error code only', async () => {

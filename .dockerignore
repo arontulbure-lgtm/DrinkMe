@@ -9,4 +9,10 @@ server/*
 !server/server.js
 !server/app-check.js
 !server/storage/
-!server/scripts/
+# Only the scripts the server needs in production (backups, Postgres migration and export). Owner and
+# developer tools (testapi, testusers, firebase-configure, official, env-remove, test-postgres,
+# docker-smoke) stay out of the image.
+!server/scripts/backup.js
+!server/scripts/postgres-cli.mjs
+!server/scripts/migrate-to-postgres.mjs
+!server/scripts/export-from-postgres.mjs

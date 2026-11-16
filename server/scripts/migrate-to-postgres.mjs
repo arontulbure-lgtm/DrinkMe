@@ -66,6 +66,11 @@ export async function migrateToPostgres(argv, { log = console } = {}) {
     return 1;
   }
   try {
+    // The server takes the same lock: a running server would overwrite the migrated state with its own.
+    if (!(await store.acquireInstanceLock())) {
+      log.error('[migrate] Refused: a DrinkMe server (or another migration) is using this Postgres database. Stop it first. Nothing was written.');
+      return 2;
+    }
     const existing = await store.load();
     if (existing) {
       const existingCounts = countDbRecords(JSON.parse(existing.text));

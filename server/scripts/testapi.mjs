@@ -10,7 +10,9 @@
 //   npm run testapi -- reset-password <email>              resets through Firebase's oob code (like the email
 //                                                         link) to a new random password, saved in the file
 //
-// API base: TESTAPI_URL (default http://127.0.0.1:5000). Never prints a password, ID token or session token.
+// API base: TESTAPI_URL (default http://127.0.0.1:5000). Plain http only to this machine or a private LAN
+// address (the session token goes with every call); anything else must be https. Never prints a password,
+// ID token or session token. Token and password files are written owner-only (0600).
 // The Firebase web API key is read from the project's Identity Toolkit config with the service account and
 // is never printed either.
 import fs from 'node:fs';
@@ -18,11 +20,33 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadServiceAccount } from './official.mjs';
-import { isDeletableTestEmail, randomPassword, TEST_USERS_FILE } from './testusers.mjs';
+import { isDeletableTestEmail, randomPassword, TEST_USERS_FILE, writeSecretFile } from './testusers.mjs';
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOKENS_FILE = path.join(path.dirname(TEST_USERS_FILE), 'testusers.tokens.local.json');
 const API = (process.env.TESTAPI_URL ?? 'http://127.0.0.1:5000').replace(/\/$/, '');
+
+// localhost, loopback, or a private IPv4 LAN address (10/8, 172.16/12, 192.168/16).
+const isLocalOrPrivateHost = (hostname) => {
+  if (hostname === 'localhost' || hostname === '[::1]') return true;
+  const parts = hostname.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts;
+  return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+};
+
+/** Null when the API base may receive a session token, otherwise why not. */
+const apiBaseProblem = (base) => {
+  let url;
+  try {
+    url = new URL(base);
+  } catch {
+    return 'TESTAPI_URL is not a valid URL';
+  }
+  if (url.protocol === 'https:') return null;
+  if (url.protocol === 'http:' && isLocalOrPrivateHost(url.hostname)) return null;
+  return 'TESTAPI_URL must be https, or http to localhost, 127.0.0.1 or a private LAN address';
+};
 const IDT = 'https://identitytoolkit.googleapis.com';
 
 const readJson = (file, fallback) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : fallback);
@@ -73,7 +97,7 @@ async function login(email) {
   }
   const tokens = readJson(TOKENS_FILE, {});
   tokens[email] = { token: json.token, uid: signIn.localId, at: new Date().toISOString() };
-  fs.writeFileSync(TOKENS_FILE, `${JSON.stringify(tokens, null, 2)}\n`);
+  writeSecretFile(TOKENS_FILE, `${JSON.stringify(tokens, null, 2)}\n`);
   console.log(`login ${email}: OK, uid ${signIn.localId} (session saved, not printed)`);
 }
 
@@ -112,7 +136,7 @@ async function resetPassword(email) {
   await identity(apiKey, 'resetPassword', { oobCode: oobCode(link), newPassword: password });
   const data = readJson(TEST_USERS_FILE, { users: [] });
   data.users.find((item) => item.email === email).password = password;
-  fs.writeFileSync(TEST_USERS_FILE, `${JSON.stringify(data, null, 2)}\n`);
+  writeSecretFile(TEST_USERS_FILE, `${JSON.stringify(data, null, 2)}\n`);
   console.log(`reset-password ${email}: reset through the reset link; new password saved, not printed`);
 }
 
@@ -149,7 +173,8 @@ const run = {
   enable: () => setDisabled(email, false),
   'delete-unverified': () => deleteUnverified(email),
 }[command];
-(run ? run() : Promise.reject(new Error('Usage: npm run testapi -- login|call|verify-link|reset-password <email> …')))
+const baseProblem = apiBaseProblem(API);
+(baseProblem ? Promise.reject(new Error(baseProblem)) : run ? run() : Promise.reject(new Error('Usage: npm run testapi -- login|call|verify-link|reset-password <email> …')))
   .catch((err) => {
     console.error(err.message);
     process.exit(1);
