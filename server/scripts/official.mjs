@@ -113,6 +113,21 @@ async function main() {
     return;
   }
 
+  if (command === 'keys') {
+    // Which service-account files lie in server/, their project, and which one server/.env points to.
+    // File names and project ids only.
+    const key = envValue(readText(serverEnvFile, 'server/.env'), 'FIREBASE_SERVICE_ACCOUNT_KEY') ?? '';
+    const configured = key && !key.startsWith('{') ? path.resolve(SERVER_DIR, key) : null;
+    console.log(`server/.env FIREBASE_SERVICE_ACCOUNT_KEY: ${!key ? 'not set' : key.startsWith('{') ? 'inline JSON' : path.relative(SERVER_DIR, configured).split(path.sep).join('/')}`);
+    for (const name of fs.readdirSync(SERVER_DIR).filter((item) => /serviceaccount|adminsdk/i.test(item) && item.endsWith('.json'))) {
+      const file = path.join(SERVER_DIR, name);
+      let project = '(unreadable)';
+      try { project = JSON.parse(fs.readFileSync(file, 'utf8')).project_id ?? '(none)'; } catch { /* reported as unreadable */ }
+      console.log(`  ${name}  project ${project}${configured === file ? '  <- in use' : ''}`);
+    }
+    return;
+  }
+
   if (command === 'find') {
     if (!arg || !arg.includes('@')) throw new Error('Usage: npm run official:find -- <email>');
     const serviceAccount = loadServiceAccount(readText(serverEnvFile, 'server/.env'), SERVER_DIR);

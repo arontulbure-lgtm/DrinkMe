@@ -90,7 +90,34 @@ const isGitIgnored = (file) => spawnSync('git', ['check-ignore', '-q', file], { 
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 
+// npm run firebase:use-key -- <service-account.json>: points the server at another key file of the same
+// project as the app (FIREBASE_SERVICE_ACCOUNT_KEY only). Prints project ids only.
+async function useKey(accountArg) {
+  const accountFile = path.resolve(process.cwd(), accountArg ?? '');
+  if (!accountArg || !fs.existsSync(accountFile)) throw new Error('Usage: npm run firebase:use-key -- <service-account.json>');
+  if (isInsideRepo(accountFile) && !isGitIgnored(accountFile)) throw new Error(`${path.relative(ROOT, accountFile)} is not git-ignored. Nothing was changed.`);
+  const accountProject = readServiceAccountProject(fs.readFileSync(accountFile, 'utf8'));
+  const rootEnvFile = path.join(ROOT, '.env');
+  const appProject = fs.existsSync(rootEnvFile)
+    ? (fs.readFileSync(rootEnvFile, 'utf8').match(/^\s*EXPO_PUBLIC_FIREBASE_PROJECT_ID\s*=\s*["']?([^"'\s#]+)/m)?.[1] ?? '(not set)')
+    : '(not set)';
+  console.log(`App project: ${appProject}`);
+  console.log(`Key project: ${accountProject}`);
+  if (appProject !== accountProject) {
+    console.log('MISMATCH: nothing was changed.');
+    process.exitCode = 1;
+    return;
+  }
+  const serverEnvFile = path.join(SERVER_DIR, '.env');
+  const serverText = fs.readFileSync(serverEnvFile, 'utf8');
+  const result = setEnvLines(serverText, { FIREBASE_SERVICE_ACCOUNT_KEY: serviceAccountSetting(accountFile) });
+  if (!result.ok) throw new Error(`${result.reason} Nothing was changed.`);
+  if (result.changed.length > 0) writeFileAtomic(serverEnvFile, result.text);
+  console.log(result.changed.length > 0 ? 'MATCH: server/.env now uses this key (no other line changed).' : 'MATCH: server/.env already uses this key.');
+}
+
 async function main() {
+  if (process.argv[2] === '--use-key') return useKey(process.argv[3]);
   const [webArg, accountArg] = process.argv.slice(2);
   if (!webArg || !accountArg) {
     throw new Error('Usage: npm run firebase:configure -- <web-config.json> <service-account.json>');
