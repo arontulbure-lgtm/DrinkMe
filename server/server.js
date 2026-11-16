@@ -66,6 +66,8 @@ function exitOnInvalidProductionConfig(problems) {
 // a fallback that trusts the client uid. That fallback is insecure and development-only.
 import { initializeApp as adminInitializeApp, getApps as adminGetApps, cert } from 'firebase-admin/app';
 import { getAuth as adminGetAuth } from 'firebase-admin/auth';
+import { getAppCheck as adminGetAppCheck } from 'firebase-admin/app-check';
+import { createAppCheckMiddleware, createAppCheckStats, parseAppCheckMode } from './app-check.js';
 
 let firebaseAuth = null;
 
@@ -122,6 +124,9 @@ if (isProduction) {
   }
   if (!firebaseAuth) {
     missingConfig.push('FIREBASE_SERVICE_ACCOUNT_KEY (a valid service account)');
+  }
+  if (!parseAppCheckMode(process.env.APP_CHECK_MODE).valid) {
+    missingConfig.push('APP_CHECK_MODE (off, monitor or enforce)');
   }
   if (missingConfig.length) exitOnInvalidProductionConfig(missingConfig);
   if (!REQUIRE_VERIFIED_EMAIL) {
@@ -353,6 +358,35 @@ const mutationLimiter = rateLimit({
   skip: (req) => req.method === 'GET', // only rate-limit writes
 });
 app.use('/api', mutationLimiter);
+// App Check (SEC-I, docs/APP_CHECK_PLAN.md): APP_CHECK_MODE off (default), monitor or enforce. After the
+// limiters, so a flood of bad tokens is rate-limited first; before the sign-in gate, so an app without a
+// valid token learns nothing else. Tokens are verified with Firebase (cached keys, no call per request).
+// Test mode only: APP_CHECK_TEST_TOKEN is accepted as the one valid token, since tests cannot get real ones.
+{
+  const appCheck = parseAppCheckMode(process.env.APP_CHECK_MODE);
+  if (!appCheck.valid) console.warn('[app-check] APP_CHECK_MODE is not off, monitor or enforce: App Check is OFF.');
+  const testToken = process.env.NODE_ENV === 'test' ? process.env.APP_CHECK_TEST_TOKEN : undefined;
+  if (appCheck.mode !== 'off') {
+    if (!firebaseAuth && !testToken) {
+      console.warn(`[app-check] APP_CHECK_MODE=${appCheck.mode} needs FIREBASE_SERVICE_ACCOUNT_KEY: every token counts as invalid.`);
+    }
+    const stats = createAppCheckStats();
+    const verify = testToken
+      ? async (token) => { if (token !== testToken) throw new Error('invalid'); }
+      : async (token) => {
+        if (!firebaseAuth) throw new Error('no firebase admin');
+        return adminGetAppCheck().verifyToken(token);
+      };
+    app.use('/api', createAppCheckMiddleware({ mode: appCheck.mode, verify, onResult: (result) => stats.record(result) }));
+    if (appCheck.mode === 'monitor') {
+      setInterval(() => {
+        const line = stats.summary();
+        if (line) console.log(line);
+      }, process.env.NODE_ENV === 'test' ? 500 : 15 * 60 * 1000).unref();
+    }
+    console.log(`[app-check] ${appCheck.mode} mode for /api.`);
+  }
+}
 // Before the body parsers, so a refused request is never parsed. See requireSignedInAdult.
 app.use('/api', requireSignedInAdult);
 
