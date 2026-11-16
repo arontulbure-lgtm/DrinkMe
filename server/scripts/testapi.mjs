@@ -89,7 +89,8 @@ async function call(email, method, apiPath, rawBody) {
   });
   const text = await res.text();
   console.log(`${method.toUpperCase()} ${apiPath} -> ${res.status}`);
-  if (text) console.log(text.length > 3000 ? `${text.slice(0, 3000)}…` : text);
+  // TESTAPI_FULL=1 prints the whole answer (for scripts that parse it).
+  if (text) console.log(text.length > 3000 && process.env.TESTAPI_FULL !== '1' ? `${text.slice(0, 3000)}…` : text);
   if (!res.ok) process.exitCode = 2;
 }
 
