@@ -28,7 +28,8 @@
     "agent:feature": "tsx agents/tasks/implement-feature.ts",
     "db:migrate-to-postgres": "node server/scripts/migrate-to-postgres.mjs",
     "db:export-from-postgres": "node server/scripts/export-from-postgres.mjs",
-    "test:postgres": "npm --prefix server run test:postgres"
+    "test:postgres": "npm --prefix server run test:postgres",
+    "docker:smoke": "node server/scripts/docker-smoke.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
