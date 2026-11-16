@@ -20,6 +20,13 @@ export const AI_ALCOHOL_PATTERN = new RegExp(
   'u'
 );
 // Removed before the check, because they name no alcoholic drink. "nonalcoholic" needs no entry: it is one word.
+// An alcohol-free qualifier also covers the drink it qualifies: "non-alcoholic gin", "alcohol-free beer", "0.0 beer",
+// "gin (alcohol-free)", "bere fara alcool" name no alcoholic drink.
+const FREE_QUALIFIER = '(?:(?:non|no|zero|without|fara)[\\s-]*(?:alcoholic|alcohol|alcoolica|alcoolice|alcoolic|alcool)|(?:alcohol|alcool)[\\s-]*free|0[.,]0(?:\\s*%)?)';
+const QUALIFIED_DRINK = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${FREE_QUALIFIER}(?:[\\s-]+\\p{L}+)?|\\p{L}+[\\s-]*\\(?\\s*${FREE_QUALIFIER}\\s*\\)?)(?![\\p{L}\\p{N}])`,
+  'gu',
+);
 export const AI_ALCOHOL_FREE_PHRASES = /(?<![\p{L}\p{N}])(?:(?:non|no|zero|without|fara)[\s-]+(?:alcoholic|alcohol|alcoolica|alcoolice|alcoolic|alcool)|(?:alcohol|alcool)[\s-]*free|ginger[\s-]+beer|root[\s-]+beer|bere[\s-]+de[\s-]+ghimbir|(?:wine|beer)[\s-]*glass(?:es)?|pahar(?:e)?[\s-]+de[\s-]+(?:vin|bere)|(?:wine|cider)[\s-]+vinegar|otet[\s-]+de[\s-]+vin)(?![\p{L}\p{N}])/gu;
 
 // Removes accents and invisible format characters, so neither can hide a word.
@@ -27,4 +34,6 @@ export const toAlcoholCheckText = (value) => value.normalize('NFKD').replace(/[\
 
 
 /** True when the text names an alcoholic drink (after removing alcohol-free phrases such as "ginger beer"). */
-export const textMentionsAlcohol = (text) => AI_ALCOHOL_PATTERN.test(toAlcoholCheckText(text).replace(AI_ALCOHOL_FREE_PHRASES, ' '));
+export const textMentionsAlcohol = (text) => AI_ALCOHOL_PATTERN.test(
+  toAlcoholCheckText(text).replace(QUALIFIED_DRINK, ' ').replace(AI_ALCOHOL_FREE_PHRASES, ' '),
+);

@@ -87,3 +87,19 @@ def test_request_limits(client_factory):
         assert c.post("/v1/recipes", json=req(count=9)).status_code == 422
         assert c.post("/v1/recipes", json=req(ingredients=[])).status_code == 422
         assert c.post("/v1/recipes", json=req(extra=1)).status_code == 422
+
+
+def test_one_malformed_recipe_does_not_fail_the_batch(client_factory, fake):
+    broken = {**RECIPE, "name": "Broken", "ingredients": [{"name": "gin", "amount": 40, "unit": "oz", "abv": 40}]}
+    fake.replies.append({"recipes": [broken, MOCK, {"nonsense": True}]})
+    with client_factory() as c:
+        r = c.post("/v1/recipes", json=req())
+    assert r.status_code == 200
+    data = r.json()
+    assert [x["name"] for x in data["recipes"]] == ["Lemon Spritz"] and data["dropped"] == 2
+
+
+def test_no_recipe_list_is_invalid_output(client_factory, fake):
+    fake.replies.append({"something": []})
+    with client_factory() as c:
+        assert c.post("/v1/recipes", json=req()).json()["error"]["code"] == "model_invalid_output"

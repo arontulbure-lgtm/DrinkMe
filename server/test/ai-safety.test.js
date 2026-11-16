@@ -364,3 +364,19 @@ describe('end-to-end findings (2026-11-16)', () => {
     assert.deepEqual([guess.status, guess.item.category, guess.item.confidence], ['low_confidence', 'wine', 0.5]);
   });
 });
+
+describe('alcohol-free qualifiers (engine eval 2026-11-16)', () => {
+  test('a qualified drink is not alcohol; an unqualified one still is', async () => {
+    const { textMentionsAlcohol } = await import('../ai/alcoholWords.js');
+    for (const t of ['Non-alcoholic gin alternative', 'gin (alcohol-free)', 'bere fără alcool', '0.0 beer', 'ginger beer (non-alcoholic)']) {
+      assert.equal(textMentionsAlcohol(t), false, t);
+    }
+    for (const t of ['gin', 'non-alcoholic gin and vodka', '2 oz vodka']) assert.equal(textMentionsAlcohol(t), true, t);
+  });
+  test('a real mocktail with a non-alcoholic gin alternative is kept for a scanned gin', () => {
+    const gin = [knownItemFor({ names: ['Tanqueray London Dry Gin'], category: 'spirit', abv: null })];
+    const r = mocktail({ name: 'Garden Mocktail', tags: ['mocktail'], ingredients: [{ name: 'Non-alcoholic gin alternative', amount: 45, unit: 'ml', abv: 0 }, { name: 'tonic water', amount: 120, unit: 'ml', abv: 0 }] });
+    const out = check(r, { scannedName: 'Tanqueray London Dry Gin', knownItems: gin });
+    assert.equal(out.recipe?.isAlcoholic, false);
+  });
+});

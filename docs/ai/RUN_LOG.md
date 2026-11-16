@@ -31,3 +31,11 @@
   checkout into this worktree was blocked by the permission classifier (and listing AVDs afterwards). Replaced by an
   end-to-end API run against the real server + real model (`ai-service/eval/e2e_api.mjs`). Needs John (see PR).
 - Scan eval (153 photos, qwen3-vl:4b, 768 px): see EVAL_REPORT.md. Label review of 18 OFF rows (`review_labels.py`).
+- Evaluation rounds 2-3: prompt taxonomy clarifications (one round, same test set – noted in EVAL_REPORT), red-team
+  fixes (Romanian inhalation wording, alcohol in ml only, mislabelled "mocktails" dropped as S9, alcohol-free
+  qualifiers, gin-free mocktail allowed for a scanned spirit), OFF generic spirit tags + one retry, per-recipe
+  validation in the ai-service, one engine retry on an unusable answer. Scan 82.7 % (reviewed labels, target 85 %),
+  p50 2.4 s; real pipeline mocktail 16/20; 0 safety violations after validation in every round.
+- Final checks: server suite 1343 tests / 1342 pass / 0 fail / 1 skipped (the last engine change was verified with
+  ai-v1 24/24 and ai-safety 41/41 on a separate port); ai-service pytest 24/24; `npm run check` clean;
+  end-to-end API run with the real model 17/17.

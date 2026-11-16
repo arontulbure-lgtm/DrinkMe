@@ -67,8 +67,10 @@ Use the ingredient names exactly as listed."""
 
 RECIPE_MOCKTAIL_RULE = ("Every recipe must be a mocktail: no alcoholic ingredient at all, isAlcoholic false. Leave out every "
                         "alcoholic item from the user's list, even the main ingredient: make an alcohol-free drink inspired by "
-                        "its flavour instead, using non-alcoholic ingredients only.")
-RECIPE_MIX_RULE = "Make {count} recipes. At least one must be a mocktail (isAlcoholic false) if the ingredients allow it."
+                        "its flavour instead, using non-alcoholic ingredients only. Keep every NON-alcoholic main ingredient "
+                        "(juice, soda, energy drink, syrup, fruit) in the recipe.")
+RECIPE_MIX_RULE = ("Make {count} recipes. The LAST recipe must be a mocktail: no alcoholic ingredient at all (leave out "
+                   "spirits, liqueurs, wine, beer and bitters), isAlcoholic false. Never call a drink with alcohol a mocktail.")
 
 
 def recipe_system(language: str, mode: str, basics: list[str], mocktails_only: bool, count: int) -> str:

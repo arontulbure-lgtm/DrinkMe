@@ -20,6 +20,9 @@ const EMPTY_BAR = 'ai1-empty-bar';
 const OPTIN = 'ai1-optin';
 const BUSY = 'ai1-busy';
 const LIMITED = 'ai1-limited';
+// Own users for later tests: the global mutation limiter allows 30 writes per minute per user.
+const RETRY = 'ai1-retry';
+const REPORTER = 'ai1-reporter';
 const user = (id, extra = {}) => ({
   id, email: `${id}@example.test`, firstName: 'Test', lastName: '', city: '', bio: '', avatar: null,
   ageConfirmedAt: '2026-01-01T00:00:00.000Z', ...extra,
@@ -27,7 +30,7 @@ const user = (id, extra = {}) => ({
 const FIXTURE = {
   users: [
     user(ADULT, { aiNoticeVersion: 1 }), user(NO_NOTICE), user(EMPTY_BAR, { aiNoticeVersion: 1 }),
-    user(OPTIN, { aiNoticeVersion: 1 }), user(BUSY, { aiNoticeVersion: 1 }), user(LIMITED, { aiNoticeVersion: 1 }),
+    user(OPTIN, { aiNoticeVersion: 1 }), user(BUSY, { aiNoticeVersion: 1 }), user(LIMITED, { aiNoticeVersion: 1 }), user(RETRY, { aiNoticeVersion: 1 }), user(REPORTER, { aiNoticeVersion: 1 }),
   ],
   smartBarByUser: {
     [ADULT]: [
@@ -36,6 +39,11 @@ const FIXTURE = {
       { id: 3, name: 'cucumber', quantity: '1', unit: 'piece' },
     ],
     [BUSY]: [{ id: 1, name: 'orange juice', quantity: '1', unit: 'bottle' }],
+    [RETRY]: [
+      { id: 1, name: 'Bombay Sapphire Gin', quantity: '1', unit: 'bottle' },
+      { id: 2, name: 'Schweppes Tonic', quantity: '2', unit: 'bottle' },
+      { id: 3, name: 'cucumber', quantity: '1', unit: 'piece' },
+    ],
     [LIMITED]: [{ id: 1, name: 'orange juice', quantity: '1', unit: 'bottle' }],
   },
 };
@@ -346,6 +354,14 @@ describe('POST /api/ai/recipes', () => {
     assert.equal(recipeCalls().length, 2);
   });
 
+  test('one unusable model answer is retried once; the second answer is used', async () => {
+    stub.recipeReplies = [{ status: 502, body: { error: { code: 'model_invalid_output', message: 'x' } } }, [GIN_TONIC, SECOND, CUKE]];
+    const res = await api('POST', '/api/ai/recipes', { uid: RETRY, body: { mode: 'smart_bar', newSession: true } });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.recipes.length, 3);
+    assert.equal(recipeCalls().length, 2);
+  });
+
   test('input errors: bad mode, bad item, empty Smart Bar', async () => {
     assert.equal((await api('POST', '/api/ai/recipes', { body: { mode: 'party' } })).status, 400);
     assert.equal((await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item: { category: 'potion' } } })).status, 400);
@@ -401,13 +417,13 @@ describe('saved recipes', () => {
 
 describe('POST /api/ai/report', () => {
   test('stores a report of an AI answer in the audit log (AI text only) and validates the input', async () => {
-    const ok = await api('POST', '/api/ai/report', { body: { kind: 'recipe', reason: 'unsafe', recipeId: 'r_0123456789abcdef', recipeName: 'Garden G&T' } });
+    const ok = await api('POST', '/api/ai/report', { uid: REPORTER, body: { kind: 'recipe', reason: 'unsafe', recipeId: 'r_0123456789abcdef', recipeName: 'Garden G&T' } });
     assert.equal(ok.status, 201);
-    const scan = await api('POST', '/api/ai/report', { body: { kind: 'scan', reason: 'wrong', category: 'spirit', status: 'recognized' } });
+    const scan = await api('POST', '/api/ai/report', { uid: REPORTER, body: { kind: 'scan', reason: 'wrong', category: 'spirit', status: 'recognized' } });
     assert.equal(scan.status, 201);
     for (const body of [{ kind: 'recipe', reason: 'meh', recipeId: 'r_0123456789abcdef' }, { kind: 'recipe', reason: 'wrong', recipeId: '../x' },
       { kind: 'scan', reason: 'wrong', category: 'potion' }, { kind: 'post', reason: 'wrong' }]) {
-      assert.equal((await api('POST', '/api/ai/report', { body })).status, 400, JSON.stringify(body));
+      assert.equal((await api('POST', '/api/ai/report', { uid: REPORTER, body })).status, 400, JSON.stringify(body));
     }
   });
 });

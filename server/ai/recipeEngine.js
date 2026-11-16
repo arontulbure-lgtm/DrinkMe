@@ -86,7 +86,13 @@ export const generateRecipeBatch = async (input) => {
     }
   };
 
-  await ask({});
+  try {
+    await ask({});
+  } catch (err) {
+    // An unusable model answer is random: one more try within the budget. Timeouts and outages are not retried.
+    if (err?.code !== 'ai_invalid_output' || Date.now() - started >= REGENERATE_BUDGET_MS || input.signal?.aborted) throw err;
+    await ask({});
+  }
   if (accepted.length < MIN_BATCH && Date.now() - started < REGENERATE_BUDGET_MS) {
     try {
       await ask({});

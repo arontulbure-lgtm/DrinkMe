@@ -14,7 +14,7 @@ from . import imaging, prompts
 from .config import Settings
 from .ollama_client import ModelInvalidOutput, OllamaClient
 from .schemas import (
-    ModelRecipes, ModelScan, Recipe, RecipeRequest, RecipeResponse, RecipeTimings, ScanItem, ScanRequest,
+    ModelRecipe, ModelRecipes, ModelScan, Recipe, RecipeRequest, RecipeResponse, RecipeTimings, ScanItem, ScanRequest,
     ScanResult, ScanTimings,
 )
 from .taxonomy import CATEGORIES, DEFAULT_ABV, flags_for, is_alcoholic
@@ -201,13 +201,21 @@ async def run_recipes(req: RecipeRequest, client: OllamaClient, settings: Settin
         settings.text_model, system, user, _RECIPES_SCHEMA, temperature=0.7, num_predict=2600, num_ctx=6144,
     )
     try:
-        parsed = ModelRecipes.model_validate(raw)
-    except ValidationError as exc:
+        raw_list = raw["recipes"]
+        if not isinstance(raw_list, list):
+            raise TypeError("recipes is not a list")
+    except (KeyError, TypeError) as exc:
         raise ModelInvalidOutput() from exc
     recipes: list[Recipe] = []
     dropped = 0
     seen = {_fold(n) for n in req.excludeNames}
-    for model_recipe in parsed.recipes:
+    # Each recipe is validated on its own: one malformed recipe must not cost the whole batch.
+    for item in raw_list:
+        try:
+            model_recipe = ModelRecipe.model_validate(item)
+        except ValidationError:
+            dropped += 1
+            continue
         recipe = normalise_recipe(model_recipe.model_dump(), req.language)
         if recipe is None or _fold(recipe.name) in seen or (req.mocktailsOnly and recipe.isAlcoholic):
             dropped += 1
