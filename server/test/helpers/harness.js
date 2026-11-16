@@ -12,7 +12,8 @@ const SERVER_FILE = path.join(SERVER_DIR, 'server.js');
 export const REAL_DATA_DIR = path.join(SERVER_DIR, 'data');
 export const REAL_DB_FILE  = path.join(REAL_DATA_DIR, 'db.json');
 
-const TEST_PORT          = '5055';
+// Overridable so two worktrees can run the suite at the same time (e.g. DRINKME_TEST_PORT=5056).
+const TEST_PORT          = /^\d{2,5}$/.test(process.env.DRINKME_TEST_PORT ?? '') ? process.env.DRINKME_TEST_PORT : '5055';
 const INHERITED_ENV_KEYS = ['PATH', 'SystemRoot', 'TEMP', 'TMP'];
 const START_TIMEOUT_MS   = 30_000;
 const POLL_INTERVAL_MS   = 100;

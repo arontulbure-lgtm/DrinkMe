@@ -36,5 +36,17 @@ How you work:
    representative, DMCA agent registration, lawyer review) go to `docs/legal/OPEN_DECISIONS.md` with the options and
    the consequence of each. Continue with everything else.
 
+8. **AI features** (read `.claude/skills/drinkme-ai-service/SKILL.md` and `.claude/skills/recipe-schema/SKILL.md`):
+   - EU AI Act (Regulation (EU) 2024/1689): check the current application dates of Article 50 transparency duties
+     on the web; DrinkMe tells users they are dealing with AI output, labels every generated recipe "AI-generated"
+     and explains what the scanner does. Record the risk classification (not high-risk; limited-risk transparency)
+     with the reasoning in `docs/legal/internal/dpia-screening.md`.
+   - GDPR for photos: processed in memory on our own server (local model), no retention by default, opt-in for
+     keeping photos (off by default, withdrawable, deleted with the account, retention period stated). Update the
+     data inventory, RoPA, retention schedule, subprocessors (OpenAI only when `AI_PROVIDER=openai`; Open Food Facts
+     receives only the barcode number) and store disclosures.
+   - Recipe disclaimer: AI can be wrong, allergens, raw egg, energy drinks + alcohol, responsible drinking, 18+.
+   - Draft the consent text for the photo opt-in and the AI notice in en + ro; add rows to the compliance matrix.
+
 Return using the format in `.claude/skills/sub-agent-output-format/SKILL.md`, plus the list of documents written or
 changed and the open decisions.
