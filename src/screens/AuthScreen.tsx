@@ -13,6 +13,7 @@ import { GoogleAuthProvider, OAuthProvider, AuthCredential } from 'firebase/auth
 import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
 import { getAuthErrorKey, getPasswordResetErrorKey, getSocialAuthErrorKey, isAuthCancellation } from '../lib/authErrors';
+import { LegalAgreementLine } from '../components/LegalLinks';
 import {
   PASSWORD_RESET_COOLDOWN_MS,
   getCooldownRemainingSeconds,
@@ -521,6 +522,8 @@ export default function AuthScreen() {
                   {isSignUp ? t('auth.toggleToSignIn') : t('auth.toggleToSignUp')}
                 </Text>
               </TouchableOpacity>
+              {/* Legal T-02: shown once the legal pages are hosted (EXPO_PUBLIC_LEGAL_BASE_URL). */}
+              <LegalAgreementLine />
             </>
           )}
         </View>

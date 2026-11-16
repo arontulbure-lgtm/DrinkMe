@@ -45,6 +45,21 @@ LC-12/LC-33 (look-alike brand names: NFKC, diacritics, separators, Cyrillic/Gree
 
 Not code here: LC-10, LC-20 routine, LC-21 (D-09), LC-22, LC-26 (needs native modules), LC-27 (follows D-03), LC-28 store settings, LC-29, LC-30, LC-32, LC-24 (docs after the reset change).
 
+## Status (2026-11-16)
+| Task | Status | Waiting on |
+|---|---|---|
+| T-01 legal links + contact | done (0c858f9): hidden until `EXPO_PUBLIC_LEGAL_BASE_URL` is set | D-06 (hosting) to switch on; pages ready in `docs/public` |
+| T-02 links on sign-in and notice | done (0c858f9) | D-06 |
+| T-03 remove the partners/discount card | not done | D-18 (default "remove" not confirmed) |
+| T-04 Powered by Google, no raw Google errors | done (ffa9b89); coordinates no longer requested (d25b861) | VERIFY Google attribution rules for a text-only notice |
+| T-05 logs without IP/UA | done (325e0ee) | — |
+| T-06 terms acceptance on the server | done (f4c06ba) | — |
+| T-07 Terms step in the app | done behind `EXPO_PUBLIC_TERMS_STEP_ENABLED` (off) | D-01 (lawyer reviews the Terms), D-06 |
+| T-08 … T-12 per-country age gate | not started | D-02/03/04 (excluded countries, Qatar), N-1 (re-gate), N-3 (under-age answer), D-10 |
+| T-13 … T-15 brand labels and markets | not started | official account live (done), D-12; wording VERIFY |
+| T-16 … T-19 DSA reasons, statements, outcomes | not started | D-14, D-15, N-7, N-13 |
+| T-20 … T-26 retention, EXIF, export, filter, under-age closure | not started | N-5, N-6, N-8, N-9, N-10, N-12 |
+
 ## Order
 - **Phase 0 (now):** T-03, T-01, T-02, T-04, T-05.
 - **Phase 1:** T-06 → T-07; T-08 → T-09 → T-10 → T-11 in one release (server first); T-12 optional.

@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useLocalization } from '../context/LocalizationContext';
+import { placesRequestHeaders } from '../lib/placesHeaders';
 
 interface LocationSuggestion {
   description: string;
@@ -65,11 +66,18 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
         const response = await fetch(
           `https://maps.googleapis.com/maps/api/place/autocomplete/json?key=${GOOGLE_API_KEY}&input=${encodeURIComponent(
             search
-          )}&types=establishment`
+          )}&types=establishment`,
+          { headers: placesRequestHeaders() }
         );
         const data = await response.json();
+        // ZERO_RESULTS is a normal answer: no places match.
+        if (data.status === 'ZERO_RESULTS') {
+          setResults([]);
+          return;
+        }
         if (data.status !== 'OK') {
-          setError(data.error_message || t('location.loadError'));
+          // Google's own error_message is English and can describe the key: never shown (legal T-04).
+          setError(t('location.loadError'));
           setResults([]);
           return;
         }
@@ -107,14 +115,15 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
       try {
         setLoading(true);
         const response = await fetch(
-          `https://maps.googleapis.com/maps/api/place/details/json?key=${GOOGLE_API_KEY}&place_id=${item.placeId}&fields=formatted_address,geometry/location`
+          `https://maps.googleapis.com/maps/api/place/details/json?key=${GOOGLE_API_KEY}&place_id=${encodeURIComponent(item.placeId)}&fields=formatted_address`,
+          { headers: placesRequestHeaders() }
         );
         const data = await response.json();
-        const location = data.result?.geometry?.location;
+        // Only the address is asked for: posts keep the place name, never coordinates (data minimisation).
         onSelect({
           description: data.result?.formatted_address || item.description,
-          lat: typeof location?.lat === 'number' ? location.lat : null,
-          lng: typeof location?.lng === 'number' ? location.lng : null,
+          lat: null,
+          lng: null,
         });
         onClose();
       } catch (error) {
@@ -168,6 +177,8 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
               ) : null
             }
           />
+          {/* Google Places terms: results from Places carry Google's attribution (legal T-04). */}
+          {results.length > 0 ? <Text style={styles.attribution}>{t('location.poweredByGoogle')}</Text> : null}
         </View>
       </View>
     </Modal>
@@ -214,6 +225,12 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#FCA5A5',
     marginTop: 8,
+  },
+  attribution: {
+    color: '#6B7280',
+    fontSize: 11,
+    textAlign: 'right',
+    marginTop: 6,
   },
   emptyText: {
     color: '#9CA3AF',

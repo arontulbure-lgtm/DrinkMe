@@ -15,11 +15,22 @@ import { loadServiceAccount } from './official.mjs';
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = path.resolve(SERVER_DIR, '..');
 export const TEST_USERS_FILE = path.join(ROOT, 'logs', 'testusers.local.json');
-export const TEST_EMAILS = ['test1@drinkme.test', 'test2@drinkme.test', 'test3@drinkme.test'];
+// test4 is the temporary admin of scripted moderation checks (ADMIN_USER_IDS set for that session only).
+export const TEST_EMAILS = ['test1@drinkme.test', 'test2@drinkme.test', 'test3@drinkme.test', 'test4@drinkme.test'];
 // Only these addresses may ever be deleted by this script.
 export const isDeletableTestEmail = (email) => (
   TEST_EMAILS.includes(email) || /^test\d+@drinkme\.test$/.test(email ?? '') || /^drinkmesocialapp\+e2e[\w-]*@gmail\.com$/.test(email ?? '')
 );
+
+/**
+ * Writes a file that holds passwords or session tokens: owner-only (0600; no effect on Windows), also when
+ * it already existed with wider permissions, in a folder created 0700.
+ */
+export function writeSecretFile(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, text, { mode: 0o600 });
+  fs.chmodSync(file, 0o600); // the mode above applies only when the file is created
+}
 
 /** A random password that meets the app's and Firebase's policy: 16+ chars, upper, lower, digit, '.' and '-'. */
 export function randomPassword() {
@@ -50,8 +61,7 @@ async function create() {
     saved.push({ email, uid: user.uid, password });
     console.log(`${email}  uid ${user.uid}`);
   }
-  fs.mkdirSync(path.dirname(TEST_USERS_FILE), { recursive: true });
-  fs.writeFileSync(TEST_USERS_FILE, `${JSON.stringify({ project, createdAt: new Date().toISOString(), users: saved }, null, 2)}\n`);
+  writeSecretFile(TEST_USERS_FILE, `${JSON.stringify({ project, createdAt: new Date().toISOString(), users: saved }, null, 2)}\n`);
   console.log(`Project ${project}. Passwords saved in ${path.relative(ROOT, TEST_USERS_FILE)} (git-ignored), not printed.`);
 }
 

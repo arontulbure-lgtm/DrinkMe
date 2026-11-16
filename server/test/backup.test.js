@@ -89,7 +89,7 @@ test('a missing database or unknown source fails clearly', async (t) => {
   t.after(s.cleanup);
   await assert.rejects(runBackup({ dbFile: s.dbFile, backupDir: s.backupDir, now: START }), /no database file/);
   s.writeDb({});
-  await assert.rejects(runBackup({ dbFile: s.dbFile, backupDir: s.backupDir, source: 'postgres', now: START }), /unknown BACKUP_SOURCE/);
+  await assert.rejects(runBackup({ dbFile: s.dbFile, backupDir: s.backupDir, source: 'mongodb', now: START }), /unknown BACKUP_SOURCE/);
 });
 
 test('files that only look like backups are left alone', async (t) => {

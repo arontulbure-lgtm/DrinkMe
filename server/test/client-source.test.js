@@ -174,3 +174,75 @@ describe('feed cards open the post detail', () => {
     assert.equal(loc.match(/^\s+open: '(Open post|Deschide postarea) \{\{name\}\}',$/gm)?.length, 2);
   });
 });
+
+// 4. Places requests carry the app-restriction headers (Maps key, JOHN_TODO section 3) and never show
+//    Google's raw error text (legal T-04).
+describe('Places requests (LocationPickerModal)', () => {
+  const picker = read('src/components/LocationPickerModal.tsx');
+  const headers = read('src/lib/placesHeaders.ts');
+
+  test('both Places calls send placesRequestHeaders()', () => {
+    const calls = picker.match(/fetch\([\s\S]*?maps\.googleapis\.com[\s\S]*?\);/g) ?? [];
+    assert.equal(calls.length, 2);
+    for (const call of calls) assert.match(call, /headers: placesRequestHeaders\(\)/);
+  });
+
+  test('the helper sends the Android package + certificate and the iOS bundle id, from app.config', () => {
+    assert.match(headers, /'X-Android-Package': packageName, 'X-Android-Cert': sha1/);
+    assert.match(headers, /'X-Ios-Bundle-Identifier': bundleId/);
+    assert.match(read('app.config.ts'), /androidCertSha1: process\.env\.EXPO_PUBLIC_ANDROID_CERT_SHA1/);
+  });
+
+  test('Google error_message is never shown; results carry the Powered by Google attribution', () => {
+    assert.doesNotMatch(picker, /setError\(data\.error_message/);
+    assert.match(picker, /t\('location\.poweredByGoogle'\)/);
+    assert.equal(read('src/context/LocalizationContext.tsx').match(/poweredByGoogle: 'Powered by Google'/g)?.length, 2);
+  });
+});
+
+// 5. Legal links (legal T-01/T-02): every document the app can open exists in the static site for both
+//    languages, links appear only with an https base URL, and Contact always shows.
+describe('legal links', () => {
+  const config = read('src/config/legal.ts');
+  const links = read('src/components/LegalLinks.tsx');
+
+  test('every linked document has an en and ro page in docs/public', () => {
+    const docs = [...links.matchAll(/\{ doc: '([\w-]+)'/g)].map((m) => m[1]);
+    assert.ok(docs.length >= 7);
+    for (const doc of docs) {
+      for (const lang of ['en', 'ro']) {
+        assert.ok(fs.existsSync(path.join(ROOT, 'docs', 'public', lang, `${doc}.html`)), `${lang}/${doc}.html`);
+      }
+    }
+  });
+
+  test('URLs are <base>/{en,ro}/<doc>.html, https only; no base means no document links', () => {
+    assert.match(config, /return `\$\{base\}\/\$\{locale === 'ro' \? 'ro' : 'en'\}\/\$\{doc\}\.html`;/);
+    assert.ok(config.includes(String.raw`/^https:\/\/`), 'https-only base URL');
+    assert.match(links, /DOCS\.filter\(\(\{ doc \}\) => getLegalUrl\(doc, locale\) !== null\)/);
+    assert.match(links, /legal\.contact/);
+  });
+
+  test('Edit Profile, the sign-in screen and the privacy notice use them', () => {
+    assert.match(read('src/screens/EditProfileScreen.tsx'), /<LegalLinks \/>/);
+    assert.match(read('src/screens/AuthScreen.tsx'), /<LegalAgreementLine \/>/);
+    assert.match(read('src/screens/OnboardingScreen.tsx'), /<PrivacyPolicyLink \/>/);
+  });
+});
+
+// 6. Terms acceptance (legal T-06/T-07): the app's TERMS_VERSION equals the server's, the step is behind
+//    EXPO_PUBLIC_TERMS_STEP_ENABLED until the text is reviewed (D-01), and it posts { type: 'terms' }.
+describe('terms step', () => {
+  test('TERMS_VERSION matches the server and the step is flagged', () => {
+    const onboarding = read('src/screens/OnboardingScreen.tsx');
+    const server = fs.readFileSync(path.join(SERVER_DIR, 'server.js'), 'utf8');
+    const clientVersion = Number(onboarding.match(/export const TERMS_VERSION = (\d+);/)?.[1]);
+    const serverVersion = Number(server.match(/const TERMS_VERSION = (\d+);/)?.[1]);
+    assert.ok(clientVersion >= 1);
+    assert.equal(clientVersion, serverVersion);
+    assert.match(onboarding, /TERMS_STEP_ENABLED = process\.env\.EXPO_PUBLIC_TERMS_STEP_ENABLED === 'true'/);
+    assert.match(onboarding, /type: 'terms', version: TERMS_VERSION/);
+    assert.match(read('src/navigation/AppNavigator.tsx'), /needsTermsAcceptance\(profile\)/);
+    assert.equal(read('src/context/LocalizationContext.tsx').match(/termsAccept: '/g)?.length, 2);
+  });
+});
