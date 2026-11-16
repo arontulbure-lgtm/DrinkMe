@@ -207,7 +207,7 @@ const translations = {
       errors: {
         invalidCredentials: 'Email or password is incorrect.',
         emailInUse: 'An account with this email already exists. Sign in, or reset your password.',
-        weakPassword: 'This password is too weak. Choose a stronger one.',
+        weakPassword: 'This password does not meet the rules: at least 8 characters, an uppercase letter, a digit and a special character.',
         invalidEmail: 'Please enter a valid email address.',
         tooManyRequests: 'Too many attempts. Please wait a few minutes and try again.',
         network: 'Could not connect. Check your internet connection and try again.',
@@ -722,7 +722,7 @@ const translations = {
       errors: {
         invalidCredentials: 'Adresa de e-mail sau parola este incorectă.',
         emailInUse: 'Există deja un cont cu această adresă de e-mail. Autentifică-te sau resetează-ți parola.',
-        weakPassword: 'Parola este prea slabă. Alege una mai puternică.',
+        weakPassword: 'Parola nu respectă regulile: cel puțin 8 caractere, o literă mare, o cifră și un caracter special.',
         invalidEmail: 'Introdu o adresă de e-mail validă.',
         tooManyRequests: 'Prea multe încercări. Așteaptă câteva minute și încearcă din nou.',
         network: 'Nu ne-am putut conecta. Verifică conexiunea la internet și încearcă din nou.',
