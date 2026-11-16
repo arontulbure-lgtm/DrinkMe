@@ -3,6 +3,35 @@
 Prepared by the autonomous run of 2026-10-30. Nothing here has been attempted. Each list is in the order to do it.
 Values in angle brackets are placeholders: never paste real keys into this file or any other tracked file.
 
+## Triage (run of 2026-11-16)
+(a) Claude Code does it fully · (b) Claude Code does the code/prep, John finishes one step · (c) only John (login, payment, console click, real phone, lawyer). Worked through in this order: security, correctness, launch prep. Status is updated at the end of the run.
+
+| Item | Class | Why / John's step |
+|---|---|---|
+| 1a sign-in steps without Google/Apple/iOS/second phone (1-6, 10-19, 21-22) | a | emulator + adb driver + test users |
+| 1a 7, 8, 20 (Google), 9 (Apple), 23 (two phones) | c | Google needs a dev build; Apple needs the developer account; 23 is covered by server tests |
+| 1a 21 / 1b 15 (TalkBack, VoiceOver) | b | labels checked from uiautomator dumps; a real screen-reader pass is John's |
+| 1b lists and images (1-15) | a | emulator; 1b 4 (GPS in photos) also needs a real phone photo (c) |
+| 1c moderation as admin | a | temporary admin test user in a dev-only session, never John's uid |
+| 2 email verification, steps 2-7, 9, 10 | a | unverified test users, admin-generated verification links |
+| 2 step 1 (console account linking), 8 (Google takeover), 11 (turn on in hosted server) | c | console / Google sign-in / host |
+| 3 OpenAI key, Maps key rotation, Firebase web key restriction, quotas, billing | c | console |
+| 3 Maps app-restriction headers in the app | b | code here; John adds package + SHA-1 / bundle ID restriction in the console after the first EAS build |
+| 3 Firebase enumeration protection, password policy | done 2026-11-14 | verified with `npm run firebase:auth-check` |
+| 3 app password rules = Firebase policy | a | already equal; messages checked |
+| 3 App Check (SEC-I) | b | plan + code behind a flag; John registers the app in the console after a dev build |
+| 3 password reset ends server sessions | done 2026-11-12 | commit 0844255, password-reset-session tests |
+| 3 old keys in `D:\DrinkMeApp\CLAUDE.md` | done 2026-11-14 | placeholders |
+| 3 `ANTHROPIC_API_KEY` in root `.env` | c | `agents/` reads it; John moves it, then `npm run env:remove` |
+| 3 key files in `server/` | b | one consistently named, git-ignored key for drinkmeapp-a8fea; moving files outside the project folder is John's (sandbox) |
+| 4 host, volume, variables, deploy, domain | c | host account |
+| 4 host readiness (Dockerfile, healthz, env checklist, backup job) | a | |
+| 4 DATA-1 Postgres | b | storage layer + migration + tests here; John creates the database and sets the URL |
+| 5 store accounts, payments, console forms | c | |
+| 5 store texts, privacy labels, Data safety, age rating answers, public privacy/terms/deletion pages | b | drafts here; John pastes, hosts, gets the lawyer's OK |
+| 5 Sign in with Apple, first EAS build | c | Apple account / Expo account |
+| 6 legal review | c | lawyer; Phase 0/1 code gaps that need no decision are done here |
+
 ## 1. Device checks (do these first)
 
 Start the backend (`cd server`, `node server.js`; `server/.env` must have `NODE_ENV=development`) and Metro (`npx expo start`). Use two phones or one phone plus an emulator when a step needs a second user.
