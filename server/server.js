@@ -301,7 +301,10 @@ morgan.token('url', (req) => (
   (req.originalUrl || req.url).split('?')[0].replace(/^(\/api\/users\/)[^/]+(\/delete-account\/?)$/i, '$1:id$2')
 ));
 // The app's dev log batches (development only) would fill the console with one line every few seconds.
-app.use(morgan(isProduction ? 'combined' : 'dev', { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
+// Production (legal T-05, GDPR minimisation): time, method, path, status, size and duration only; no IP
+// address, user agent or referrer, which morgan's 'combined' format would keep for every request.
+const PRODUCTION_LOG_FORMAT = ':date[iso] :method :url :status :res[content-length] - :response-time ms';
+app.use(morgan(isProduction ? PRODUCTION_LOG_FORMAT : 'dev', { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
 
 // ── Media ─────────────────────────────────────────────────────────────────────
 // Images leave the JSON responses and come from here. Mounted before the body parsers, which a GET
