@@ -218,7 +218,7 @@ describe('legal links', () => {
 
   test('URLs are <base>/{en,ro}/<doc>.html, https only; no base means no document links', () => {
     assert.match(config, /return `\$\{base\}\/\$\{locale === 'ro' \? 'ro' : 'en'\}\/\$\{doc\}\.html`;/);
-    assert.match(config, /\^https:\\/\\//);
+    assert.ok(config.includes(String.raw`/^https:\/\/`), 'https-only base URL');
     assert.match(links, /DOCS\.filter\(\(\{ doc \}\) => getLegalUrl\(doc, locale\) !== null\)/);
     assert.match(links, /legal\.contact/);
   });
