@@ -3,6 +3,17 @@
 Branch: `auto/run-2026-10-30` (committed in logical chunks on this branch; never pushed, never on main; review with `git log main..` and `git diff main`).
 
 ## Summary for John
+### Session 10 (2026-11-16): JOHN_TODO worked through (branch auto/run-2026-11-14)
+- **Checks:** Server tests: full run 1319 passed, 8 skipped (Postgres integration without TEST_DATABASE_URL), 2 failed (owner-view field lists missing the new termsVersion); both fixed and re-run (90/90), so 1321 of 1321 run tests pass. Postgres tests against Docker: 25 passed, 1 skipped (SIGTERM on Windows). npm run check: 0 errors, 0 warnings. npm run docker:smoke: all checks passed. gitleaks (all branches, 91 commits): no leaks.
+- **Triage:** table at the top of the old JOHN_TODO (eda341e); the new `docs/JOHN_TODO.md` keeps only your items, in order (22d50f2).
+- **Security:** App Check slot behind flags (6df8ee9); Maps key restriction headers + no raw Google errors (ffa9b89); password-policy message (1bf7f67); `official:keys` / `firebase:use-key` (adda413). Password reset ending sessions was already done (0844255). **Not done (blocked):** renaming the key file / editing `server/.env` (the safety check refuses edits of `server/.env`; I put the original name back at once, MATCH confirmed) and moving the old key outside the project folder (sandbox): two commands in JOHN_TODO section 1.
+- **Device checks:** `docs/DEVICE_CHECKS.md` (e07c438): 1c 8/8 PASS with a session-only admin test user; email verification server steps PASS on a separate `REQUIRE_VERIFIED_EMAIL=true` server with a temporary database; sign-in screen and 1b API steps PASS; the rest marked NEEDS-JOHN with the reason. No crash/high/medium found today.
+- **DATA-1 (9e3ca6a, 65ee7fc):** JSON or Postgres (`DB_DRIVER`), migration/export/backup tools, Docker Postgres tests 25/26 (SIGTERM test skips on Windows); security review fixes (durable critical saves, verified TLS, 28-day history, one server per database).
+- **Hosting:** `npm run docker:smoke` passes (healthz, 401, no dev route, non-root); `docs/PRODUCTION_ENV.md` (ab73593); image ships only production scripts.
+- **Store:** `docs/store/` and `docs/public/` drafts (d27adc4); store-review fixes in `app.config.ts` and Places (d25b861).
+- **Legal:** T-01, T-02, T-04, T-05, T-06 done, T-07 done behind a flag; status table in `docs/legal/CODE_GAPS_PLAN.md`.
+- **Merge:** pushed, PR opened and merged into main when green; next branch created from main (details in the PR).
+
 ### Session 9 (2026-11-14): cleanup, automated retest on the emulator, merge
 - **Checks:** server tests 1279 of 1279 (full run, route coverage included); `npm run check` 0 errors, 0 warnings; gitleaks clean.
 - **0. Triage fixes (7e6629c, ec20cde):** app log entries from before a session are no longer counted as its new issues (entry numbers, duplicate detection); session.json records the Firebase project; the server prints a count-only `[official]` line at start.
