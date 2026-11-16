@@ -53,6 +53,8 @@ export default {
       apiUrl: process.env.EXPO_PUBLIC_API_URL,
       googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      // SHA-1 of the Android signing certificate (a public fingerprint) for the Places key restriction.
+      androidCertSha1: process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1,
     }
   }
 };

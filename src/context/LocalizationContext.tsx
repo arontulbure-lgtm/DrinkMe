@@ -58,6 +58,7 @@ const translations = {
       searchPlaceholder: 'Search venues or addresses',
       noMatches: 'No matches found',
       loadError: 'Unable to load suggestions',
+      poweredByGoogle: 'Powered by Google',
       notConfigured: 'Location search is not available right now.',
     },
     stories: {
@@ -572,6 +573,8 @@ const translations = {
       searchPlaceholder: 'Caută localuri sau adrese',
       noMatches: 'Niciun rezultat găsit',
       loadError: 'Nu am putut încărca sugestiile',
+      // Google's attribution text stays in English (Places terms).
+      poweredByGoogle: 'Powered by Google',
       notConfigured: 'Căutarea locațiilor nu este disponibilă momentan.',
     },
     stories: {

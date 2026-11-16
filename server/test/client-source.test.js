@@ -174,3 +174,28 @@ describe('feed cards open the post detail', () => {
     assert.equal(loc.match(/^\s+open: '(Open post|Deschide postarea) \{\{name\}\}',$/gm)?.length, 2);
   });
 });
+
+// 4. Places requests carry the app-restriction headers (Maps key, JOHN_TODO section 3) and never show
+//    Google's raw error text (legal T-04).
+describe('Places requests (LocationPickerModal)', () => {
+  const picker = read('src/components/LocationPickerModal.tsx');
+  const headers = read('src/lib/placesHeaders.ts');
+
+  test('both Places calls send placesRequestHeaders()', () => {
+    const calls = picker.match(/fetch\([\s\S]*?maps\.googleapis\.com[\s\S]*?\);/g) ?? [];
+    assert.equal(calls.length, 2);
+    for (const call of calls) assert.match(call, /headers: placesRequestHeaders\(\)/);
+  });
+
+  test('the helper sends the Android package + certificate and the iOS bundle id, from app.config', () => {
+    assert.match(headers, /'X-Android-Package': packageName, 'X-Android-Cert': sha1/);
+    assert.match(headers, /'X-Ios-Bundle-Identifier': bundleId/);
+    assert.match(read('app.config.ts'), /androidCertSha1: process\.env\.EXPO_PUBLIC_ANDROID_CERT_SHA1/);
+  });
+
+  test('Google error_message is never shown; results carry the Powered by Google attribution', () => {
+    assert.doesNotMatch(picker, /setError\(data\.error_message/);
+    assert.match(picker, /t\('location\.poweredByGoogle'\)/);
+    assert.equal(read('src/context/LocalizationContext.tsx').match(/poweredByGoogle: 'Powered by Google'/g)?.length, 2);
+  });
+});
