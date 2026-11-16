@@ -2,7 +2,8 @@ import 'dotenv/config';
 
 export default {
   expo: {
-    name: "DrinkMeFinal",
+    // Home-screen and store name. The slug below is the Expo project id and stays.
+    name: "DrinkMe",
     slug: "DrinkMeFinal",
     version: "1.0.0",
     orientation: "portrait",
@@ -19,8 +20,8 @@ export default {
       bundleIdentifier: "com.aroncarola.drinkmefinal",
       infoPlist: {
         NSCameraUsageDescription: "DrinkMe needs the camera to photograph your drinks.",
-        NSPhotoLibraryUsageDescription: "DrinkMe needs access to your photos to add drink images.",
-        NSPhotoLibraryAddUsageDescription: "DrinkMe saves drink photos to your library."
+        // No NSPhotoLibraryAddUsageDescription: the app never saves photos to the library (Apple 5.1.1).
+        NSPhotoLibraryUsageDescription: "DrinkMe needs access to your photos to add drink images."
       }
     },
     android: {

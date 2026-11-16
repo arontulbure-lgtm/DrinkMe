@@ -115,15 +115,15 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
       try {
         setLoading(true);
         const response = await fetch(
-          `https://maps.googleapis.com/maps/api/place/details/json?key=${GOOGLE_API_KEY}&place_id=${encodeURIComponent(item.placeId)}&fields=formatted_address,geometry/location`,
+          `https://maps.googleapis.com/maps/api/place/details/json?key=${GOOGLE_API_KEY}&place_id=${encodeURIComponent(item.placeId)}&fields=formatted_address`,
           { headers: placesRequestHeaders() }
         );
         const data = await response.json();
-        const location = data.result?.geometry?.location;
+        // Only the address is asked for: posts keep the place name, never coordinates (data minimisation).
         onSelect({
           description: data.result?.formatted_address || item.description,
-          lat: typeof location?.lat === 'number' ? location.lat : null,
-          lng: typeof location?.lng === 'number' ? location.lng : null,
+          lat: null,
+          lng: null,
         });
         onClose();
       } catch (error) {
