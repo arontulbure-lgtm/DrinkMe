@@ -15,7 +15,8 @@ import { loadServiceAccount } from './official.mjs';
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = path.resolve(SERVER_DIR, '..');
 export const TEST_USERS_FILE = path.join(ROOT, 'logs', 'testusers.local.json');
-export const TEST_EMAILS = ['test1@drinkme.test', 'test2@drinkme.test', 'test3@drinkme.test'];
+// test4 is the temporary admin of scripted moderation checks (ADMIN_USER_IDS set for that session only).
+export const TEST_EMAILS = ['test1@drinkme.test', 'test2@drinkme.test', 'test3@drinkme.test', 'test4@drinkme.test'];
 // Only these addresses may ever be deleted by this script.
 export const isDeletableTestEmail = (email) => (
   TEST_EMAILS.includes(email) || /^test\d+@drinkme\.test$/.test(email ?? '') || /^drinkmesocialapp\+e2e[\w-]*@gmail\.com$/.test(email ?? '')

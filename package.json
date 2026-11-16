@@ -24,6 +24,7 @@
     "testusers:create": "node server/scripts/testusers.mjs create",
     "testusers:reset": "node server/scripts/testusers.mjs reset",
     "testusers:delete": "node server/scripts/testusers.mjs delete",
+    "testapi": "node server/scripts/testapi.mjs",
     "agent:feature": "tsx agents/tasks/implement-feature.ts"
   },
   "dependencies": {
