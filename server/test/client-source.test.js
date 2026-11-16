@@ -229,3 +229,20 @@ describe('legal links', () => {
     assert.match(read('src/screens/OnboardingScreen.tsx'), /<PrivacyPolicyLink \/>/);
   });
 });
+
+// 6. Terms acceptance (legal T-06/T-07): the app's TERMS_VERSION equals the server's, the step is behind
+//    EXPO_PUBLIC_TERMS_STEP_ENABLED until the text is reviewed (D-01), and it posts { type: 'terms' }.
+describe('terms step', () => {
+  test('TERMS_VERSION matches the server and the step is flagged', () => {
+    const onboarding = read('src/screens/OnboardingScreen.tsx');
+    const server = fs.readFileSync(path.join(SERVER_DIR, 'server.js'), 'utf8');
+    const clientVersion = Number(onboarding.match(/export const TERMS_VERSION = (\d+);/)?.[1]);
+    const serverVersion = Number(server.match(/const TERMS_VERSION = (\d+);/)?.[1]);
+    assert.ok(clientVersion >= 1);
+    assert.equal(clientVersion, serverVersion);
+    assert.match(onboarding, /TERMS_STEP_ENABLED = process\.env\.EXPO_PUBLIC_TERMS_STEP_ENABLED === 'true'/);
+    assert.match(onboarding, /type: 'terms', version: TERMS_VERSION/);
+    assert.match(read('src/navigation/AppNavigator.tsx'), /needsTermsAcceptance\(profile\)/);
+    assert.equal(read('src/context/LocalizationContext.tsx').match(/termsAccept: '/g)?.length, 2);
+  });
+});

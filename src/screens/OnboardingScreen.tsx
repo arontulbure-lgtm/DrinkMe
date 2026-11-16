@@ -9,7 +9,7 @@ import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError, isNameR
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
-import { PrivacyPolicyLink } from '../components/LegalLinks';
+import { PrivacyPolicyLink, TermsAndPrivacyLinks } from '../components/LegalLinks';
 
 // Same number as PRIVACY_NOTICE_VERSION in server/server.js. Raise both when the notice text changes
 // in substance, and re-check the text whenever the public read rules or PARTNER_CONSENT_REQUIRED do.
@@ -19,6 +19,15 @@ import { PrivacyPolicyLink } from '../components/LegalLinks';
 // its own and stores the highest, so older builds still answering their own notice are never stranded.
 // Version 2: nothing is visible without signing in, or before the 18+ confirmation, the 90-day audit log, and the reported version kept when a reported post is edited.
 export const PRIVACY_NOTICE_VERSION = 2;
+
+// Legal T-07: same number as TERMS_VERSION in server/server.js. The Terms step is off until the Terms text is
+// reviewed (D-01) and hosted (D-06): EXPO_PUBLIC_TERMS_STEP_ENABLED=true turns it on, and the app then asks
+// once per new version, after the privacy notice.
+export const TERMS_VERSION = 1;
+export const TERMS_STEP_ENABLED = process.env.EXPO_PUBLIC_TERMS_STEP_ENABLED === 'true';
+export const needsTermsAcceptance = (profile: { termsVersion?: number | null } | null | undefined) => (
+  TERMS_STEP_ENABLED && !!profile && (profile.termsVersion ?? 0) < TERMS_VERSION
+);
 
 const NAME_MAX_LENGTH = 120;
 
@@ -38,6 +47,7 @@ export default function OnboardingScreen({ onLater }: Props) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const isNoticeStep = (profile?.privacyNoticeVersion ?? 0) < PRIVACY_NOTICE_VERSION;
+  const isTermsStep = !isNoticeStep && needsTermsAcceptance(profile);
 
   const applyUpdatedProfile = (updated: BaseUser) => {
     if (!serverUserId) return;
@@ -64,6 +74,21 @@ export default function OnboardingScreen({ onLater }: Props) {
       return apiFetch<BaseUser>(`/api/users/${serverUserId}/acknowledgements`, {
         method: 'POST',
         body: JSON.stringify({ type: 'privacy', version: PRIVACY_NOTICE_VERSION }),
+      });
+    },
+    onMutate: () => setErrorKey(null),
+    onSuccess: (updated) => {
+      if (isCurrentAuthUser(serverUserId)) applyUpdatedProfile(updated);
+    },
+    onError: handleSaveError,
+  });
+
+  const termsMutation = useMutation({
+    mutationFn: async () => {
+      if (!serverUserId) throw new Error('Missing user id');
+      return apiFetch<BaseUser>(`/api/users/${serverUserId}/acknowledgements`, {
+        method: 'POST',
+        body: JSON.stringify({ type: 'terms', version: TERMS_VERSION }),
       });
     },
     onMutate: () => setErrorKey(null),
@@ -159,6 +184,30 @@ export default function OnboardingScreen({ onLater }: Props) {
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
                   <Text style={styles.primaryText}>{t('onboarding.privacyAccept')}</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : isTermsStep ? (
+            <>
+              <Ionicons name="document-text-outline" size={48} color="#8B5FBF" style={styles.icon} />
+              <Text style={styles.title} accessibilityRole="header">{t('onboarding.termsTitle')}</Text>
+              <Text style={styles.body}>{t('onboarding.termsAdults')}</Text>
+              <Text style={styles.body}>{t('onboarding.termsContent')}</Text>
+              <Text style={styles.body}>{t('onboarding.termsModeration')}</Text>
+              <Text style={styles.body}>{t('onboarding.termsNoSales')}</Text>
+              <TermsAndPrivacyLinks />
+              {errorKey ? <Text style={styles.error} accessibilityLiveRegion="polite">{t(errorKey)}</Text> : null}
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={() => termsMutation.mutate()}
+                disabled={termsMutation.isPending || isLoggingOut}
+                accessibilityRole="button"
+                accessibilityLabel={t('onboarding.termsAccept')}
+              >
+                {termsMutation.isPending ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.primaryText}>{t('onboarding.termsAccept')}</Text>
                 )}
               </TouchableOpacity>
             </>

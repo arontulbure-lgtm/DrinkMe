@@ -2095,6 +2095,7 @@ const AUDIT_SYSTEM_MAX_ENTRIES = 20_000;
 const AUDIT_META_KEYS = {
   'ack.age_confirmed': [],
   'ack.privacy_accepted': ['version'],
+  'ack.terms_accepted': ['version'],
   // reason: 'tokens_revoked' when Firebase revoked the refresh tokens (password reset or change, email
   // change, revokeRefreshTokens); 'account_disabled' / 'account_gone' when Firebase reports the account
   // disabled or deleted outside the app; absent for the email takeover guard's bump.
@@ -2110,7 +2111,7 @@ const AUDIT_ACTIONS = new Set(Object.keys(AUDIT_META_KEYS));
 // The user's own actions. Lead decision (data minimisation): they are deleted with the account, not
 // anonymised; account.deletion_completed under the anonymous id stays as the record. Admin entries keep
 // the anonymous id instead of the uid.
-const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'auth.session_revoked', 'account.deletion_requested']);
+const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'ack.terms_accepted', 'auth.session_revoked', 'account.deletion_requested']);
 const isUserAuditEntry = (entry) => AUDIT_SELF_ACTIONS.has(entry.action);
 const auditCapFor = (entry) => (isUserAuditEntry(entry) ? AUDIT_USER_MAX_ENTRIES : AUDIT_SYSTEM_MAX_ENTRIES);
 
@@ -2468,6 +2469,12 @@ const toPublicUser = (user, viewerId) => {
 // the 90-day audit log, and the reported version kept when a reported post is edited.
 const PRIVACY_NOTICE_VERSION = 2;
 
+// Legal T-06: the Terms of Use version the user accepted (docs/legal/terms.md). Raise it when the Terms change in
+// a way that needs new acceptance; the app asks again (T-07, behind EXPO_PUBLIC_TERMS_STEP_ENABLED until the
+// text is reviewed, D-01). Owner default N-2: the server records acceptance but refuses nothing without it.
+const TERMS_VERSION = 1;
+const getTermsVersion = (user) => (Number.isInteger(user.termsVersion) ? user.termsVersion : null);
+
 const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVersion) ? user.privacyNoticeVersion : null);
 
 // What the owner gets back. An allowlist too, so internal fields such as nameSetByUser stay private.
@@ -2490,6 +2497,7 @@ const toOwnerUser = (user) => {
     ageConfirmed: isAgeConfirmed(id),
     needsName,
     privacyNoticeVersion: getPrivacyNoticeVersion(user),
+    termsVersion: getTermsVersion(user),
     // Only while the name prompt is due: the Google or Apple name was dropped as reserved at sign-in.
     ...(needsName && user.nameReservedAtSignIn === true && { nameReservedAtSignIn: true }),
     // Only while true, so the client can explain it.
@@ -3314,6 +3322,26 @@ app.post('/api/users/:id/acknowledgements', requireAuth, (req, res) => {
   const user = userIndex.get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const { type, confirmed, version } = req.body || {};
+  if (type === 'terms') {
+    if (!Number.isInteger(version) || version < 1 || version > TERMS_VERSION) {
+      return res.status(400).json({ error: 'Invalid acknowledgement' });
+    }
+    // The highest stays; a repeat or a lower version writes nothing.
+    if (version <= (getTermsVersion(user) ?? 0)) return res.json(toOwnerUser(user));
+    const { termsVersion: previousVersion, termsAcceptedAt: previousAt } = user;
+    user.termsVersion = version;
+    user.termsAcceptedAt = new Date().toISOString();
+    const undoAudit = appendAudit('ack.terms_accepted', { actorId: user.id, meta: { version } });
+    if (!saveDbOrRespond(res)) {
+      undoAudit();
+      if (previousVersion === undefined) delete user.termsVersion;
+      else user.termsVersion = previousVersion;
+      if (previousAt === undefined) delete user.termsAcceptedAt;
+      else user.termsAcceptedAt = previousAt;
+      return;
+    }
+    return res.json(toOwnerUser(user));
+  }
   if (type === 'privacy') {
     if (!Number.isInteger(version) || version < 1 || version > PRIVACY_NOTICE_VERSION) {
       return res.status(400).json({ error: 'Invalid acknowledgement' });

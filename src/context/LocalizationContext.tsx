@@ -535,6 +535,13 @@ const translations = {
       privacyPrivate:
         'Your email, saved posts and Smart Bar stay private. You can delete your account at any time from Edit Profile.',
       privacyAccept: 'I understand',
+      // Terms step (legal T-07), shown only with EXPO_PUBLIC_TERMS_STEP_ENABLED; draft wording until D-01.
+      termsTitle: 'Terms of Use',
+      termsAdults: 'DrinkMe is only for adults (18 or older, or the legal drinking age where you live, if higher).',
+      termsContent: 'You are responsible for what you post. Do not post content that is illegal, hateful, or encourages excessive or dangerous drinking.',
+      termsModeration: 'We can remove content and suspend accounts that break the Terms or the Community Guidelines.',
+      termsNoSales: 'DrinkMe does not sell alcohol and posts must not sell it.',
+      termsAccept: 'I agree to the Terms of Use',
       nameTitle: 'What should we call you?',
       nameHint: 'Other DrinkMe users will see this name. Do not use your email address.',
       nameInvalid: 'Enter a name, without @.',
@@ -1066,6 +1073,12 @@ const translations = {
       privacyPrivate:
         'E-mailul, postările salvate și Smart Bar rămân private. Îți poți șterge contul oricând din ecranul Editează profilul.',
       privacyAccept: 'Am înțeles',
+      termsTitle: 'Termeni de utilizare',
+      termsAdults: 'DrinkMe este doar pentru adulți (18 ani sau mai mult, ori vârsta legală pentru alcool din țara ta, dacă e mai mare).',
+      termsContent: 'Răspunzi pentru ce postezi. Nu posta conținut ilegal, care incită la ură sau care încurajează consumul excesiv sau periculos de alcool.',
+      termsModeration: 'Putem elimina conținut și suspenda conturi care încalcă Termenii sau Regulile comunității.',
+      termsNoSales: 'DrinkMe nu vinde alcool, iar postările nu au voie să vândă alcool.',
+      termsAccept: 'Sunt de acord cu Termenii de utilizare',
       nameTitle: 'Cum să-ți spunem?',
       nameHint: 'Ceilalți utilizatori DrinkMe vor vedea acest nume. Nu folosi adresa de e-mail.',
       nameInvalid: 'Introdu un nume, fără @.',

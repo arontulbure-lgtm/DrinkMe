@@ -57,6 +57,20 @@ export function PrivacyPolicyLink() {
   );
 }
 
+/** The Terms and Privacy links on the Terms step (legal T-07); nothing until the pages are hosted. */
+export function TermsAndPrivacyLinks() {
+  const { t, locale } = useLocalization();
+  if (!getLegalUrl('terms', locale)) return null;
+  return (
+    <View style={styles.inlineLinks}>
+      <Text style={styles.agreementLink} accessibilityRole="link" onPress={() => { void openLegalDoc('terms', locale); }}>
+        {t('legal.terms')}
+      </Text>
+      <PrivacyPolicyLink />
+    </View>
+  );
+}
+
 export default function LegalLinks() {
   const { t, locale } = useLocalization();
 
@@ -117,6 +131,10 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     marginTop: 16,
+  },
+  inlineLinks: {
+    gap: 8,
+    marginTop: 8,
   },
   agreementLink: {
     color: '#8B5FBF',
