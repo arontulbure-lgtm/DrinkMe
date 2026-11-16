@@ -31,7 +31,7 @@ All routes except `/health` need header `X-AI-Service-Token: <AI_SERVICE_TOKEN>`
 outside local development; the service refuses to bind a non-loopback host without it).
 | Route | Body | Answer |
 |---|---|---|
-| `GET /health`, `GET /v1/health` | - | `{status: "ok"|"degraded", schemaVersion, models: {vision, text}, ollama: bool, ocr: bool}` |
+| `GET /health`, `GET /v1/health` | - | `{status: "ok"|"degraded", schemaVersion, models: {vision, text}, ollama: bool, modelsPresent: bool, ocr: bool}` |
 | `POST /v1/scan` | `{schemaVersion, imageBase64, mimeType, language}` (JPEG/PNG/WebP, max 7 MB decoded) | `ScanResult` |
 | `POST /v1/recipes` | `RecipeRequest` | `{schemaVersion, recipes: Recipe[], model, timings}` |
 Error answers: `{error: {code, message}}` with codes `invalid_request` (400/422), `unauthorized` (401),
@@ -50,9 +50,10 @@ Error answers: `{error: {code, message}}` with codes `invalid_request` (400/422)
 
 ### RecipeRequest
 `{schemaVersion, mode: "scan"|"smart_bar", language: "en"|"ro", ingredients: [{name, category?}], basics: string[],
-mocktailsOnly: bool, excludeNames: string[], count: 3..5}`
+mocktailsOnly: bool, excludeNames: string[], count: 1..5}` (the server asks 4, and 1 for the mocktail top-up)
 - `scan`: `ingredients` holds exactly the scanned item; other ingredients are allowed and become "you'll also need".
-- `smart_bar`: only `ingredients` + `basics` may be used.
+- `smart_bar`: only `ingredients` + `basics` may be used. Basics are user text: they go in the user message, never
+  the system prompt.
 
 ### Recipe
 See the recipe-schema skill.
@@ -68,16 +69,24 @@ See the recipe-schema skill.
 - Routes (all behind `requireSignedInAdult`, `requireAuth`, the AI limiter):
   | Route | Notes |
   |---|---|
-  | `GET /api/ai/status` | `{available, provider, scan, recipes, barcode, noticeVersion, noticeAccepted, settings}`; the app's feature flag |
-  | `POST /api/ai/notice` | `{version}` accepts the AI notice (stored as `aiNoticeVersion` on the user) |
-  | `PUT /api/ai/settings` | `{basics?: string[], photoOptIn?: bool}` |
-  | `POST /api/ai/scan` | JSON `{imageBase64, language}`; needs notice; 18+; AI limiter |
-  | `POST /api/ai/barcode` | `{ean, language}`; EAN-8/12/13 checksum; Open Food Facts; needs notice |
+  | `GET /api/ai/status` | `{available, provider, scan, recipes, barcode, noticeVersion, noticeAccepted, processing, settings}`; the app's feature flag |
+  | `POST /api/ai/notice` | `{version}` accepts the AI notice. The version depends on the provider (local 1, openai 2: the text names the recipient), so switching provider asks again |
+  | `PUT /api/ai/settings` | `{basics?: string[] \| null, photoOptIn?: bool}`; opt-in stores `aiPhotoOptInAt` + `aiPhotoConsentVersion` |
+  | `POST /api/ai/scan` | JSON `{imageBase64, language}`; needs notice; 18+; one request per user, then AI limiter |
+  | `POST /api/ai/barcode` | `{ean, language}`; EAN-8/12/13 checksum; Open Food Facts; no notice needed, works with AI off |
+  | `POST /api/ai/report` | `{kind: 'recipe'\|'scan', reason: 'offensive'\|'unsafe'\|'wrong'\|'other', ...}` → audit entry `ai.output_reported` (Google Play AI content policy) |
   | `POST /api/ai/recipes` | `{mode, item?, language, newSession?}`; returns `{recipes, exhausted}` |
   | `GET /api/recipes/saved` · `POST /api/recipes/saved` · `DELETE /api/recipes/saved/:recipeId` | saved recipes (max 200) |
-- Error codes to the app: `ai_disabled` 503, `ai_notice_required` 403, `ai_rate_limit` 429, `ai_unavailable` 503
-  (provider down), `ai_timeout` 504, `ai_invalid_output` 502 (nothing valid after one regeneration),
-  `barcode_not_found` 404, `barcode_invalid` 400, `recipe_limit` 429, `recipes_exhausted` (200 with `exhausted: true`).
+- Error codes to the app (each has an `ai.errors.*` string in ro/en): `ai_disabled` 503, `ai_notice_required` 403,
+  `ai_rate_limit` 429, `ai_busy` 409 (one AI request per user at a time), `ai_unavailable` 503 (provider down),
+  `ai_timeout` 504, `ai_invalid_output` 502 (nothing valid after one regeneration), `ai_bad_request` 400,
+  `barcode_not_found` 404, `barcode_invalid` 400, `barcode_unavailable` 503, `smart_bar_empty` 400,
+  `water_no_recipes` 400, `recipe_limit` 429, `recipe_invalid` 400; exhausted batches are 200 with `exhausted: true`.
+- The client tolerates enum values it does not know (unknown status/category → `unclear`, unknown warnings dropped),
+  so adding a value is an additive change; removing or renaming one needs a new schema version.
+- The one-request lock is released when the provider work settles, not on disconnect; a disconnect aborts the call.
+- Production refuses to start with `AI_PROVIDER=local` unless `AI_SERVICE_TOKEN` has 32+ characters and
+  `AI_SERVICE_URL` is loopback or https.
 - Every new route is in `server/test/helpers/routes.js` `ROUTE_MANIFEST`.
 
 ## Env vars
@@ -88,13 +97,17 @@ See the recipe-schema skill.
 | `AI_SERVICE_TOKEN` | server + ai-service | none | shared secret, header `X-AI-Service-Token` |
 | `AI_SERVICE_TIMEOUT_MS` | server | `60000` | recipes; scan uses min(20000, this) |
 | `AI_PHOTO_RETENTION_DAYS` | server | `90` | only for users who opted in |
+| `AI_PHOTO_DIR` | server | `server/data/ai-scans` | kept photos (opt-in), metadata stripped |
+| `AI_RATE_LIMIT_PER_HOUR` | server | `30` | scans + batches per user per hour |
+| `AI_SERVICE_HOST` / `AI_SERVICE_PORT` | ai-service | `127.0.0.1` / `8088` | non-loopback needs the token |
+| `DRINKME_MAX_IMAGE_SIDE`, `DRINKME_OCR`, `SCAN_MIN_CONFIDENCE`, `OLLAMA_TIMEOUT_S`, `OLLAMA_KEEP_ALIVE` | ai-service | see LOCAL_SETUP | |
 | `OLLAMA_HOST` | ai-service | `127.0.0.1:11434` | |
 | `DRINKME_VISION_MODEL` / `DRINKME_TEXT_MODEL` | ai-service | see docs/ai/LOCAL_SETUP.md | Ollama tags |
 | `OLLAMA_MODELS`, `PIP_CACHE_DIR`, `HF_HOME`, `TORCH_HOME` | Windows user env | D:\AI\... | see docs/ai/LOCAL_SETUP.md |
 
 ## Feature flags
-- Server: `AI_PROVIDER`. `off` makes every `/api/ai/*` AI route answer 503 `ai_disabled`; barcode lookup and saved
-  recipes stay on (they need no model).
+- Server: `AI_PROVIDER`. `off` makes every `/api/ai/*` AI route answer 503 `ai_disabled`; barcode lookup, saved
+  recipes and reports stay on (they need no model). Rollback = `AI_PROVIDER=off` (see docs/ai/ROLLOUT.md).
 - Client: `AI_ENABLED` (ScannerScreen.tsx) and `AI_RECIPES_ENABLED` (SmartBarScreen.tsx) are hard kill switches
   (true on this branch). The real flows show only when the kill switch is on **and** `GET /api/ai/status` says
   `available`; otherwise the "coming soon" preview stays. Never delete the preview.

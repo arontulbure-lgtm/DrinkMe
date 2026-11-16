@@ -2,7 +2,8 @@
 // checkRecipe before a user sees it, whichever provider made it. Patterns are matched on folded text
 // (lower case, no accents), so they are written without diacritics.
 import { textMentionsAlcohol } from './alcoholWords.js';
-import { foldText } from './taxonomy.js';
+import { computeStrength } from './schemas.js';
+import { DEFAULT_ABV, foldText, isAlcoholicCategory } from './taxonomy.js';
 
 export const MAX_STANDARD_DRINKS = 2;
 
@@ -20,7 +21,7 @@ const DANGEROUS_TECHNIQUE = pattern([
   'flam(?:e|es|ed|ing)', 'flamb\\w*','fire', 'ignite[sd]?', 'igniting', 'set (?:it )?alight', 'light (?:it|the \\w+) on fire',
   'torch(?:ed|ing)?', 'blowtorch', 'dry ice', 'liquid nitrogen', 'inhal(?:e|ed|ing|ation)', 'vapou?r(?:ize|ise|ized|ised)?',
   'aerosol', 'smoke (?:it )?in', 'breathe in', 'snort',
-  'flambat', 'flambare', 'aprinde', 'aprins', 'foc', 'gheata carbonica', 'gheata uscata', 'azot lichid', 'inhala', 'inhaleaza', 'vapori',
+  'flambat', 'flambare', 'aprinde', 'aprins', 'foc', 'gheata carbonica', 'gheata uscata', 'azot lichid', 'inhal\\w*', 'vapori\\w*', 'fum de inhalat', 'de inhalat',
 ]);
 // S4: raw egg (warning, not a drop). Aquafaba and egg-free foams do not count.
 const RAW_EGG = pattern([
@@ -28,7 +29,10 @@ const RAW_EGG = pattern([
 ]);
 const EGG_FREE = /(?<![\p{L}\p{N}])(?:aquafaba|egg[\s-]?free|fara ou|vegan foam|eggnog flavou?red syrup)(?![\p{L}\p{N}])/u;
 // S5: energy drinks.
-const ENERGY = pattern(['energy drinks?', 'energizant(?:a|e)?', 'bautura energizanta', 'red bull', 'monster energy', 'burn energy', 'hell energy']);
+const ENERGY = pattern([
+  'energy drinks?', 'energy', 'energizant\\w*', 'bautura energizanta', 'red bull', 'redbull', 'monster', 'rockstar', 'burn', 'hell',
+  'battery', 'xixo energy', 'shark energy', 'tiger energy',
+]);
 // S6: medicines, drugs, supplements and non-food items.
 const NON_FOOD = pattern([
   'paracetamol', 'acetaminophen', 'ibuprofen', 'aspirin', 'aspirina', 'codeine', 'codeina', 'cough syrup', 'sirop de tuse',
@@ -40,6 +44,11 @@ const NON_FOOD = pattern([
   'rubbing alcohol', 'spirt medicinal', 'alcool sanitar', 'hand sanitizer', 'dezinfectant', 'disinfectant', 'mouthwash',
   'apa de gura', 'perfume', 'parfum', 'cologne', 'lighter fluid', 'gasoline', 'benzina', 'kerosene', 'ethanol 96', 'pure ethanol',
   'grain alcohol', 'everclear', 'spirytus', 'alcool alimentar 96', 'cleaning (?:product|spray|agent)s?', 'lye', 'borax',
+]);
+// S9 (label honesty): names or tags that claim there is no alcohol.
+const NON_ALCOHOLIC_CLAIM = pattern([
+  'mocktails?', 'virgin', 'non alcoholic', 'nonalcoholic', 'alcohol free', 'zero proof', 'spirit free', 'no alcohol',
+  'fara alcool', 'analcolic\\w*', 'sin alcohol', 'sans alcool', 'alkoholfrei\\w*',
 ]);
 // S8: driving.
 const DRIVING = pattern([
@@ -124,13 +133,52 @@ export const isAllowedIngredient = (name, allowedNames) => {
 };
 
 /**
+ * What the server knows for sure about an input ingredient (the confirmed scan item): its names, category and ABV.
+ * Returns { names, category, abv } or null.
+ */
+export const knownItemFor = ({ names, category, abv }) => {
+  if (!category) return null;
+  const alcoholic = isAlcoholicCategory(category, abv ?? null);
+  return {
+    names: names.filter(Boolean),
+    category,
+    // The label's ABV when known, else the category default (a spirit without a readable ABV counts as 40 %).
+    abv: alcoholic ? (typeof abv === 'number' ? abv : (DEFAULT_ABV[category] ?? 40)) : 0,
+  };
+};
+
+const matchesKnown = (ingredientName, known) => known.names.some((name) => (
+  isAllowedIngredient(ingredientName, [name]) || isAllowedIngredient(name, [ingredientName])
+));
+
+/**
+ * Raises the ABV of every ingredient that is a known item (the scanned bottle) to the item's real ABV, then
+ * recomputes strength. The model's numbers are never trusted for the bottle the user actually scanned.
+ */
+const applyKnownItems = (recipe, knownItems) => {
+  if (!knownItems?.length) return recipe;
+  let changed = false;
+  const ingredients = recipe.ingredients.map((ingredient) => {
+    const known = knownItems.find((k) => matchesKnown(ingredient.name, k));
+    if (!known || known.abv <= ingredient.abv) return ingredient;
+    changed = true;
+    return { ...ingredient, abv: known.abv };
+  });
+  if (!changed) return recipe;
+  const { estimatedAbv, standardDrinks } = computeStrength(ingredients);
+  return { ...recipe, ingredients, estimatedAbv, standardDrinks, isAlcoholic: recipe.isAlcoholic || standardDrinks > 0 };
+};
+
+/**
  * Applies S1-S13 to one normalised recipe.
- * ctx: { mode: 'scan'|'smart_bar', language, mocktailsOnly, allowedNames (smart_bar: bar + basics),
- *        scannedName (scan), basics, shownNames: Set of folded names already shown }
+ * ctx: { mode: 'scan'|'smart_bar', language, adult, mocktailsOnly, allowedNames (smart_bar: bar + basics),
+ *        scannedName + scannedAliases (scan), knownItems (from knownItemFor), basics,
+ *        shownNames: Set of folded names already shown }
  * Returns { recipe } (possibly with warnings / responsibleNote / youWillAlsoNeed added) or { dropped: rule }.
  */
-export const checkRecipe = (recipe, ctx) => {
-  if (!recipe) return { dropped: 'S9' };
+export const checkRecipe = (normalized, ctx) => {
+  if (!normalized) return { dropped: 'S9' };
+  const recipe = applyKnownItems(normalized, ctx.knownItems);
   const text = recipeText(recipe);
   const folded = foldText(recipe.name);
   if (ctx.shownNames?.has(folded)) return { dropped: 'S12' };
@@ -140,6 +188,8 @@ export const checkRecipe = (recipe, ctx) => {
   // A recipe that names an alcoholic drink is alcoholic, whatever its ABV numbers say.
   const namesAlcohol = textMentionsAlcohol(ingredientText(recipe));
   const isAlcoholic = recipe.isAlcoholic || namesAlcohol;
+  // Label honesty (S9): an alcoholic recipe must never be called a mocktail, virgin or alcohol-free.
+  if (isAlcoholic && NON_ALCOHOLIC_CLAIM.test(foldText([recipe.name, ...recipe.tags].join(' ')))) return { dropped: 'S9' };
   if (isAlcoholic && (ctx.mocktailsOnly || !ctx.adult)) return { dropped: 'S13' };
   if (recipe.standardDrinks > MAX_STANDARD_DRINKS) return { dropped: 'S1' };
   if (isAlcoholic && DRIVING.test(text)) return { dropped: 'S8' };
@@ -149,8 +199,11 @@ export const checkRecipe = (recipe, ctx) => {
     const names = [...recipe.ingredients.map((i) => i.name), ...(recipe.garnish ? [recipe.garnish] : [])];
     if (!names.every((name) => isAllowedIngredient(name, ctx.allowedNames))) return { dropped: 'S10' };
   } else if (ctx.mode === 'scan') {
-    if (!recipe.ingredients.some((i) => isAllowedIngredient(i.name, [ctx.scannedName, ...(ctx.scannedAliases ?? [])])
-      || isAllowedIngredient(ctx.scannedName, [i.name]))) {
+    // A mocktail cannot contain an alcoholic scanned bottle: it may be inspired by it instead (the batch's mocktail).
+    const scannedIsAlcoholic = (ctx.knownItems ?? []).some((k) => k.abv > 0);
+    const usesItem = recipe.ingredients.some((i) => isAllowedIngredient(i.name, [ctx.scannedName, ...(ctx.scannedAliases ?? [])])
+      || isAllowedIngredient(ctx.scannedName, [i.name]));
+    if (!usesItem && !(scannedIsAlcoholic && !isAlcoholic)) {
       return { dropped: 'S11' };
     }
     result.youWillAlsoNeed = recipe.ingredients
@@ -160,9 +213,12 @@ export const checkRecipe = (recipe, ctx) => {
       .map((i) => i.name)
       .slice(0, 12);
   }
-  const egg = RAW_EGG.test(ingredientText(recipe)) && !EGG_FREE.test(text);
+  // Per ingredient: an "aquafaba" in the description must not hide an egg-white ingredient.
+  const egg = recipe.ingredients.some((i) => RAW_EGG.test(foldText(i.name)) && !EGG_FREE.test(foldText(i.name)));
   if (egg) result.warnings.push('raw_egg');
-  if (isAlcoholic && ENERGY.test(text)) result.warnings.push('energy_alcohol');
+  const knownEnergy = (ctx.knownItems ?? []).filter((k) => k.category === 'energy_drink');
+  const hasEnergy = ENERGY.test(text) || recipe.ingredients.some((i) => knownEnergy.some((k) => matchesKnown(i.name, k)));
+  if (isAlcoholic && hasEnergy) result.warnings.push('energy_alcohol');
   if (isAlcoholic) result.responsibleNote = responsibleNoteFor(recipe.language);
   return { recipe: result };
 };

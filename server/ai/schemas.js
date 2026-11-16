@@ -103,7 +103,8 @@ export const normalizeRecipe = (raw, fallbackLanguage) => {
     const ingName = cleanAiText(ing?.name, RECIPE_LIMITS.ingredientName);
     const amount = finiteIn(ing?.amount, 0.01, RECIPE_LIMITS.amountMax);
     if (!ingName || amount === null || !RECIPE_UNITS.includes(ing.unit)) return null;
-    const statedAbv = finiteIn(ing.abv ?? 0, 0, 100);
+    // A missing ABV is invalid (S9): defaulting it to 0 would turn an unknown spirit into a "mocktail".
+    const statedAbv = finiteIn(ing.abv, 0, 100);
     if (statedAbv === null) return null;
     ingredients.push({
       name: ingName,
@@ -119,7 +120,11 @@ export const normalizeRecipe = (raw, fallbackLanguage) => {
     .map((tag) => cleanAiText(tag, RECIPE_LIMITS.tag)).filter(Boolean).slice(0, RECIPE_LIMITS.tags);
   const language = RECIPE_LANGUAGES.includes(raw.language) ? raw.language : fallbackLanguage;
   if (!RECIPE_LANGUAGES.includes(language)) return null;
+  // Alcohol is only counted in ml: an alcoholic ingredient in g or pieces would escape the strength check (S9).
+  if (ingredients.some((i) => i.abv > 0.5 && i.unit !== 'ml')) return null;
   const { estimatedAbv, standardDrinks } = computeStrength(ingredients);
+  // The model says it contains alcohol but no ingredient carries any: the numbers cannot be trusted (S9).
+  if (raw.isAlcoholic === true && standardDrinks === 0) return null;
   return {
     name,
     description: cleanAiText(raw.description, RECIPE_LIMITS.description),

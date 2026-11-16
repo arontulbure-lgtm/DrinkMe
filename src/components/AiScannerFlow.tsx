@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import AiNoticeCard from './AiNoticeCard';
+import AiReportSheet from './AiReportSheet';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
@@ -70,6 +71,7 @@ export default function AiScannerFlow({ status, navigation }: Props) {
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [isLooking, setIsLooking] = useState(false);
   const [addedName, setAddedName] = useState<string | null>(null);
+  const [isReporting, setIsReporting] = useState(false);
   // A cancelled scan may still answer later; its answer is then ignored.
   const scanToken = useRef(0);
 
@@ -90,7 +92,7 @@ export default function AiScannerFlow({ status, navigation }: Props) {
       if (token === scanToken.current) showResult(scan);
     } catch (error) {
       if (token !== scanToken.current) return;
-      setErrorKey(getAiErrorKey(error));
+      setErrorKey(getAiErrorKey(error, 'scan'));
       setPhase('idle');
     }
   }, [locale, showResult]);
@@ -208,7 +210,8 @@ export default function AiScannerFlow({ status, navigation }: Props) {
         {header}
         <ScrollView contentContainerStyle={styles.content}>
           <AiNoticeCard
-            onAccept={() => acceptNotice.mutate()}
+            onAccept={() => acceptNotice.mutate(status.noticeVersion)}
+            processing={status.processing}
             isAccepting={acceptNotice.isPending}
             errorText={acceptNotice.isError ? t(getAiErrorKey(acceptNotice.error)) : null}
           />
@@ -398,9 +401,19 @@ export default function AiScannerFlow({ status, navigation }: Props) {
             <Ionicons name="refresh" size={18} color="#8B5FBF" />
             <Text style={styles.linkText}>{t('ai.scan.scanAnother')}</Text>
           </TouchableOpacity>
+          {result.source === 'photo' && (
+            <TouchableOpacity style={styles.linkButton} onPress={() => setIsReporting(true)} accessibilityRole="button" accessibilityLabel={t('ai.report.label')}>
+              <Ionicons name="flag-outline" size={16} color="#9CA3AF" />
+              <Text style={styles.reportText}>{t('ai.report.action')}</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
       {barcodeModal}
+      <AiReportSheet
+        target={isReporting ? { kind: 'scan', category: result.item?.category, status: result.status } : null}
+        onClose={() => setIsReporting(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -436,6 +449,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   linkButton: { flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
   linkText: { color: '#8B5FBF', fontSize: 15, fontWeight: '600' },
+  reportText: { color: '#9CA3AF', fontSize: 14 },
   disabled: { opacity: 0.6 },
   errorBox: {
     flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: '#EF444422', borderRadius: 10, padding: 12,

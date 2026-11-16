@@ -92,7 +92,8 @@ def build_scan_result(raw: dict[str, Any], ocr_lines: list[str], settings: Setti
 
 async def run_scan(req: ScanRequest, client: OllamaClient, settings: Settings) -> ScanResult:
     started = time.perf_counter()
-    img, model_b64 = imaging.decode_image(req.imageBase64, req.mimeType, settings.max_image_side)
+    # Off the event loop: a large decode must not block health checks and other requests.
+    img, model_b64 = await asyncio.to_thread(imaging.decode_image, req.imageBase64, req.mimeType, settings.max_image_side)
     ocr_lines: list[str] = []
     ocr_ms = 0
     if settings.ocr_enabled:
@@ -195,7 +196,7 @@ async def run_recipes(req: RecipeRequest, client: OllamaClient, settings: Settin
     started = time.perf_counter()
     names = [i.name for i in req.ingredients]
     system = prompts.recipe_system(req.language, req.mode, req.basics, req.mocktailsOnly, req.count)
-    user = prompts.recipe_user_message(req.mode, names, req.excludeNames, req.count)
+    user = prompts.recipe_user_message(req.mode, names, req.excludeNames, req.count, req.basics)
     raw = await client.chat_json(
         settings.text_model, system, user, _RECIPES_SCHEMA, temperature=0.7, num_predict=2600, num_ctx=6144,
     )

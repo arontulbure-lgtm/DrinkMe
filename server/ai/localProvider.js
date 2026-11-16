@@ -24,7 +24,7 @@ export const createLocalProvider = ({ url, token, timeoutMs = 60_000, fetchImpl 
 
   // One retry, only when the service could not be reached or answered 503 (e.g. model still loading).
   // Timeouts are not retried: the user would wait twice as long for the same failure.
-  const call = async (path, body, callTimeoutMs) => {
+  const call = async (path, body, callTimeoutMs, signal) => {
     for (let attempt = 0; attempt < 2; attempt++) {
       let response;
       try {
@@ -32,7 +32,7 @@ export const createLocalProvider = ({ url, token, timeoutMs = 60_000, fetchImpl 
           method: 'POST',
           headers,
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(callTimeoutMs),
+          signal: signal ? AbortSignal.any([AbortSignal.timeout(callTimeoutMs), signal]) : AbortSignal.timeout(callTimeoutMs),
         });
       } catch (err) {
         if (err?.name === 'TimeoutError' || err?.name === 'AbortError') throw new AiProviderError('ai_timeout');
@@ -68,11 +68,12 @@ export const createLocalProvider = ({ url, token, timeoutMs = 60_000, fetchImpl 
         return { ok: false };
       }
     },
-    scan: ({ imageBase64, mimeType, language }) => call(
+    scan: ({ imageBase64, mimeType, language, signal }) => call(
       '/v1/scan',
       { schemaVersion: AI_SCHEMA_VERSION, imageBase64, mimeType, language },
       Math.min(SCAN_TIMEOUT_CAP_MS, timeoutMs),
+      signal,
     ),
-    recipes: (request) => call('/v1/recipes', { schemaVersion: AI_SCHEMA_VERSION, ...request }, timeoutMs),
+    recipes: (request, { signal } = {}) => call('/v1/recipes', { schemaVersion: AI_SCHEMA_VERSION, ...request }, timeoutMs, signal),
   };
 };

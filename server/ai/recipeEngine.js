@@ -50,7 +50,8 @@ const allowsMocktail = (mode, inputs) => {
 };
 
 /**
- * input: { provider, userId, adult, mode, language, inputs: [{ name, category? }], scannedAliases?, basics, newSession }
+ * input: { provider, userId, adult, mode, language, inputs: [{ name, category? }], scannedAliases?, knownItems?, basics,
+ *          newSession, signal? (aborts the provider call when the client goes away) }
  * Returns { recipes, exhausted, dropped: { S1: n, ... } }.
  */
 export const generateRecipeBatch = async (input) => {
@@ -61,7 +62,7 @@ export const generateRecipeBatch = async (input) => {
   const ctx = {
     mode, language, adult, mocktailsOnly, basics: expandBasics(basics),
     allowedNames: [...inputs.map((i) => i.name), ...expandBasics(basics)],
-    scannedName: inputs[0]?.name, scannedAliases: input.scannedAliases ?? [],
+    scannedName: inputs[0]?.name, scannedAliases: input.scannedAliases ?? [], knownItems: input.knownItems ?? [],
     shownNames: session.names,
   };
   const dropped = {};
@@ -73,7 +74,7 @@ export const generateRecipeBatch = async (input) => {
       schemaVersion: AI_SCHEMA_VERSION, mode, language, ingredients: inputs, basics,
       mocktailsOnly, excludeNames: [...session.display, ...accepted.map((r) => r.name)].slice(-SESSION_MAX_NAMES),
       count: BATCH_SIZE, ...extra,
-    });
+    }, { signal: input.signal });
     if (!Array.isArray(response?.recipes)) throw new AiProviderError('ai_invalid_output');
     for (const raw of response.recipes) {
       const verdict = checkRecipe(normalizeRecipe(raw, language), ctx);
@@ -111,6 +112,10 @@ export const generateRecipeBatch = async (input) => {
     session.names.add(foldText(recipe.name));
     session.display.push(recipe.name);
   }
-  if (session.display.length > SESSION_MAX_NAMES) session.display.splice(0, session.display.length - SESSION_MAX_NAMES);
+  if (session.display.length > SESSION_MAX_NAMES) {
+    session.display.splice(0, session.display.length - SESSION_MAX_NAMES);
+    session.names = new Set(session.display.map(foldText));
+    ctx.shownNames = session.names;
+  }
   return { recipes, exhausted: false, dropped };
 };

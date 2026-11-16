@@ -45,7 +45,7 @@ description: The JSON schema of an AI-generated DrinkMe recipe (v1) and the safe
 | S6 | Medicine, drug, supplement or non-food ingredient (cough syrup, paracetamol, cannabis, bleach, rubbing alcohol, hand sanitizer, ...) | drop |
 | S7 | Alcoholic recipe | add `responsibleNote` (localised) |
 | S8 | Any mention of driving on an alcoholic recipe | drop |
-| S9 | Schema invalid (any field) | drop |
+| S9 | Schema invalid (any field); a missing ingredient ABV; an alcoholic ingredient not in ml; the model says alcoholic but no ingredient carries alcohol; an alcoholic recipe named or tagged mocktail / virgin / alcohol-free | drop |
 | S10 | Smart Bar mode: an ingredient or garnish not in the user's Smart Bar or basics | drop |
 | S11 | Scan mode: the scanned item is not an ingredient | drop |
 | S12 | Same normalised name already shown in this generation session | drop |

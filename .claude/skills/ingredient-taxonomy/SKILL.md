@@ -29,7 +29,9 @@ Rules:
    from the label is ≤ 0.5 %. Unknown ABV on an alcoholic category counts as alcoholic.
 2. Plain water is recognised (`status: water`) but gets no recipes. Flavoured sparkling water is `soda_mixer`.
 3. Anything that is not a food/drink ingredient - people, pets, furniture, phones, medicines, supplements, cleaning
-   products, cosmetics, tobacco, cannabis - is `status: not_ingredient` with a polite message. Never a recipe.
+   products, cosmetics, tobacco, cannabis, candy and mints, chewing gum, pickles, sauces and snacks - is
+   `status: not_ingredient` with a polite message. Never a recipe. Branded mineral or spring water is `water`.
+   Cordials and concentrates "to dilute", including zero-sugar ones, are `syrup`; semi-sparkling rosé is `wine`.
 4. A blurry, dark or partial photo where nothing can be read is `status: unclear` and suggests the barcode.
 5. Coffee and tea are not scan categories in v1 (they belong to posts, not the Smart Bar mixer flow); a cold-brew or
    iced-tea bottle maps to `soda_mixer`, coffee beans to `not_ingredient`. Revisit with the data-curator.

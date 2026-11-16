@@ -114,13 +114,13 @@ export default function AiSettingsScreen({ navigation }: RootStackScreenProps<'A
                 disabled={update.isPending}
                 trackColor={{ false: '#374151', true: '#8B5FBF' }}
                 thumbColor="#FFFFFF"
-                accessibilityLabel={t('ai.settings.photoTitle')}
+                accessibilityLabel={t('ai.settings.photoSwitchLabel')}
               />
             </View>
             <Text style={styles.muted}>{t('ai.settings.photoBody')}</Text>
           </View>
 
-          <AiNoticeCard />
+          <AiNoticeCard processing={status.data?.processing} />
         </ScrollView>
       )}
     </SafeAreaView>

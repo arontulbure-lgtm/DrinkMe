@@ -7,13 +7,18 @@ import io
 import logging
 import re
 import threading
+import warnings
 
 from PIL import Image, ImageOps
 
 log = logging.getLogger("ai-service.imaging")
 
 MAX_DECODED_BYTES = 7 * 1024 * 1024
-Image.MAX_IMAGE_PIXELS = 40_000_000  # decompression-bomb guard
+# Decompression-bomb guards: a small PNG can expand to gigabytes. Checked on the header, before decoding.
+MAX_PIXELS = 25_000_000
+MAX_SIDE = 8000
+Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+warnings.simplefilter("error", Image.DecompressionBombWarning)
 
 _SIGNATURES = {
     "image/jpeg": (b"\xff\xd8\xff",),
@@ -43,8 +48,13 @@ def decode_image(image_b64: str, mime: str, max_side: int) -> tuple[Image.Image,
         raise ImageInvalid("type does not match content")
     try:
         img = Image.open(io.BytesIO(raw))
+        width, height = img.size
+        if width * height > MAX_PIXELS or max(width, height) > MAX_SIDE:
+            raise ImageInvalid("image dimensions too large")
+        if img.format == "JPEG":
+            img.draft("RGB", (max_side, max_side))  # decode at reduced size: less memory and time
         img = ImageOps.exif_transpose(img).convert("RGB")
-    except (OSError, Image.DecompressionBombError, ValueError) as exc:
+    except (OSError, Image.DecompressionBombError, Image.DecompressionBombWarning, ValueError) as exc:
         raise ImageInvalid("cannot decode image") from exc
     img.thumbnail((max_side, max_side))
     buf = io.BytesIO()

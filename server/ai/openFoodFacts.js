@@ -8,6 +8,8 @@ const LOOKUP_TIMEOUT_MS = 6000;
 const CACHE_MAX = 1000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const BARCODE_CONFIDENCE = 0.95;
+const MAX_RESPONSE_CHARS = 512 * 1024;
+const RETRY_DELAY_MS = 1500;
 
 /** EAN-8, UPC-A (12) or EAN-13 with a valid check digit. */
 export const isValidEan = (value) => {
@@ -33,18 +35,23 @@ const TAG_MAP = [
   [['en:wines', 'en:red-wines', 'en:white-wines', 'en:rose-wines', 'en:fortified-wines'], 'wine'],
   [['en:ciders'], 'cider'],
   [['en:beers', 'en:lagers', 'en:non-alcoholic-beers'], 'beer'],
-  [['en:spirits', 'en:distilled-spirits', 'en:gins', 'en:vodkas', 'en:rums', 'en:whiskies', 'en:brandies', 'en:tequilas', 'en:fruit-brandies'], 'spirit'],
+  [['en:spirits', 'en:distilled-spirits', 'en:distilled-beverages', 'en:hard-liquors', 'en:eaux-de-vie', 'en:gins', 'en:vodkas',
+    'en:rums', 'en:whiskies', 'en:whisky', 'en:scotch-whisky', 'en:bourbons', 'en:brandies', 'en:cognacs', 'en:tequilas',
+    'en:fruit-brandies', 'en:anise-flavoured-alcoholic-beverages'], 'spirit'],
   [['en:fresh-fruits', 'en:citrus', 'en:lemons', 'en:limes', 'en:berries'], 'fresh_fruit'],
   [['en:herbs', 'en:fresh-herbs', 'en:spices', 'en:mint'], 'herb_spice'],
 ];
 
-export const categoryFromTags = (tags) => {
+export const categoryFromTags = (tags, abv = null) => {
   const set = new Set(Array.isArray(tags) ? tags : []);
   for (const [candidates, category] of TAG_MAP) {
     if (candidates.some((tag) => set.has(tag))) return category;
   }
+  // Generic tags only: guess from the ABV (the app shows it as low confidence for the user to check).
+  if (set.has('en:alcoholic-beverages')) return abv !== null && abv < 8 ? 'beer' : abv !== null && abv < 15 ? 'wine' : 'spirit';
   return null;
 };
+const GENERIC_ONLY = (tags) => !TAG_MAP.some(([candidates]) => candidates.some((tag) => tags.includes(tag)));
 
 const parseVolumeMl = (quantity) => {
   const match = typeof quantity === 'string' ? quantity.match(/(\d+(?:[.,]\d+)?)\s*(ml|cl|l)\b/i) : null;
@@ -60,12 +67,14 @@ const pickText = (product, field, language) => {
 
 /** Maps an OFF product to a ScanResult-shaped answer (validated again by validateScanResult). */
 export const scanResultFromProduct = (product, language) => {
-  const category = categoryFromTags(product.categories_tags);
+  const rawAbv = Number(product.nutriments?.alcohol_100g ?? product.nutriments?.alcohol ?? product.alcohol_value);
+  const abv = Number.isFinite(rawAbv) && rawAbv >= 0 && rawAbv <= 100 ? rawAbv : null;
+  const tags = Array.isArray(product.categories_tags) ? product.categories_tags : [];
+  const category = categoryFromTags(tags, abv);
   if (!category || !SCAN_CATEGORIES.includes(category)) {
     return { status: 'not_ingredient', item: null };
   }
-  const rawAbv = Number(product.nutriments?.alcohol_100g ?? product.nutriments?.alcohol ?? product.alcohol_value);
-  const abv = Number.isFinite(rawAbv) && rawAbv >= 0 && rawAbv <= 100 ? rawAbv : null;
+  const guessed = GENERIC_ONLY(tags);
   const item = {
     category,
     brand: typeof product.brands === 'string' ? product.brands.split(',')[0].trim().slice(0, 80) || null : null,
@@ -75,9 +84,10 @@ export const scanResultFromProduct = (product, language) => {
     volumeMl: parseVolumeMl(product.quantity),
     isAlcoholic: isAlcoholicCategory(category, abv),
     flags: flagsFor(category),
-    confidence: BARCODE_CONFIDENCE,
+    confidence: guessed ? 0.5 : BARCODE_CONFIDENCE,
   };
-  return { status: category === 'water' ? 'water' : 'recognized', item };
+  if (category === 'water') return { status: 'water', item };
+  return { status: guessed ? 'low_confidence' : 'recognized', item };
 };
 
 export const createBarcodeLookup = ({ fetchImpl = fetch, baseUrl = OFF_URL } = {}) => {
@@ -87,20 +97,30 @@ export const createBarcodeLookup = ({ fetchImpl = fetch, baseUrl = OFF_URL } = {
     const hit = cache.get(key);
     if (hit && hit.expires > Date.now()) return hit.value;
     const fields = 'product_name,product_name_en,product_name_ro,brands,categories_tags,quantity,nutriments,alcohol_value';
+    // One retry after a short pause when Open Food Facts throttles (429), is busy (5xx) or the network blips.
     let response;
-    try {
-      response = await fetchImpl(`${baseUrl}/${ean}.json?fields=${fields}`, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
-        signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
-      });
-    } catch (err) {
-      throw Object.assign(new Error('Barcode lookup failed'), { code: err?.name === 'TimeoutError' ? 'ai_timeout' : 'barcode_unavailable' });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetchImpl(`${baseUrl}/${ean}.json?fields=${fields}`, {
+          headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+          signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+        });
+      } catch {
+        response = null;
+      }
+      if (response && response.status !== 429 && response.status < 500) break;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
+    if (!response) throw Object.assign(new Error('Barcode lookup failed'), { code: 'barcode_unavailable' });
     if (response.status === 404) return null;
     if (!response.ok) throw Object.assign(new Error('Barcode lookup failed'), { code: 'barcode_unavailable' });
     let body;
     try {
-      body = await response.json();
+      // Only JSON, and only a product-sized answer: the reply comes from outside.
+      if (!(response.headers.get('content-type') ?? '').includes('json')) throw new Error('not json');
+      const text = await response.text();
+      if (text.length > MAX_RESPONSE_CHARS) throw new Error('too large');
+      body = JSON.parse(text);
     } catch {
       throw Object.assign(new Error('Barcode lookup failed'), { code: 'barcode_unavailable' });
     }

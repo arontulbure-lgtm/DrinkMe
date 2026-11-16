@@ -40,7 +40,13 @@ const FIXTURE = {
   },
 };
 
-const JPEG_B64 = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, 0x41)]).toString('base64');
+// A structurally valid JPEG: SOI, APP0 (JFIF), APP1 (EXIF with a fake GPS tag), SOS, image data, EOI.
+const JPEG_B64 = Buffer.concat([
+  Buffer.from([0xff, 0xd8]),
+  Buffer.from([0xff, 0xe0, 0x00, 0x10]), Buffer.from('JFIF\0'), Buffer.alloc(9, 1),
+  Buffer.from([0xff, 0xe1, 0x00, 0x0e]), Buffer.from('Exif\0\0GPSPOS'),
+  Buffer.from([0xff, 0xda, 0x00, 0x08]), Buffer.alloc(6, 0), Buffer.from('IMAGEDATA'), Buffer.from([0xff, 0xd9]),
+]).toString('base64');
 const GIF_B64 = Buffer.from('GIF89a\x01\x00\x01\x00', 'latin1').toString('base64');
 
 const R = (name, ingredients, extra = {}) => ({
@@ -150,6 +156,8 @@ describe('GET /api/ai/status and the AI notice', () => {
     assert.equal(res.body.available, true);
     assert.equal(res.body.provider, 'local');
     assert.equal(res.body.noticeAccepted, true);
+    assert.equal(res.body.processing, 'drinkme');
+    assert.equal(res.body.noticeVersion, 1);
     assert.deepEqual(res.body.settings, { basics: ['gheață', 'apă', 'zahăr', 'sare'], basicsCustomized: false, photoOptIn: false });
     assert.equal(stub.calls[0].path, '/v1/health');
   });
@@ -239,6 +247,9 @@ describe('POST /api/ai/scan', () => {
     const files = fs.readdirSync(photoDir);
     assert.equal(files.length, 2);
     assert.ok(files.every((name) => !name.includes(OPTIN)), 'file names never hold the user id');
+    const kept = fs.readFileSync(path.join(photoDir, files.find((name) => name.endsWith('.jpg'))));
+    assert.ok(kept.includes(Buffer.from('IMAGEDATA')), 'the image itself is kept');
+    assert.ok(!kept.includes(Buffer.from('Exif')) && !kept.includes(Buffer.from('GPSPOS')), 'EXIF (location) is removed');
     await api('PUT', '/api/ai/settings', { uid: OPTIN, body: { photoOptIn: false } });
     assert.equal(fs.readdirSync(photoDir).length, 0);
   });
@@ -290,15 +301,38 @@ describe('POST /api/ai/recipes', () => {
     assert.equal(again.body.exhausted, true);
   });
 
+  test('scan mode: the real ABV of the scanned bottle is used even when the model says 0 (brand-name spirit)', async () => {
+    const SNEAKY = R('Smirnoff Cooler', [{ name: 'Smirnoff Red', amount: 180, unit: 'ml', abv: 0, optional: false }, ml('soda water', 60)], { isAlcoholic: false });
+    const SMALL = R('Smirnoff Highball', [{ name: 'Smirnoff Red', amount: 30, unit: 'ml', abv: 0, optional: false }, ml('soda water', 120)], { isAlcoholic: false });
+    stub.recipeReplies = [[SNEAKY, SMALL], [], []];
+    const item = { category: 'spirit', brand: 'Smirnoff', product: 'Red', abv: 37.5 };
+    const res = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item, newSession: true } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.recipes.map((r) => r.name), ['Smirnoff Highball']);
+    const [highball] = res.body.recipes;
+    assert.equal(highball.isAlcoholic, true);
+    assert.ok(highball.standardDrinks > 0.8);
+    assert.match(highball.responsibleNote, /Enjoy responsibly/);
+  });
+
+  test('scan mode: a scanned energy drink mixed with alcohol gets the warning', async () => {
+    stub.recipeReplies = [[R('Night Fuel', [ml('Monster Ultra White', 150), ml('vodka', 30, 40)])], [], []];
+    const item = { category: 'energy_drink', brand: 'Monster', product: 'Ultra White', abv: null };
+    const res = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item, newSession: true } });
+    assert.deepEqual(res.body.recipes[0].warnings, ['energy_alcohol']);
+  });
+
   test('scan mode: built around the item, "you will also need" listed, water refused', async () => {
     const LEMON = R('Gin Sour Light', [ml('Bombay Sapphire gin', 40, 40), ml('lemon juice', 20), ml('simple syrup', 10)]);
-    stub.recipeReplies = [[LEMON, GIN_TONIC, SECOND, CUKE]];
+    const VODKA = R('Vodka Tonic', [ml('vodka', 40, 40), ml('tonic water', 120)]);
+    stub.recipeReplies = [[LEMON, GIN_TONIC, SECOND, CUKE, VODKA]];
     const item = { category: 'spirit', brand: 'Bombay Sapphire', product: 'London Dry Gin', abv: 40 };
     const res = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item, language: 'ro', newSession: true } });
     assert.equal(res.status, 200);
     const sour = res.body.recipes.find((r) => r.name === 'Gin Sour Light');
     assert.deepEqual(sour.youWillAlsoNeed, ['lemon juice']);
-    assert.equal(res.body.recipes.some((r) => r.name === 'Cucumber Tonic'), false, 'a recipe without the scanned item is dropped');
+    assert.equal(res.body.recipes.some((r) => r.name === 'Vodka Tonic'), false, 'an alcoholic recipe without the scanned item is dropped');
+    assert.equal(res.body.recipes.some((r) => r.name === 'Cucumber Tonic'), true, 'a mocktail inspired by the alcoholic bottle may leave it out');
     const call = recipeCalls()[0].body;
     assert.deepEqual([call.mode, call.language, call.ingredients[0].name], ['scan', 'ro', 'Bombay Sapphire London Dry Gin']);
     const water = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item: { category: 'water', brand: 'Borsec' } } });
@@ -362,6 +396,19 @@ describe('saved recipes', () => {
     await server.restart();
     const list = await api('GET', '/api/recipes/saved');
     assert.ok(list.body.items.some((r) => r.id === saved.body.id));
+  });
+});
+
+describe('POST /api/ai/report', () => {
+  test('stores a report of an AI answer in the audit log (AI text only) and validates the input', async () => {
+    const ok = await api('POST', '/api/ai/report', { body: { kind: 'recipe', reason: 'unsafe', recipeId: 'r_0123456789abcdef', recipeName: 'Garden G&T' } });
+    assert.equal(ok.status, 201);
+    const scan = await api('POST', '/api/ai/report', { body: { kind: 'scan', reason: 'wrong', category: 'spirit', status: 'recognized' } });
+    assert.equal(scan.status, 201);
+    for (const body of [{ kind: 'recipe', reason: 'meh', recipeId: 'r_0123456789abcdef' }, { kind: 'recipe', reason: 'wrong', recipeId: '../x' },
+      { kind: 'scan', reason: 'wrong', category: 'potion' }, { kind: 'post', reason: 'wrong' }]) {
+      assert.equal((await api('POST', '/api/ai/report', { body })).status, 400, JSON.stringify(body));
+    }
   });
 });
 

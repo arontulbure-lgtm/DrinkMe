@@ -26,8 +26,10 @@ export default function ScannerScreen({ navigation }: TabScreenProps<'Scanner'>)
   if (AI_ENABLED && status.data?.available) {
     return <AiScannerFlow status={status.data} navigation={navigation} />;
   }
-  // AI on in the app but the server has it off or the ai-service is down: the preview, with a note.
-  return <ScannerPreview unavailable={AI_ENABLED && (status.isError || status.data?.available === false)} />;
+  // AI on in the app but the ai-service is down: the preview with "taking a break". Provider deliberately off (or a
+  // server without AI v1): the plain "coming soon" preview.
+  const isDown = AI_ENABLED && status.data?.available === false && status.data.provider !== 'off';
+  return <ScannerPreview unavailable={isDown} />;
 }
 
 function ScannerPreview({ unavailable }: { unavailable: boolean }) {

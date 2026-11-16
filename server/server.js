@@ -19,8 +19,9 @@ import { createOpenAiProvider } from './ai/openaiProvider.js';
 import { createPhotoStore } from './ai/photoStore.js';
 import { AiProviderError, resolveAiProviderName } from './ai/provider.js';
 import { generateRecipeBatch, recipeId as recipeIdFor } from './ai/recipeEngine.js';
-import { checkRecipe } from './ai/recipeSafety.js';
+import { checkRecipe, knownItemFor } from './ai/recipeSafety.js';
 import { normalizeRecipe, validateScanResult } from './ai/schemas.js';
+import { SCAN_CATEGORIES } from './ai/taxonomy.js';
 
 dotenv.config();
 
@@ -438,8 +439,16 @@ const openai = AI_ENABLED && process.env.OPENAI_API_KEY
 const parsePositiveMs = (raw, fallback) => (/^\d{3,6}$/.test(raw ?? '') ? Number(raw) : fallback);
 const aiProvider = (() => {
   if (AI_PROVIDER_NAME === 'local') {
-    if (isProduction && !process.env.AI_SERVICE_TOKEN) {
-      console.warn('[ai] AI_PROVIDER=local without AI_SERVICE_TOKEN in production: the ai-service must not be reachable from outside.');
+    // Production: the link to the ai-service carries photos, so it needs a strong token and must be loopback or https.
+    if (isProduction) {
+      const token = process.env.AI_SERVICE_TOKEN ?? '';
+      let url;
+      try { url = new URL(process.env.AI_SERVICE_URL || 'http://127.0.0.1:8088'); } catch { url = null; }
+      const isLoopback = url && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+      if (token.length < 32 || !url || !(isLoopback || url.protocol === 'https:')) {
+        console.error('[ai] FATAL: AI_PROVIDER=local in production needs AI_SERVICE_TOKEN (32+ characters) and an AI_SERVICE_URL that is loopback or https (use a private network or WireGuard otherwise). Refusing to start.');
+        process.exit(1);
+      }
     }
     return createLocalProvider({
       url: process.env.AI_SERVICE_URL,
@@ -2020,12 +2029,14 @@ const AUDIT_META_KEYS = {
   'admin.report_resolved': ['reportId', 'action', 'resolvedCount'],
   'admin.user_suspended': ['permanent'],
   'admin.user_unsuspended': ['void'],
+  // A user reported an AI answer (Google Play AI-generated content policy). AI text only, never personal data.
+  'ai.output_reported': ['kind', 'reason', 'recipeId', 'recipeName', 'category', 'status'],
 };
 const AUDIT_ACTIONS = new Set(Object.keys(AUDIT_META_KEYS));
 // The user's own actions. Lead decision (data minimisation): they are deleted with the account, not
 // anonymised; account.deletion_completed under the anonymous id stays as the record. Admin entries keep
 // the anonymous id instead of the uid.
-const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'auth.session_revoked', 'account.deletion_requested']);
+const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'auth.session_revoked', 'account.deletion_requested', 'ai.output_reported']);
 const isUserAuditEntry = (entry) => AUDIT_SELF_ACTIONS.has(entry.action);
 const auditCapFor = (entry) => (isUserAuditEntry(entry) ? AUDIT_USER_MAX_ENTRIES : AUDIT_SYSTEM_MAX_ENTRIES);
 
@@ -2661,7 +2672,10 @@ const deleteUserDataCascade = (uid) => {
   savedByUser.delete(uid);
   smartBarByUser.delete(uid);
   savedRecipesByUser.delete(uid);
-  aiPhotoStore.deleteForUser(uid);
+  // Kept scan photos (opt-in only). A file that could not be deleted keeps the cascade open, so it is retried.
+  if (aiPhotoStore.deleteForUser(uid).failed > 0) {
+    throw Object.assign(new Error('Could not delete kept scan photos'), { code: 'EPHOTODELETE' });
+  }
   notificationsByUser.delete(uid);
   limitEventsByUser.delete(uid);
 
@@ -4924,8 +4938,13 @@ app.post('/api/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, asyn
 // Contracts: .claude/skills/drinkme-ai-service, recipe-schema, ingredient-taxonomy. The provider's output is
 // never trusted: scans go through validateScanResult, recipes through normalizeRecipe + checkRecipe (S1-S13).
 // Photos stay in memory unless the user opted in (aiPhotoOptIn). Request bodies are never logged.
-const AI_NOTICE_VERSION = 1;
+// The notice says where photos go, so it depends on the provider: accepting the local-processing notice (1) does
+// not cover OpenAI processing (2). Switching provider asks users again.
+const AI_NOTICE_VERSION = AI_PROVIDER_NAME === 'openai' ? 2 : 1;
 const AI_SCHEMA_VERSION = '1';
+// Version of the photo opt-in consent text (ai.settings.photoBody, docs/legal/ai-transparency.md §9.2). Stored with
+// the time of consent (GDPR Art. 7(1)); raise it when the text changes in substance.
+const AI_PHOTO_CONSENT_VERSION = 1;
 const AI_V1_RATE_LIMIT_PER_HOUR = /^\d{1,4}$/.test(process.env.AI_RATE_LIMIT_PER_HOUR ?? '') ? Number(process.env.AI_RATE_LIMIT_PER_HOUR) : 30;
 const BARCODE_RATE_LIMIT_PER_HOUR = 60;
 const SAVED_RECIPES_MAX = 200;
@@ -4936,8 +4955,7 @@ const AI_SCAN_NAME_MAX_LENGTH = 120;
 const AI_HEALTH_CACHE_MS = 10_000;
 const AI_LANGUAGES = ['en', 'ro'];
 const AI_DEFAULT_BASICS = { en: ['ice', 'water', 'sugar', 'salt'], ro: ['gheață', 'apă', 'zahăr', 'sare'] };
-const AI_SCAN_CATEGORIES = new Set(['spirit', 'liqueur', 'wine', 'sparkling_wine', 'beer', 'cider', 'vermouth_aperitif', 'bitters',
-  'syrup', 'juice', 'soda_mixer', 'energy_drink', 'dairy_cream', 'fresh_fruit', 'herb_spice', 'water']);
+const AI_SCAN_CATEGORIES = new Set(SCAN_CATEGORIES);
 
 const toAiLanguage = (value) => (AI_LANGUAGES.includes(value) ? value : 'en');
 
@@ -4958,7 +4976,7 @@ const barcodeLimiter = rateLimit({
   message: { error: 'Too many barcode lookups. Try again later.', code: 'ai_rate_limit' },
 });
 
-const hasAcceptedAiNotice = (user) => Number.isInteger(user?.aiNoticeVersion) && user.aiNoticeVersion >= AI_NOTICE_VERSION;
+const hasAcceptedAiNotice = (user) => user?.aiNoticeVersion === AI_NOTICE_VERSION;
 
 const requireAiProvider = (req, res, next) => (
   aiProvider ? next() : res.status(503).json({ error: 'AI features are unavailable', code: 'ai_disabled' })
@@ -4969,7 +4987,9 @@ const requireAiNotice = (req, res, next) => (
     : res.status(403).json({ error: 'Please read and accept the AI notice first', code: 'ai_notice_required' })
 );
 
-// One model request per user at a time: the GPU serves everyone, so a second tap waits for nothing.
+// One model request per user at a time: the GPU serves everyone, so a second tap waits for nothing. The lock is
+// released by the handler once the provider work has settled (req.aiDone), never when the client disconnects, so
+// dropping connections cannot queue extra jobs; a disconnect aborts the provider call through req.aiSignal instead.
 const aiBusyUsers = new Set();
 const oneAiRequestPerUser = (req, res, next) => {
   if (aiBusyUsers.has(req.userId)) {
@@ -4977,9 +4997,13 @@ const oneAiRequestPerUser = (req, res, next) => {
   }
   const userId = req.userId;
   aiBusyUsers.add(userId);
-  const release = () => aiBusyUsers.delete(userId);
-  res.on('finish', release);
-  res.on('close', release);
+  const controller = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) controller.abort(); });
+  req.aiSignal = controller.signal;
+  let released = false;
+  req.aiDone = () => { if (!released) { released = true; aiBusyUsers.delete(userId); } };
+  // A handler that answers without calling aiDone (input errors) still frees the lock once the answer is sent.
+  res.on('finish', req.aiDone);
   next();
 };
 
@@ -5028,6 +5052,8 @@ app.get('/api/ai/status', requireAuth, async (req, res, next) => {
       barcode: true,
       noticeVersion: AI_NOTICE_VERSION,
       noticeAccepted: hasAcceptedAiNotice(user),
+      // Where photos and ingredient lists are processed; the app shows the matching notice text.
+      processing: AI_PROVIDER_NAME === 'openai' ? 'openai' : 'drinkme',
       settings: getAiSettings(user, language),
     });
   } catch (err) { next(err); }
@@ -5072,16 +5098,25 @@ app.put('/api/ai/settings', requireAuth, (req, res) => {
     }
   }
   if (cleanBasics !== undefined && cleanBasics !== null && isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
-  const previous = { basics: user.aiBasics, photoOptIn: user.aiPhotoOptIn };
+  const consentFields = ['aiPhotoOptIn', 'aiPhotoOptInAt', 'aiPhotoConsentVersion'];
+  const previous = { basics: user.aiBasics, ...Object.fromEntries(consentFields.map((f) => [f, user[f]])) };
   if (cleanBasics === null) delete user.aiBasics;
   else if (cleanBasics !== undefined) user.aiBasics = cleanBasics;
-  if (photoOptIn !== undefined) user.aiPhotoOptIn = photoOptIn;
+  if (photoOptIn === true && user.aiPhotoOptIn !== true) {
+    user.aiPhotoOptIn = true;
+    user.aiPhotoOptInAt = new Date().toISOString();
+    user.aiPhotoConsentVersion = AI_PHOTO_CONSENT_VERSION;
+  } else if (photoOptIn === false) {
+    user.aiPhotoOptIn = false;
+    delete user.aiPhotoOptInAt;
+    delete user.aiPhotoConsentVersion;
+  }
   if (!saveDbOrRespond(res)) {
     if (previous.basics === undefined) delete user.aiBasics; else user.aiBasics = previous.basics;
-    if (previous.photoOptIn === undefined) delete user.aiPhotoOptIn; else user.aiPhotoOptIn = previous.photoOptIn;
+    for (const f of consentFields) { if (previous[f] === undefined) delete user[f]; else user[f] = previous[f]; }
     return;
   }
-  if (photoOptIn === false && previous.photoOptIn === true) aiPhotoStore.deleteForUser(req.userId);
+  if (photoOptIn === false && previous.aiPhotoOptIn === true) aiPhotoStore.deleteForUser(req.userId);
   res.json(getAiSettings(user, toAiLanguage(language)));
 });
 
@@ -5091,7 +5126,7 @@ const handleAiScan = async (req, res) => {
     if (image.error) return res.status(image.status).json({ error: image.error });
     const [, mimeType, imageBase64] = image.dataUrl.match(/^data:(image\/[a-z]+);base64,(.*)$/s);
     const language = toAiLanguage(req.body?.language);
-    const result = validateScanResult(await aiProvider.scan({ imageBase64, mimeType, language }));
+    const result = validateScanResult(await aiProvider.scan({ imageBase64, mimeType, language, signal: req.aiSignal }));
     if (!result) throw new AiProviderError('ai_invalid_output');
     if (userIndex.get(req.userId)?.aiPhotoOptIn === true) {
       aiPhotoStore.save(req.userId, Buffer.from(imageBase64, 'base64'), mimeType.split('/')[1], result);
@@ -5099,9 +5134,11 @@ const handleAiScan = async (req, res) => {
     res.json({ schemaVersion: AI_SCHEMA_VERSION, source: 'photo', ...result });
   } catch (err) {
     sendAiError(res, err);
+  } finally {
+    req.aiDone?.();
   }
 };
-app.post('/api/ai/scan', requireAuth, requireAiProvider, requireAiNotice, aiV1Limiter, oneAiRequestPerUser, postBodyParser, handleAiScan);
+app.post('/api/ai/scan', requireAuth, requireAiProvider, requireAiNotice, oneAiRequestPerUser, aiV1Limiter, postBodyParser, handleAiScan);
 
 // Not AI: works whenever the user is signed in and 18+, even with AI_PROVIDER=off. Only the number leaves the server.
 app.post('/api/ai/barcode', requireAuth, barcodeLimiter, async (req, res) => {
@@ -5126,17 +5163,24 @@ const toScanInput = (item) => {
   const style = sanitizeOptional(item.style, AI_SCAN_NAME_MAX_LENGTH);
   const name = sanitizeText([brand, product].filter(Boolean).join(' ') || style || item.category.replace(/_/g, ' '), AI_SCAN_NAME_MAX_LENGTH);
   if (!name) return null;
-  return { input: { name, category: item.category }, aliases: [product, brand, style].filter(Boolean) };
+  const abv = typeof item.abv === 'number' && Number.isFinite(item.abv) && item.abv >= 0 && item.abv <= 100 ? item.abv : null;
+  return {
+    input: { name, category: item.category },
+    aliases: [product, brand, style].filter(Boolean),
+    // The confirmed bottle: its real category and ABV override whatever the model writes for it.
+    known: knownItemFor({ names: [name, product, brand, style], category: item.category, abv }),
+  };
 };
 
 // { mode: 'scan', item, language, newSession } or { mode: 'smart_bar', language, newSession }.
-app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, aiV1Limiter, oneAiRequestPerUser, async (req, res) => {
+app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, oneAiRequestPerUser, aiV1Limiter, async (req, res) => {
   const { mode, item, newSession } = req.body || {};
   const language = toAiLanguage(req.body?.language);
   if (mode !== 'scan' && mode !== 'smart_bar') return res.status(400).json({ error: 'Invalid mode' });
   if (newSession !== undefined && typeof newSession !== 'boolean') return res.status(400).json({ error: 'Invalid newSession' });
   let inputs;
   let scannedAliases = [];
+  let knownItems = [];
   if (mode === 'scan') {
     const scan = toScanInput(item);
     if (!scan) return res.status(400).json({ error: 'Invalid item' });
@@ -5145,6 +5189,7 @@ app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, aiV
     }
     inputs = [scan.input];
     scannedAliases = scan.aliases;
+    knownItems = scan.known ? [scan.known] : [];
   } else {
     inputs = ensureSmartBar(req.userId)
       .map((barItem) => sanitizeText(typeof barItem?.name === 'string' ? barItem.name : '', AI_SCAN_NAME_MAX_LENGTH))
@@ -5162,12 +5207,16 @@ app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, aiV
       language,
       inputs,
       scannedAliases,
+      knownItems,
+      signal: req.aiSignal,
       basics: getAiSettings(userIndex.get(req.userId), language).basics,
       newSession: newSession === true,
     });
     res.json({ schemaVersion: AI_SCHEMA_VERSION, recipes: batch.recipes, exhausted: batch.exhausted });
   } catch (err) {
     sendAiError(res, err);
+  } finally {
+    req.aiDone?.();
   }
 });
 
@@ -5220,6 +5269,42 @@ app.delete('/api/recipes/saved/:recipeId', requireAuth, (req, res) => {
     return;
   }
   res.status(204).end();
+});
+
+// Report an AI answer (recipe or scan result) from the app. Reviewed through GET /api/admin/audit?action=ai.output_reported.
+const AI_REPORT_REASONS = new Set(['offensive', 'unsafe', 'wrong', 'other']);
+const aiReportLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `ai-report:${req.userId}`,
+  message: { error: 'Too many reports. Try again tomorrow.', code: 'ai_rate_limit' },
+});
+app.post('/api/ai/report', requireAuth, aiReportLimiter, (req, res) => {
+  const { kind, reason, recipeId, recipeName, category, status } = req.body || {};
+  if (!['recipe', 'scan'].includes(kind) || !AI_REPORT_REASONS.has(reason)) return res.status(400).json({ error: 'Invalid report' });
+  const meta = { kind, reason };
+  if (kind === 'recipe') {
+    if (typeof recipeId !== 'string' || !/^r_[0-9a-f]{16}$/.test(recipeId)) return res.status(400).json({ error: 'Invalid report' });
+    meta.recipeId = recipeId;
+    const name = sanitizeOptional(recipeName, 80);
+    if (name) meta.recipeName = name;
+  } else {
+    if (category !== undefined && !AI_SCAN_CATEGORIES.has(category)) return res.status(400).json({ error: 'Invalid report' });
+    if (status !== undefined && !['recognized', 'low_confidence', 'water', 'not_ingredient', 'unclear'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid report' });
+    }
+    if (category) meta.category = category;
+    if (status) meta.status = status;
+  }
+  if (isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
+  const undo = appendAudit('ai.output_reported', { actorId: req.userId, meta });
+  if (!saveDbOrRespond(res)) {
+    undo?.();
+    return;
+  }
+  res.status(201).json({ reported: true });
 });
 
 aiPhotoStore.purgeExpired();

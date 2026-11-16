@@ -54,7 +54,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
   const aiStatus = useAiStatus(locale, AI_RECIPES_ENABLED);
   const acceptNotice = useAcceptAiNotice();
   const isAiAvailable = AI_RECIPES_ENABLED && aiStatus.data?.available === true;
-  const savedRecipesQuery = useSavedRecipes(activeTab === 'saved' && savedSection === 'recipes');
+  const savedRecipesQuery = useSavedRecipes(AI_RECIPES_ENABLED && aiStatus.isSuccess && activeTab === 'saved' && savedSection === 'recipes');
   const savedRecipes = useMemo(() => savedRecipesQuery.data ?? [], [savedRecipesQuery.data]);
   const toggleSavedRecipe = useToggleSavedRecipe();
   const extraScrollInset = useMemo(() => insets.bottom + 120, [insets.bottom]);
@@ -306,7 +306,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
           </View>
 
           <Text style={styles.betaNote}>
-            {AI_RECIPES_ENABLED && (aiStatus.isError || aiStatus.data?.available === false) ? t('ai.unavailable') : t('smartBar.betaNote')}
+            {AI_RECIPES_ENABLED && aiStatus.data?.available === false && aiStatus.data.provider !== 'off' ? t('ai.unavailable') : t('smartBar.betaNote')}
           </Text>
         </View>
       );
@@ -315,7 +315,8 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
     if (!aiStatus.data?.noticeAccepted) {
       return (
         <AiNoticeCard
-          onAccept={() => acceptNotice.mutate()}
+          onAccept={() => acceptNotice.mutate(aiStatus.data.noticeVersion)}
+          processing={aiStatus.data.processing}
           isAccepting={acceptNotice.isPending}
           errorText={acceptNotice.isError ? t(getAiErrorKey(acceptNotice.error)) : null}
         />
@@ -362,7 +363,6 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
   }, [
     acceptNotice,
     aiStatus.data,
-    aiStatus.isError,
     inventory.length,
     isAgeConfirmed,
     isAiAvailable,
@@ -460,7 +460,9 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
     );
   }, [applyLocalUser, fetchMoreSaved, hasMoreSaved, isFetchingMoreSaved, isSavedLoading, navigation, savedDrinks, serverUserId, t, toggleCheer, toggleSave]);
 
-  const savedContent = (
+  // Saved recipes need no model, but they need a server that knows AI v1: show the switch only after a status answer.
+  const showSavedRecipes = AI_RECIPES_ENABLED && aiStatus.isSuccess;
+  const savedContent = !showSavedRecipes ? savedPostsContent : (
     <View style={{ gap: 16 }}>
       <View style={styles.segment} accessibilityRole="tablist">
         {(['posts', 'recipes'] as const).map((section) => {

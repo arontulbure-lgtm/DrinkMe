@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import AiReportSheet from '../components/AiReportSheet';
 import { useLocalization } from '../context/LocalizationContext';
 import { formatAmount, getAiErrorKey, useSavedRecipes, useToggleSavedRecipe } from '../lib/ai';
 import type { RootStackScreenProps } from '../navigation/types';
@@ -13,6 +14,7 @@ export default function AiRecipeDetailScreen({ navigation, route }: RootStackScr
   const savedQuery = useSavedRecipes();
   const toggleSaved = useToggleSavedRecipe();
   const isSaved = useMemo(() => (savedQuery.data ?? []).some((r) => r.id === recipe.id), [recipe.id, savedQuery.data]);
+  const [isReporting, setIsReporting] = useState(false);
 
   const handleToggle = () => {
     toggleSaved.mutate(
@@ -28,6 +30,15 @@ export default function AiRecipeDetailScreen({ navigation, route }: RootStackScr
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          onPress={() => setIsReporting(true)}
+          hitSlop={10}
+          style={{ marginRight: 20 }}
+          accessibilityRole="button"
+          accessibilityLabel={t('ai.report.label')}
+        >
+          <Ionicons name="flag-outline" size={22} color="#FFFFFF" />
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={handleToggle}
           hitSlop={10}
@@ -106,6 +117,10 @@ export default function AiRecipeDetailScreen({ navigation, route }: RootStackScr
         {recipe.responsibleNote ? <Text style={styles.responsible}>{recipe.responsibleNote}</Text> : null}
         <Text style={styles.disclaimer}>{t('ai.recipes.disclaimer')}</Text>
       </ScrollView>
+      <AiReportSheet
+        target={isReporting ? { kind: 'recipe', recipeId: recipe.id, recipeName: recipe.name } : null}
+        onClose={() => setIsReporting(false)}
+      />
     </SafeAreaView>
   );
 }

@@ -74,9 +74,23 @@ const run = (cmd, args, opts = {}) => {
   if (r.status !== 0) throw new Error(`${path.basename(cmd)} ${args[0] ?? ''} failed (exit ${r.status})`);
 };
 
+// The value travels in the child's environment, never inside the command text, so no quoting can break it.
 function setUserEnv(name, value) {
   if (process.platform !== 'win32') return;
-  spawnSync('powershell.exe', ['-NoProfile', '-Command', `[Environment]::SetEnvironmentVariable('${name}','${value}','User')`], { stdio: 'ignore' });
+  spawnSync('powershell.exe', ['-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable($env:DM_NAME, $env:DM_VAL, "User")'], {
+    stdio: 'ignore', env: { ...process.env, DM_NAME: name, DM_VAL: value },
+  });
+}
+
+/** True when the file carries a valid Authenticode signature from Ollama Inc. */
+function isSignedByOllama(file) {
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-Command',
+    // Single quotes only: Windows PowerShell 5.1 drops embedded double quotes from -Command arguments.
+    "$s = Get-AuthenticodeSignature -LiteralPath $env:DM_FILE; Write-Output ($s.Status.ToString() + '|' + $s.SignerCertificate.Subject)"], {
+    encoding: 'utf8', env: { ...process.env, DM_FILE: file },
+  });
+  const [status, subject = ''] = (r.stdout ?? '').trim().split('|');
+  return status === 'Valid' && /O=Ollama Inc\./.test(subject);
 }
 
 async function setup() {
@@ -95,6 +109,10 @@ async function setup() {
     const res = await fetch('https://ollama.com/download/OllamaSetup.exe');
     if (!res.ok) throw new Error(`Ollama download failed (${res.status})`);
     fs.writeFileSync(installer, Buffer.from(await res.arrayBuffer()));
+    if (!isSignedByOllama(installer)) {
+      fs.rmSync(installer, { force: true });
+      throw new Error('The downloaded Ollama installer is not validly signed by Ollama Inc.; deleted, not run.');
+    }
     log(`Installing Ollama to ${P.ollamaDir} ...`);
     spawnSync(installer, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/DIR=${P.ollamaDir}`], { stdio: 'inherit', timeout: 10 * 60 * 1000 });
     if (!fs.existsSync(P.ollamaExe)) throw new Error('Ollama did not install');
@@ -194,13 +212,18 @@ async function main() {
   if (command === 'setup') return setup();
   if (command === 'start') return void (await ensureAiService());
   if (command === 'stop') return stop();
+  if (command === 'test') {
+    const r = spawnSync(P.python, ['-m', 'pytest', path.join(SERVICE_DIR, 'tests'), '-q', '-p', 'no:cacheprovider', ...process.argv.slice(3)], { stdio: 'inherit', env: aiEnv() });
+    process.exitCode = r.status ?? 1;
+    return;
+  }
   if (command === 'health') {
     const health = await serviceHealth();
     console.log(JSON.stringify(health ?? { status: 'down', url: AI_SERVICE_URL }, null, 2));
     process.exitCode = health?.status === 'ok' ? 0 : 1;
     return;
   }
-  console.log('Usage: node scripts/ai-service.mjs setup|start|stop|health');
+  console.log('Usage: node scripts/ai-service.mjs setup|start|stop|health|test');
   process.exitCode = 1;
 }
 

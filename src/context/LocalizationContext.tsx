@@ -248,9 +248,9 @@ const translations = {
       required: 'Confirm you are 18 or older to continue.',
       confirmFailed: 'Could not save your answer. Please try again.',
       scannerIntro:
-        'Point your camera at any bottle or label and let the AI instantly identify the product and suggest drink recipes crafted just for you.',
-      scannerRecognition: 'Snap a photo or pick one from your gallery — our AI identifies drinks and mixers in seconds.',
-      scannerRecipes: 'Once the product is detected, get 5 personalised drink recipes with ingredients and step-by-step instructions.',
+        'Point your camera at a bottle or label: the AI identifies the product and suggests drink recipes for you. It can make mistakes, so check the result.',
+      scannerRecognition: 'Snap a photo or pick one from your gallery — our AI identifies drinks and mixers.',
+      scannerRecipes: 'Once the product is detected, get 3 to 5 drink recipes with ingredients and step-by-step instructions.',
       recipesIntro: 'Select ingredients from your bar, tap Generate, and our AI will craft personalised drink recipes matched to exactly what you have on hand.',
       recipesFeature: 'Get 5 tailored drink recipes instantly',
       itemNamePlaceholder: 'Item name (e.g., Lemonade, Tonic)',
@@ -364,7 +364,7 @@ const translations = {
       recipesIntro:
         'Select ingredients from your bar, tap Generate, and our AI will craft personalised cocktail recipes matched to exactly what you have on hand.',
       featurePick: 'Pick ingredients with one tap',
-      featureRecipes: 'Get 5 tailored cocktail recipes instantly',
+      featureRecipes: 'Get 3 to 5 recipes made from your ingredients',
       featureSave: 'Save favourites directly to your bar',
       betaNote: 'This feature is being perfected and will be unlocked in the next update.',
     },
@@ -384,13 +384,13 @@ const translations = {
       error: 'Something went wrong. Please try again.',
       aiTitle: 'AI Scanner',
       intro:
-        'Point your camera at any bottle or label and let the AI instantly identify the product and suggest cocktail recipes crafted just for you.',
-      featureRecognitionTitle: 'Instant Recognition',
-      featureRecognition: 'Snap a photo or pick one from your gallery — our AI identifies spirits, wines, and mixers in seconds.',
+        'Point your camera at a bottle or label: the AI identifies the product and suggests cocktail and mocktail recipes for you. It can make mistakes, so check the result.',
+      featureRecognitionTitle: 'Label recognition',
+      featureRecognition: 'Snap a photo or pick one from your gallery — our AI identifies spirits, wines and mixers.',
       featureRecipesTitle: 'Recipe Generator',
-      featureRecipes: 'Once the product is detected, get 5 personalised cocktail recipes with ingredients and step-by-step instructions.',
+      featureRecipes: 'Once the product is detected, get 3 to 5 recipes with ingredients and step-by-step instructions.',
       featureSaveTitle: 'Save & Share',
-      featureSave: 'Love a recipe? Save it to your Smart Bar and share your favourites with the DrinkMe community.',
+      featureSave: 'Love a recipe? Save it and find it again under Smart Bar › Saved.',
       betaNote: 'This feature is currently being fine-tuned. It will be available in the next update. Stay tuned!',
     },
     editProfile: {
@@ -532,7 +532,9 @@ const translations = {
       notice: {
         title: 'Before you use AI',
         body:
-          'The scanner sends the photo you take to DrinkMe\'s own server, where an AI model reads the label. The photo is processed in memory and deleted right away; we keep it only if you turn on "Help improve the scanner" in AI settings. Recipes are written by AI: they can be wrong, so check every ingredient for allergies and intolerances. Alcoholic recipes are for adults 18+; please drink responsibly.',
+          'DrinkMe\'s scanner and recipes use AI. Your photo goes to DrinkMe\'s own AI server, where an open-weights model that we run ourselves reads it – no outside AI company receives it. The photo is used only to answer you and is not stored, unless you turn on "Help improve the scanner" in AI settings. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
+        bodyOpenai:
+          'DrinkMe\'s scanner and recipes use AI provided by OpenAI. Your photo and the ingredients you choose are sent to OpenAI to be read and answered; OpenAI is asked not to store them, and DrinkMe does not keep the photo unless you turn on "Help improve the scanner" in AI settings. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
         accept: 'I understand',
         privacyLink: 'Read the privacy policy',
       },
@@ -626,7 +628,7 @@ const translations = {
         unsaveLabel: 'Remove {{name}} from saved',
         saveFailed: 'Could not update your saved recipes. Please try again.',
         open: 'Open recipe {{name}}',
-        disclaimer: 'AI-generated recipe. It can contain mistakes: check every ingredient for allergies and intolerances. Amounts are for one serving.',
+        disclaimer: 'AI-generated recipe. It can contain mistakes: check every ingredient for allergies and intolerances. Amounts are for one serving. Not medical or nutrition advice.',
         warnings: {
           raw_egg: 'Contains raw egg: not recommended during pregnancy, for young children, older people or anyone with a weak immune system.',
           energy_alcohol: 'Energy drink with alcohol: caffeine can hide how drunk you are. We do not recommend this mix.',
@@ -637,6 +639,17 @@ const translations = {
         editBasics: 'Edit basics',
         generate: 'Generate recipes',
         mocktailsOnly: 'Only mocktails are shown until you confirm you are 18+.',
+      },
+      report: {
+        action: 'Report',
+        label: 'Report this AI answer',
+        title: 'What is wrong with this answer?',
+        offensive: 'Offensive or inappropriate',
+        unsafe: 'Unsafe or encourages excessive drinking',
+        wrong: 'Wrong ingredient, amount or product',
+        other: 'Something else',
+        sent: 'Thanks – we will review it.',
+        failed: 'Could not send the report. Please try again.',
       },
       saved: {
         posts: 'Posts',
@@ -655,7 +668,8 @@ const translations = {
         basicsLimit: 'You can have up to 12 basics.',
         photoTitle: 'Help improve the scanner',
         photoBody:
-          'Off by default. When on, DrinkMe keeps the photos you scan, with what the scanner recognised, for up to 90 days to test and improve the scanner. They are never shown to other users or sold, and are deleted when you turn this off or delete your account. You can change this at any time.',
+          'Off unless you turn it on. When it is on, DrinkMe keeps each photo you scan, together with what the scanner recognised, for up to 90 days, only to test and improve how well the scanner recognises drinks. Only the DrinkMe team can see them; they are never shown to other users, sold or used for advertising. Photograph only the product – avoid people, faces and documents. Location and camera details stored in the photo file are removed before it is kept. You can turn this off at any time: the photos already kept are deleted straight away, and they are also deleted if you delete your account. Using the scanner does not depend on this choice. Details: Privacy policy.',
+        photoSwitchLabel: 'Keep my scan photos to help improve the scanner',
         saveFailed: 'Could not save your AI settings. Please try again.',
         noticeTitle: 'How AI works in DrinkMe',
       },
@@ -676,6 +690,7 @@ const translations = {
         recipe_invalid: 'This recipe can no longer be saved.',
         image_too_large: 'This photo is too large. Please try another one.',
         image_invalid: 'This photo could not be read. Use a JPEG or PNG photo.',
+        ai_bad_request: 'The AI could not use this input. Please check it and try again.',
         offline: 'You seem to be offline. Check your connection and try again.',
         generic: 'Something went wrong. Please try again.',
       },
@@ -917,9 +932,9 @@ const translations = {
       required: 'Confirmă că ai cel puțin 18 ani pentru a continua.',
       confirmFailed: 'Nu am putut salva răspunsul. Încearcă din nou.',
       scannerIntro:
-        'Îndreaptă camera spre orice sticlă sau etichetă, iar AI-ul identifică imediat produsul și îți sugerează rețete de băuturi create pentru tine.',
-      scannerRecognition: 'Fă o fotografie sau alege una din galerie — AI-ul nostru identifică băuturi și mixere în câteva secunde.',
-      scannerRecipes: 'După ce produsul este detectat, primești 5 rețete de băuturi personalizate, cu ingrediente și instrucțiuni pas cu pas.',
+        'Îndreaptă camera spre o sticlă sau o etichetă: AI-ul identifică produsul și îți sugerează rețete de băuturi. Poate greși, așa că verifică rezultatul.',
+      scannerRecognition: 'Fă o fotografie sau alege una din galerie — AI-ul nostru identifică băuturi și mixere.',
+      scannerRecipes: 'După ce produsul este detectat, primești 3–5 rețete de băuturi, cu ingrediente și instrucțiuni pas cu pas.',
       recipesIntro: 'Selectează ingredientele din barul tău, apasă Generează, iar AI-ul nostru creează rețete de băuturi personalizate pe baza a ceea ce ai la îndemână.',
       recipesFeature: 'Primești imediat 5 rețete de băuturi potrivite pentru tine',
       itemNamePlaceholder: 'Denumire (ex: Limonadă, Tonic)',
@@ -1032,7 +1047,7 @@ const translations = {
       recipesIntro:
         'Selectează ingredientele din barul tău, apasă Generează, iar AI-ul nostru creează rețete de cocktailuri personalizate pe baza a ceea ce ai la îndemână.',
       featurePick: 'Alege ingredientele cu o singură atingere',
-      featureRecipes: 'Primești imediat 5 rețete de cocktailuri potrivite pentru tine',
+      featureRecipes: 'Primești 3–5 rețete făcute din ingredientele tale',
       featureSave: 'Salvează preferatele direct în barul tău',
       betaNote: 'Această funcție este în curs de perfecționare și va fi deblocată în următoarea actualizare.',
     },
@@ -1052,13 +1067,13 @@ const translations = {
       error: 'A apărut o eroare. Încearcă din nou.',
       aiTitle: 'Scanner AI',
       intro:
-        'Îndreaptă camera spre orice sticlă sau etichetă, iar AI-ul identifică imediat produsul și îți sugerează rețete de cocktailuri create special pentru tine.',
-      featureRecognitionTitle: 'Recunoaștere instantanee',
-      featureRecognition: 'Fă o fotografie sau alege una din galerie — AI-ul nostru identifică spirtoase, vinuri și mixere în câteva secunde.',
+        'Îndreaptă camera spre o sticlă sau o etichetă: AI-ul identifică produsul și îți sugerează rețete de cocktailuri și mocktailuri. Poate greși, așa că verifică rezultatul.',
+      featureRecognitionTitle: 'Recunoașterea etichetei',
+      featureRecognition: 'Fă o fotografie sau alege una din galerie — AI-ul nostru identifică spirtoase, vinuri și mixere.',
       featureRecipesTitle: 'Generator de rețete',
-      featureRecipes: 'După ce produsul este detectat, primești 5 rețete de cocktailuri personalizate, cu ingrediente și instrucțiuni pas cu pas.',
+      featureRecipes: 'După ce produsul este detectat, primești 3–5 rețete cu ingrediente și instrucțiuni pas cu pas.',
       featureSaveTitle: 'Salvează și distribuie',
-      featureSave: 'Îți place o rețetă? Salveaz-o în Smart Bar și împărtășește-ți preferatele cu comunitatea DrinkMe.',
+      featureSave: 'Îți place o rețetă? Salveaz-o și o găsești în Smart Bar › Salvate.',
       betaNote: 'Această funcție este încă în curs de perfecționare. Va fi disponibilă în următoarea actualizare. Revino în curând!',
     },
     editProfile: {
@@ -1200,7 +1215,9 @@ const translations = {
       notice: {
         title: 'Înainte să folosești AI',
         body:
-          'Scannerul trimite fotografia pe care o faci către serverul DrinkMe, unde un model AI citește eticheta. Fotografia este procesată în memorie și ștearsă imediat; o păstrăm doar dacă activezi „Ajută la îmbunătățirea scannerului” din Setări AI. Rețetele sunt scrise de AI: pot conține greșeli, așa că verifică fiecare ingredient pentru alergii și intoleranțe. Rețetele cu alcool sunt pentru adulți 18+; consumă responsabil.',
+          'Scanerul și rețetele DrinkMe folosesc AI. Fotografia ta ajunge la propriul server AI al DrinkMe, unde un model cu ponderi deschise, rulat de noi, o citește – nicio companie AI externă nu o primește. Fotografia este folosită doar pentru a-ți răspunde și nu este stocată, cu excepția cazului în care activezi „Ajută la îmbunătățirea scannerului” din Setări AI. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
+        bodyOpenai:
+          'Scanerul și rețetele DrinkMe folosesc AI furnizat de OpenAI. Fotografia ta și ingredientele alese sunt trimise către OpenAI pentru a fi citite și pentru a primi un răspuns; OpenAI este rugat să nu le stocheze, iar DrinkMe nu păstrează fotografia decât dacă activezi „Ajută la îmbunătățirea scannerului” din Setări AI. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
         accept: 'Am înțeles',
         privacyLink: 'Citește politica de confidențialitate',
       },
@@ -1294,7 +1311,7 @@ const translations = {
         unsaveLabel: 'Scoate {{name}} din salvate',
         saveFailed: 'Nu am putut actualiza rețetele salvate. Încearcă din nou.',
         open: 'Deschide rețeta {{name}}',
-        disclaimer: 'Rețetă generată de AI. Poate conține greșeli: verifică fiecare ingredient pentru alergii și intoleranțe. Cantitățile sunt pentru o porție.',
+        disclaimer: 'Rețetă generată de AI. Poate conține greșeli: verifică fiecare ingredient pentru alergii și intoleranțe. Cantitățile sunt pentru o porție. Nu este un sfat medical sau de nutriție.',
         warnings: {
           raw_egg: 'Conține ou crud: nerecomandat în sarcină, copiilor mici, vârstnicilor sau persoanelor cu imunitate scăzută.',
           energy_alcohol: 'Băutură energizantă cu alcool: cofeina poate ascunde cât de băut ești. Nu recomandăm această combinație.',
@@ -1305,6 +1322,17 @@ const translations = {
         editBasics: 'Editează ingredientele de bază',
         generate: 'Generează rețete',
         mocktailsOnly: 'Vezi doar mocktailuri până confirmi că ai 18+ ani.',
+      },
+      report: {
+        action: 'Raportează',
+        label: 'Raportează acest răspuns AI',
+        title: 'Ce nu este în regulă cu acest răspuns?',
+        offensive: 'Ofensator sau nepotrivit',
+        unsafe: 'Nesigur sau încurajează consumul excesiv',
+        wrong: 'Ingredient, cantitate sau produs greșit',
+        other: 'Altceva',
+        sent: 'Mulțumim – îl vom verifica.',
+        failed: 'Nu am putut trimite raportul. Încearcă din nou.',
       },
       saved: {
         posts: 'Postări',
@@ -1323,7 +1351,8 @@ const translations = {
         basicsLimit: 'Poți avea cel mult 12 ingrediente de bază.',
         photoTitle: 'Ajută la îmbunătățirea scannerului',
         photoBody:
-          'Dezactivat implicit. Când este activat, DrinkMe păstrează fotografiile pe care le scanezi, împreună cu ce a recunoscut scannerul, cel mult 90 de zile, pentru a testa și îmbunătăți scannerul. Nu sunt arătate altor utilizatori și nu sunt vândute, iar ele se șterg când dezactivezi opțiunea sau îți ștergi contul. Poți schimba oricând.',
+          'Dezactivat, cu excepția cazului în care îl activezi. Când este activat, DrinkMe păstrează fiecare fotografie pe care o scanezi, împreună cu ce a recunoscut scanerul, cel mult 90 de zile, doar pentru a testa și îmbunătăți cât de bine recunoaște scanerul băuturile. Le poate vedea doar echipa DrinkMe; nu sunt arătate niciodată altor utilizatori, nu sunt vândute și nu sunt folosite pentru publicitate. Fotografiază doar produsul – evită persoane, fețe și documente. Locația și detaliile camerei salvate în fișierul fotografiei sunt șterse înainte de păstrare. Poți dezactiva oricând opțiunea: fotografiile deja păstrate se șterg imediat și se șterg și dacă îți ștergi contul. Folosirea scanerului nu depinde de această alegere. Detalii: Politica de confidențialitate.',
+        photoSwitchLabel: 'Păstrează fotografiile scanate pentru a îmbunătăți scanerul',
         saveFailed: 'Nu am putut salva setările AI. Încearcă din nou.',
         noticeTitle: 'Cum funcționează AI în DrinkMe',
       },
@@ -1344,6 +1373,7 @@ const translations = {
         recipe_invalid: 'Această rețetă nu mai poate fi salvată.',
         image_too_large: 'Fotografia este prea mare. Încearcă alta.',
         image_invalid: 'Fotografia nu a putut fi citită. Folosește o poză JPEG sau PNG.',
+        ai_bad_request: 'AI-ul nu a putut folosi aceste date. Verifică-le și încearcă din nou.',
         offline: 'Se pare că nu ai conexiune. Verifică internetul și încearcă din nou.',
         generic: 'Ceva nu a mers. Încearcă din nou.',
       },

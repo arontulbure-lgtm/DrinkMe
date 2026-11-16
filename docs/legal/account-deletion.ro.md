@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `account-deletion.md`.
+DRAFT v0.2 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2 – 2026-11-16 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `account-deletion.md`.
 
 # Șterge-ți contul DrinkMe
 
-Versiunea 0.1 · Pagină publică pentru linkul „șterge contul” din App Store / Google Play · Dezvoltator: Tulbure Aron PFA (DrinkMe)
+Versiunea 0.2 · Pagină publică pentru linkul „șterge contul” din App Store / Google Play · Dezvoltator: Tulbure Aron PFA (DrinkMe)
 
 ## În aplicație (cel mai rapid)
 1. Deschide DrinkMe și mergi la **Profil → Editează profilul**.
@@ -16,7 +16,7 @@ Versiunea 0.1 · Pagină publică pentru linkul „șterge contul” din App Sto
 Scrie la **drinkmesocialapp@gmail.com** de pe adresa de email a contului, cu subiectul „Șterge-mi contul”. Confirmăm că ești tu și ștergem contul în cel mult o lună (de obicei mult mai repede).
 
 ## Ce se șterge
-Profilul (nume, oraș, descriere, fotografie), postările și fotografiile lor, comentariile, „noroc”-urile, postările salvate, partenerii de băuturi și cererile, blocările, notificările, Smart Bar, înregistrările tale din jurnalul nostru de securitate și contul de conectare (Firebase Authentication).
+Profilul (nume, oraș, descriere, fotografie), postările și fotografiile lor, comentariile, „noroc”-urile, postările salvate, partenerii de băuturi și cererile, blocările, notificările, Smart Bar, rețetele AI salvate și setările AI, fotografiile scanate păstrate cu „Ajută la îmbunătățirea scannerului”, înregistrările tale din jurnalul nostru de securitate și contul de conectare (Firebase Authentication).
 
 ## Ce se păstrează și cât timp
 - **Backup-uri:** datele tale sunt eliminate din backup-uri în cel mult **30 de zile**.

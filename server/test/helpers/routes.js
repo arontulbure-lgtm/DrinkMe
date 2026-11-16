@@ -167,8 +167,9 @@ export const ROUTE_MANIFEST = {
   'GET /api/recipes/saved': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
   'POST /api/recipes/saved': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
   'DELETE /api/recipes/saved/:recipeId': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/ai/report': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
 
-  'POST /__dev/client-log':{ gate: 'dev-only', files: ['dev-log-bridge.test.js', 'route-gates.test.js'] },
+  'POST /__dev/client-log': { gate: 'dev-only', files: ['dev-log-bridge.test.js', 'route-gates.test.js'] },
 };
 
 /** The fixed parts of a route path, without edge slashes: '/api/users/:id/avatar' gives ['api/users', 'avatar']. */

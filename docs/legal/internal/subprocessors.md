@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-16 (AI recipients added) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Processors, sub-processors and other recipients (internal)
 
@@ -12,7 +12,10 @@ DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before public
 | Backup storage (separate from the database volume) | Processor | Database copies | Same as hosting, EU region | DPA | Not chosen |
 | Database provider (DATA-1: Supabase Postgres or MongoDB Atlas candidates) | Processor | Whole database | Choose EU region | DPA | Not chosen |
 | Email provider for the contact address (`drinkmesocialapp@gmail.com`, Gmail) | Processor/controller for mailbox content – VERIFY consumer Gmail terms | User emails, DSR, notices | US/global | Consumer Gmail has no DPA – **recommend Google Workspace or another business mailbox with a DPA** (decision D-15) | Active |
-| OpenAI (only if `AI_ENABLED=true`) | Processor | Scanner photos, ingredient lists | US; SCCs / DPF – VERIFY | OpenAI DPA | **Off. Do not enable before the privacy documents are updated and the DPA is signed** |
+| OpenAI (only if `AI_PROVIDER=openai`, or `AI_ENABLED=true` with `AI_PROVIDER` unset) | Processor | Scanner photos, recipe inputs (`gpt-4o-mini`, `store: false`) | US; SCCs / DPF – VERIFY | OpenAI DPA (Services Agreement + DPA) | **Not used – default `off`, plan is local (`AI_PROVIDER=local`). Do not use in production without: signed DPA, privacy-policy and AI-notice update (`AI_NOTICE_VERSION` bump), Apple 5.1.2(i) explicit permission screen, and removal/gating of the legacy routes (LC-41)** |
+| Our own ai-service + Ollama + RapidOCR (open-weights model `qwen3-vl:4b-instruct`, Apache-2.0 – VERIFY Ollama package) | Not a recipient: software we run ourselves; the model publisher (Alibaba Qwen team) receives **nothing** | Scan photos (memory), recipe inputs | Same machine or private network as the Express server | Model licence (Apache-2.0) – keep a copy with the release | Active on the AI branch (local development PC today) |
+| GPU server provider for the ai-service in production (to be chosen) | **Processor** (Art. 28) – hosts the machine where photos are processed in memory and, for opted-in users, where kept photos may live | Scan photos, recipe inputs, opt-in photos if stored there | **Prefer an EU region** (decision D-23); if the provider is a non-EU company: DPF/SCCs + transfer risk note | Provider DPA; no provider access to RAM/disk beyond standard operations; disk encryption | **Not chosen (D-23)** |
+| Open Food Facts (Open Food Facts association, France) | Not a processor and no personal data: receives only the barcode number from our server (no user id, token or user IP); we are a user of their open database (ODbL; images CC BY-SA) | EAN number | France / EU | Open Food Facts terms of use and ODbL attribution ("Found by barcode (Open Food Facts)" is shown – `ai.scan.sourceBarcode`) | Active (server-side, also with `AI_PROVIDER=off`) |
 | Apple App Store, Google Play | Independent controllers | Store account, downloads, crash data they collect | Global | Store agreements | Disclose in privacy policy |
 | Expo (EAS Build / Expo services) | Processor for build artefacts; no user data unless `expo-updates` or Expo push are used – VERIFY | none currently | US | Expo terms | Check before release |
 

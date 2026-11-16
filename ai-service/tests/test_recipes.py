@@ -32,7 +32,8 @@ def test_recipes_are_normalised_and_strength_computed(client_factory, fake):
     assert gin["standardDrinks"] == 1.26 and gin["isAlcoholic"] is True and gin["aiGenerated"] is True
     assert recipes[1]["isAlcoholic"] is False and recipes[1]["standardDrinks"] == 0
     system = fake.requests[0]["messages"][0]["content"]
-    assert "ONLY the ingredients" in system and "ice, sugar" in system
+    assert "ONLY the ingredients" in system and '"ice"' not in system
+    assert '"ice"; "sugar"' in fake.requests[0]["messages"][1]["content"]
 
 
 def test_model_under_reported_abv_is_raised():

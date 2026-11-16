@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `privacy-eu-uk.md`.
+DRAFT v0.2 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2 – 2026-11-16 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `privacy-eu-uk.md`.
 
 # Politica de confidențialitate – Anexă pentru UE/SEE și Regatul Unit
 
-Versiunea 0.1 · Data intrării în vigoare: [se stabilește la publicare] · Se aplică în completarea Politicii de confidențialitate DrinkMe.
+Versiunea 0.2 · Data intrării în vigoare: [se stabilește la publicare] · Se aplică în completarea Politicii de confidențialitate DrinkMe.
 
 ## 1. Operator și reprezentant
 Operator: Tulbure Aron PFA, București, România (vezi Politica de confidențialitate §1). Nu am numit un responsabil cu protecția datelor, deoarece condițiile legale (art. 37 GDPR) nu sunt îndeplinite; ne poți scrie la drinkmesocialapp@gmail.com.
@@ -18,11 +18,14 @@ Operator: Tulbure Aron PFA, București, România (vezi Politica de confidențial
 | Jurnalul de securitate, jurnalele de cereri, limitarea cererilor, securitatea sesiunii | Interesul legitim pentru securitate și responsabilitate (lit. f), considerentul 49) |
 | Backup-uri | Interesul legitim de a recupera datele după defecțiuni; securitatea prelucrării (art. 32) |
 | Păstrarea anonimă a raportărilor deschise după ștergerea contului celui care a raportat | Interesul legitim de a finaliza moderarea |
+| Scanerul AI, căutarea după codul de bare, rețetele AI, rețetele salvate, setările AI și evidența notificării AI (Politica de confidențialitate §5a) | Executarea contractului cu tine (art. 6 alin. (1) lit. b)) – tu ceri funcția |
+| Păstrarea fotografiilor scanate cu „Ajută la îmbunătățirea scannerului” | Consimțământul tău (lit. a), art. 7); îl poți retrage oricând cu același comutator, care șterge fotografiile păstrate |
+| Limitele de utilizare AI și verificările de siguranță ale răspunsurilor AI | Interesul legitim pentru un serviciu sigur și funcțional (lit. f)) |
 | Răspunsuri la cereri și către autorități | Obligație legală (lit. c)) |
 Ne poți cere detalii despre evaluările noastre ale interesului legitim.
 
 ## 3. Decizii automate
-Conținutul raportat de trei utilizatori diferiți eligibili (conturi de cel puțin 48 de ore care au acceptat notificarea de confidențialitate) este ascuns automat pentru ceilalți până când un moderator îl verifică. Măsura este temporară și verificată de o persoană; nu este o decizie cu efecte juridice sau similare semnificative în sensul art. 22. Suspendările și eliminările sunt decise de oameni.
+Conținutul raportat de trei utilizatori diferiți eligibili (conturi de cel puțin 48 de ore care au acceptat notificarea de confidențialitate) este ascuns automat pentru ceilalți până când un moderator îl verifică. Măsura este temporară și verificată de o persoană; nu este o decizie cu efecte juridice sau similare semnificative în sensul art. 22. Suspendările și eliminările sunt decise de oameni. Scanerul AI și generatorul de rețete fac doar sugestii și nu iau decizii despre tine.
 
 ## 4. Drepturile tale
 Acces (art. 15), rectificare (16), ștergere (17), restricționare (18), portabilitate (20), opoziție la prelucrarea bazată pe interes legitim (21) și dreptul de a nu face obiectul unei decizii exclusiv automate cu efecte juridice sau similare (22). Scrie la drinkmesocialapp@gmail.com. Răspundem în termen de o lună (prelungibil cu două luni pentru cereri complexe; te vom anunța). Majoritatea datelor pot fi editate sau șterse direct în aplicație. O copie a datelor se pregătește la cerere (un export în aplicație este planificat).

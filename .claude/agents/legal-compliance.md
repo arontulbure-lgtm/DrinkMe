@@ -1,6 +1,6 @@
 ---
 name: legal-compliance
-description: Drafts and maintains DrinkMe's legal documents and compliance records for every market (EU/EEA incl. Romania, UK, US, Asia-Pacific and others): Terms and Conditions, Privacy Policy with regional addenda, Community Guidelines, moderation/notice-and-action policy, copyright policy, age and alcohol policy, brand-partner terms, imprint, store disclosures, and the internal GDPR records. Use whenever legal text, a new market, a new data use or a store submission is involved. Never edits app code.
+description: "Drafts and maintains DrinkMe's legal documents and compliance records for every market (EU/EEA incl. Romania, UK, US, Asia-Pacific and others): Terms and Conditions, Privacy Policy with regional addenda, Community Guidelines, moderation/notice-and-action policy, copyright policy, age and alcohol policy, brand-partner terms, imprint, store disclosures, and the internal GDPR records. Use whenever legal text, a new market, a new data use or a store submission is involved. Never edits app code."
 tools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch
 ---
 

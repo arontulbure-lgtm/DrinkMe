@@ -114,3 +114,17 @@ def test_ocr_abv_and_volume_parsing():
     assert abv_from_text(["alc. 4,5% vol"]) == 4.5
     assert volume_from_text(["70 cl"]) == 700
     assert volume_from_text(["0,5 L"]) == 500
+
+
+def test_rejects_oversized_dimensions_before_decoding(client_factory, fake):
+    import base64
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("L", (9000, 8), 0).save(buf, "PNG")  # tiny file, too wide
+    with client_factory() as c:
+        r = c.post("/v1/scan", json={"schemaVersion": "1", "imageBase64": base64.b64encode(buf.getvalue()).decode(),
+                                     "mimeType": "image/png"})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "image_invalid"
+    assert fake.requests == []

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { categoryFromTags, isValidEan, scanResultFromProduct } from '../ai/openFoodFacts.js';
 import { resolveAiProviderName } from '../ai/provider.js';
-import { checkRecipe, expandBasics, isAllowedIngredient, MAX_STANDARD_DRINKS } from '../ai/recipeSafety.js';
+import { checkRecipe, expandBasics, isAllowedIngredient, knownItemFor, MAX_STANDARD_DRINKS } from '../ai/recipeSafety.js';
 import { computeStrength, normalizeRecipe, RECIPE_METHODS, RECIPE_UNITS, validateScanResult } from '../ai/schemas.js';
 import { abvFloor, SCAN_CATEGORIES, SCAN_STATUSES } from '../ai/taxonomy.js';
 
@@ -170,7 +170,9 @@ describe('safety rules', () => {
     assert.equal(check(base(), { mocktailsOnly: true }).dropped, 'S13');
     assert.equal(check(base(), { adult: false }).dropped, 'S13');
     const sneaky = mocktail({ name: 'Virgin Mule', ingredients: [{ name: 'vodka', amount: 1, unit: 'ml', abv: 0 }, { name: 'ginger beer', amount: 150, unit: 'ml', abv: 0 }] });
-    assert.equal(check(sneaky, { adult: false, scannedName: 'ginger beer' }).dropped, 'S13');
+    assert.ok(['S9', 'S13'].includes(check(sneaky, { adult: false, scannedName: 'ginger beer' }).dropped), 'dropped as mislabelled (S9) or as alcohol for a minor (S13)');
+    const unlabelled = mocktail({ name: 'Ginger Mule', ingredients: [{ name: 'vodka', amount: 1, unit: 'ml', abv: 0 }, { name: 'ginger beer', amount: 150, unit: 'ml', abv: 0 }] });
+    assert.equal(check(unlabelled, { adult: false, scannedName: 'ginger beer' }).dropped, 'S13');
     assert.ok(check(mocktail(), { adult: false, scannedName: 'tonic water' }).recipe);
   });
 
@@ -241,5 +243,124 @@ describe('contract with ai-service (schema v1)', () => {
   });
   test('strength formula matches the ai-service one', () => {
     assert.deepEqual(computeStrength([{ amount: 50, unit: 'ml', abv: 40 }, { amount: 2, unit: 'piece', abv: 0 }]), { estimatedAbv: 40, standardDrinks: 1.58 });
+  });
+});
+
+describe('security review regressions (2026-11-16)', () => {
+  test('a missing ingredient ABV is invalid (S9), never 0', () => {
+    assert.equal(normalizeRecipe(base({ ingredients: [{ name: 'Mystery bottle', amount: 50, unit: 'ml' }] }), 'en'), null);
+  });
+
+  test('model says alcoholic but every ABV is 0: dropped (S9)', () => {
+    const r = base({ isAlcoholic: true, ingredients: [{ name: 'House special', amount: 50, unit: 'ml', abv: 0 }] });
+    assert.equal(normalizeRecipe(r, 'en'), null);
+  });
+
+  test('brand-name spirits get an ABV floor without a category', () => {
+    for (const name of ['Smirnoff Red', "Jack Daniel's", 'Absolut Citron', 'Bacardi Carta Blanca', 'Captain Morgan', 'Ursus Premium', 'Timișoreana']) {
+      assert.ok(abvFloor(name) > 0, name);
+    }
+    assert.equal(abvFloor('Heineken 0.0'), 0);
+    assert.equal(abvFloor('Sierra Mist'), 0);
+  });
+
+  test('scan mode: the known item ABV overrides the model (S1, S7, S13 then apply)', () => {
+    const known = [knownItemFor({ names: ['Smirnoff Red', 'Red', 'Smirnoff'], category: 'spirit', abv: 37.5 })];
+    const big = base({ name: 'Big One', ingredients: [{ name: 'Smirnoff Red', amount: 180, unit: 'ml', abv: 0 }] });
+    assert.equal(check(big, { scannedName: 'Smirnoff Red', knownItems: known }).dropped, 'S1');
+    const small = base({ name: 'Small One', ingredients: [{ name: 'Smirnoff', amount: 30, unit: 'ml', abv: 0 }, { name: 'soda', amount: 100, unit: 'ml', abv: 0 }] });
+    const ok = check(small, { scannedName: 'Smirnoff Red', knownItems: known }).recipe;
+    assert.equal(ok.isAlcoholic, true);
+    assert.ok(ok.responsibleNote);
+    assert.equal(check(small, { scannedName: 'Smirnoff Red', knownItems: known, adult: false }).dropped, 'S13');
+    const zero = [knownItemFor({ names: ['Heineken 0.0'], category: 'beer', abv: 0 })];
+    assert.equal(check(base({ name: 'Zero', ingredients: [{ name: 'Heineken 0.0', amount: 250, unit: 'ml', abv: 0 }] }), { scannedName: 'Heineken 0.0', knownItems: zero }).recipe.isAlcoholic, false);
+  });
+
+  test('S5: a scanned energy drink brand with alcohol gets the warning', () => {
+    const known = [knownItemFor({ names: ['Hell Classic'], category: 'energy_drink', abv: null })];
+    const r = base({ ingredients: [{ name: 'Hell Classic', amount: 150, unit: 'ml', abv: 0 }, { name: 'vodka', amount: 30, unit: 'ml', abv: 40 }] });
+    assert.deepEqual(check(r, { scannedName: 'Hell Classic', knownItems: known }).recipe.warnings, ['energy_alcohol']);
+    const rockstar = base({ ingredients: [{ name: 'Rockstar', amount: 150, unit: 'ml', abv: 0 }, { name: 'gin', amount: 30, unit: 'ml', abv: 40 }] });
+    assert.deepEqual(check(rockstar).recipe.warnings, ['energy_alcohol']);
+  });
+
+  test('S4: "aquafaba" in the description does not hide an egg-white ingredient', () => {
+    const r = base({ description: 'Aquafaba works too.', ingredients: [...base().ingredients, { name: 'egg white', amount: 1, unit: 'piece', abv: 0 }] });
+    assert.deepEqual(check(r).recipe.warnings, ['raw_egg']);
+  });
+});
+
+describe('contract with the app (src/types/api.ts)', () => {
+  const api = fs.readFileSync(path.join(ROOT, 'src', 'types', 'api.ts'), 'utf8');
+  const union = (name) => [...api.match(new RegExp(`export type ${name} =([\\s\\S]*?);`))[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const field = (iface, prop) => [...api.match(new RegExp(`export interface ${iface} \\{[\\s\\S]*?${prop}: ([^;]+);`))[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  test('categories, statuses, flags, units, methods, warnings and languages equal the server', async () => {
+    const { SCAN_FLAGS } = await import('../ai/taxonomy.js');
+    const { RECIPE_WARNINGS, RECIPE_LANGUAGES } = await import('../ai/schemas.js');
+    assert.deepEqual(union('AiCategory'), SCAN_CATEGORIES);
+    assert.deepEqual([...api.match(/AI_CATEGORIES: AiCategory\[\] = \[([\s\S]*?)\];/)[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), SCAN_CATEGORIES);
+    assert.deepEqual(union('AiScanStatus'), SCAN_STATUSES);
+    assert.deepEqual(field('AiScanItem', 'flags'), SCAN_FLAGS);
+    assert.deepEqual(field('AiRecipeIngredient', 'unit'), RECIPE_UNITS);
+    assert.deepEqual(field('AiRecipe', 'method'), RECIPE_METHODS);
+    assert.deepEqual(field('AiRecipe', 'warnings'), RECIPE_WARNINGS);
+    assert.deepEqual(field('AiRecipe', 'language'), RECIPE_LANGUAGES);
+  });
+  test('flags and languages equal the exported JSON schemas', async () => {
+    const { RECIPE_LANGUAGES } = await import('../ai/schemas.js');
+    const scan = JSON.parse(fs.readFileSync(path.join(ROOT, 'ai-service', 'schemas', 'scan-result.schema.json'), 'utf8'));
+    assert.deepEqual(scan.$defs.ScanItem.properties.flags.items.enum, ['energy_drink', 'contains_caffeine']);
+    const request = JSON.parse(fs.readFileSync(path.join(ROOT, 'ai-service', 'schemas', 'recipe-request.schema.json'), 'utf8'));
+    assert.deepEqual(request.properties.language.enum, RECIPE_LANGUAGES);
+  });
+});
+
+describe('photo store', () => {
+  test('JPEG EXIF/XMP/comments and PNG text chunks are removed; unknown formats are not kept', async () => {
+    const { stripImageMetadata } = await import('../ai/photoStore.js');
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x08]), Buffer.from('Exif\0\0'),
+      Buffer.from([0xff, 0xfe, 0x00, 0x05]), Buffer.from('hey'), Buffer.from([0xff, 0xda, 0x00, 0x04, 0, 0]), Buffer.from('DATA')]);
+    const out = stripImageMetadata(jpeg, 'jpeg');
+    assert.ok(out.includes(Buffer.from('DATA')) && !out.includes(Buffer.from('Exif')) && !out.includes(Buffer.from('hey')));
+    assert.equal(stripImageMetadata(Buffer.from('RIFF....WEBP'), 'webp'), null);
+    assert.equal(stripImageMetadata(Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0xff, 0xff]), 'jpeg'), null, 'truncated segment');
+  });
+});
+
+describe('red-team regressions (eval 2026-11-16)', () => {
+  test('S3: Romanian inhalation wording is dropped', () => {
+    const r = base({ language: 'ro', ingredients: [{ name: 'whisky afumat, servit cu fum de inhalat', amount: 40, unit: 'ml', abv: 40 }] });
+    assert.equal(check(r, { scannedName: 'whisky afumat' }).dropped, 'S3');
+    assert.equal(check(base({ steps: ['Inhalați aroma.'] })).dropped, 'S3');
+    assert.ok(check(base({ description: 'Un whisky afumat, servit simplu.' })).recipe, 'smoked whisky as a flavour is fine');
+  });
+
+  test('S9: an alcoholic ingredient must be measured in ml', () => {
+    assert.equal(normalizeRecipe(base({ ingredients: [{ name: 'vodka', amount: 50, unit: 'g', abv: 40 }] }), 'en'), null);
+    assert.ok(normalizeRecipe(base({ ingredients: [...base().ingredients, { name: 'lime', amount: 1, unit: 'piece', abv: 0 }] }), 'en'));
+  });
+
+  test('S11: a mocktail inspired by an alcoholic scanned bottle may leave the bottle out; others may not', () => {
+    const gin = [knownItemFor({ names: ['Tanqueray Gin'], category: 'spirit', abv: 43.1 })];
+    assert.ok(check(mocktail(), { scannedName: 'Tanqueray Gin', knownItems: gin }).recipe);
+    assert.equal(check(base({ ingredients: [{ name: 'vodka', amount: 30, unit: 'ml', abv: 40 }, { name: 'tonic', amount: 100, unit: 'ml', abv: 0 }] }),
+      { scannedName: 'Tanqueray Gin', knownItems: gin }).dropped, 'S11');
+    const tonic = [knownItemFor({ names: ['Schweppes Tonic'], category: 'soda_mixer', abv: null })];
+    assert.equal(check(mocktail({ ingredients: [{ name: 'orange juice', amount: 150, unit: 'ml', abv: 0 }] }), { scannedName: 'Schweppes Tonic', knownItems: tonic }).dropped, 'S11');
+  });
+});
+
+describe('end-to-end findings (2026-11-16)', () => {
+  test('S9: an alcoholic recipe named or tagged as a mocktail is dropped', () => {
+    assert.equal(check(base({ name: 'Cucumber Gin Mocktail' })).dropped, 'S9');
+    assert.equal(check(base({ name: 'Garden Cooler', tags: ['alcohol-free'] })).dropped, 'S9');
+    assert.equal(check(base({ name: 'Virgin Mary-ish', language: 'ro' })).dropped, 'S9');
+    assert.ok(check(mocktail({ name: 'Cucumber Mocktail' }), { scannedName: 'tonic water' }).recipe);
+  });
+  test('barcode: generic spirit tags map to spirit; only "alcoholic beverages" is a low-confidence guess', () => {
+    assert.equal(categoryFromTags(['en:beverages', 'en:alcoholic-beverages', 'en:distilled-beverages', 'en:hard-liquors']), 'spirit');
+    const guess = scanResultFromProduct({ product_name: 'X', brands: 'Y', categories_tags: ['en:alcoholic-beverages'], nutriments: { alcohol_100g: 12 } }, 'en');
+    assert.deepEqual([guess.status, guess.item.category, guess.item.confidence], ['low_confidence', 'wine', 0.5]);
   });
 });

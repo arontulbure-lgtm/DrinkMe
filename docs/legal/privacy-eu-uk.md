@@ -1,8 +1,8 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Privacy Policy – Addendum for the EU/EEA and the United Kingdom
 
-Version 0.1 · Effective date: [to be set at publication] · Applies in addition to the DrinkMe Privacy Policy.
+Version 0.2 · Effective date: [to be set at publication] · Applies in addition to the DrinkMe Privacy Policy.
 
 ## 1. Controller and representative
 Controller: Tulbure Aron PFA, Bucharest, Romania (see Privacy Policy §1). We have not appointed a Data Protection Officer because the legal conditions (GDPR Art. 37) are not met; contact us at drinkmesocialapp@gmail.com.
@@ -17,11 +17,14 @@ Controller: Tulbure Aron PFA, Bucharest, Romania (see Privacy Policy §1). We ha
 | Security log, request logs, rate limits, session security | Legitimate interest in security and accountability (Art. 6(1)(f), Recital 49) |
 | Backups | Legitimate interest in recovering from failures; security of processing (Art. 32) |
 | Keeping open reports anonymously after the reporter deletes the account | Legitimate interest in completing moderation |
+| AI scanner, barcode lookup, AI recipes, saved recipes, AI settings and the AI notice record (Privacy Policy §5a) | Performance of our contract with you (Art. 6(1)(b)) – you ask for the feature |
+| Keeping scan photos with "Help improve the scanner" | Your consent (Art. 6(1)(a), Art. 7); withdraw at any time with the same switch, which deletes the kept photos |
+| AI rate limits and safety checks of AI answers | Legitimate interest in a safe, working service (Art. 6(1)(f)) |
 | Answering requests and authorities | Legal obligation (Art. 6(1)(c)) |
 You can ask us for details of our legitimate-interest assessments.
 
 ## 3. Automated decisions
-Content reported by three different eligible users (accounts at least 48 hours old that accepted the privacy notice) is automatically hidden from others until a moderator reviews it. This is temporary and reviewed by a person; it is not a decision with legal or similarly significant effects under Art. 22. Suspensions and removals are decided by people.
+Content reported by three different eligible users (accounts at least 48 hours old that accepted the privacy notice) is automatically hidden from others until a moderator reviews it. This is temporary and reviewed by a person; it is not a decision with legal or similarly significant effects under Art. 22. Suspensions and removals are decided by people. The AI scanner and recipe generator make suggestions only and take no decisions about you.
 
 ## 4. Your rights
 Access (Art. 15), rectification (16), erasure (17), restriction (18), portability (20), objection to processing based on legitimate interest (21), and not to be subject to solely automated decisions with legal or similar effect (22). Write to drinkmesocialapp@gmail.com. We reply within one month (extendable by two months for complex requests; we will tell you). Most data can be edited or deleted directly in the app. A copy of your data is prepared on request (an in-app export is planned).
