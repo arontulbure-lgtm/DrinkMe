@@ -56,6 +56,8 @@ export default {
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
       // SHA-1 of the Android signing certificate (a public fingerprint) for the Places key restriction.
       androidCertSha1: process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1,
+      // Where docs/public is hosted (decision D-06), e.g. https://legal.example.com. Unset: no legal links.
+      legalBaseUrl: process.env.EXPO_PUBLIC_LEGAL_BASE_URL,
     }
   }
 };

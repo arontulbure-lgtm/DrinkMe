@@ -199,3 +199,33 @@ describe('Places requests (LocationPickerModal)', () => {
     assert.equal(read('src/context/LocalizationContext.tsx').match(/poweredByGoogle: 'Powered by Google'/g)?.length, 2);
   });
 });
+
+// 5. Legal links (legal T-01/T-02): every document the app can open exists in the static site for both
+//    languages, links appear only with an https base URL, and Contact always shows.
+describe('legal links', () => {
+  const config = read('src/config/legal.ts');
+  const links = read('src/components/LegalLinks.tsx');
+
+  test('every linked document has an en and ro page in docs/public', () => {
+    const docs = [...links.matchAll(/\{ doc: '([\w-]+)'/g)].map((m) => m[1]);
+    assert.ok(docs.length >= 7);
+    for (const doc of docs) {
+      for (const lang of ['en', 'ro']) {
+        assert.ok(fs.existsSync(path.join(ROOT, 'docs', 'public', lang, `${doc}.html`)), `${lang}/${doc}.html`);
+      }
+    }
+  });
+
+  test('URLs are <base>/{en,ro}/<doc>.html, https only; no base means no document links', () => {
+    assert.match(config, /return `\$\{base\}\/\$\{locale === 'ro' \? 'ro' : 'en'\}\/\$\{doc\}\.html`;/);
+    assert.match(config, /\^https:\\/\\//);
+    assert.match(links, /DOCS\.filter\(\(\{ doc \}\) => getLegalUrl\(doc, locale\) !== null\)/);
+    assert.match(links, /legal\.contact/);
+  });
+
+  test('Edit Profile, the sign-in screen and the privacy notice use them', () => {
+    assert.match(read('src/screens/EditProfileScreen.tsx'), /<LegalLinks \/>/);
+    assert.match(read('src/screens/AuthScreen.tsx'), /<LegalAgreementLine \/>/);
+    assert.match(read('src/screens/OnboardingScreen.tsx'), /<PrivacyPolicyLink \/>/);
+  });
+});

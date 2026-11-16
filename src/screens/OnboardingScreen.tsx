@@ -9,6 +9,7 @@ import { ACCOUNT_SUSPENDED_ERROR_KEY, apiFetch, isAccountSuspendedError, isNameR
 import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { invalidateAuthorQueries } from '../lib/drinkCache';
 import { BaseUser } from '../types/api';
+import { PrivacyPolicyLink } from '../components/LegalLinks';
 
 // Same number as PRIVACY_NOTICE_VERSION in server/server.js. Raise both when the notice text changes
 // in substance, and re-check the text whenever the public read rules or PARTNER_CONSENT_REQUIRED do.
@@ -144,6 +145,8 @@ export default function OnboardingScreen({ onLater }: Props) {
               <Text style={styles.body}>{t('onboarding.privacyModeration')}</Text>
               <Text style={styles.body}>{t('onboarding.privacyBackups')}</Text>
               <Text style={styles.body}>{t('onboarding.privacyPrivate')}</Text>
+              {/* Legal T-02: the full policy, once the pages are hosted. */}
+              <PrivacyPolicyLink />
               {errorKey ? <Text style={styles.error} accessibilityLiveRegion="polite">{t(errorKey)}</Text> : null}
               <TouchableOpacity
                 style={styles.primaryButton}
