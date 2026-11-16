@@ -115,12 +115,38 @@ async function resetPassword(email) {
   console.log(`reset-password ${email}: reset through the reset link; new password saved, not printed`);
 }
 
+// Disables or enables the test user in Firebase (JOHN_TODO 2.9).
+async function setDisabled(email, disabled) {
+  testUser(email);
+  const { auth } = await admin();
+  const user = await auth.getUserByEmail(email);
+  await auth.updateUser(user.uid, { disabled });
+  console.log(`${disabled ? 'disabled' : 'enabled'} ${email} in Firebase`);
+}
+
+// The Verify Email screen's "Delete account" (JOHN_TODO 2.10): a fresh Firebase sign-in, then the API.
+async function deleteUnverified(email) {
+  const user = testUser(email);
+  const { auth, apiKey } = await admin();
+  const signIn = await identity(apiKey, 'signInWithPassword', { email, password: user.password, returnSecureToken: true });
+  const res = await fetch(`${API}/api/account/delete-unverified`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: signIn.idToken }),
+  });
+  const json = await res.json().catch(() => ({}));
+  let inFirebase = true;
+  try { await auth.getUserByEmail(email); } catch (err) { if (err.code === 'auth/user-not-found') inFirebase = false; }
+  console.log(`delete-unverified ${email}: HTTP ${res.status} ${json.code ?? ''}; still in Firebase: ${inFirebase}`);
+}
+
 const [command, email, ...rest] = process.argv.slice(2);
 const run = {
   login: () => login(email),
   call: () => call(email, rest[0], rest[1], rest[2]),
   'verify-link': () => verifyLink(email),
   'reset-password': () => resetPassword(email),
+  disable: () => setDisabled(email, true),
+  enable: () => setDisabled(email, false),
+  'delete-unverified': () => deleteUnverified(email),
 }[command];
 (run ? run() : Promise.reject(new Error('Usage: npm run testapi -- login|call|verify-link|reset-password <email> …')))
   .catch((err) => {
