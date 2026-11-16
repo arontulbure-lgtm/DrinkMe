@@ -68,6 +68,9 @@ import { initializeApp as adminInitializeApp, getApps as adminGetApps, cert } fr
 import { getAuth as adminGetAuth } from 'firebase-admin/auth';
 import { getAppCheck as adminGetAppCheck } from 'firebase-admin/app-check';
 import { createAppCheckMiddleware, createAppCheckStats, parseAppCheckMode } from './app-check.js';
+import {
+  createWriteBehindQueue, describePgError, openPostgresStore, readDbDriverConfig, toJsonbSafeText,
+} from './storage/postgres-store.js';
 
 let firebaseAuth = null;
 
@@ -158,24 +161,69 @@ const DB_FILE  = process.env.DB_FILE?.trim()
   : path.join(__dirname, 'data', 'db.json');
 const DATA_DIR = path.dirname(DB_FILE);
 
+// DATA-1: DB_DRIVER=json (default) keeps the database in DB_FILE. DB_DRIVER=postgres keeps the same
+// document as JSONB in Postgres (DATABASE_URL), written behind by storage/postgres-store.js; DB_FILE's
+// directory then only receives the rare .corrupt-/.pre-migration- copies. See server/README.md,
+// "Database: JSON or Postgres". Setting names only in these messages, never values.
+const dbDriverConfig = readDbDriverConfig(process.env);
+if (dbDriverConfig.problems.length > 0) {
+  if (isProduction) exitOnInvalidProductionConfig(dbDriverConfig.problems);
+  console.error(`[db] FATAL: invalid database settings. Fix: ${dbDriverConfig.problems.join('; ')}.`);
+  process.exit(1);
+}
+for (const warning of dbDriverConfig.warnings) console.warn(`[db] ${warning}`);
+const isPostgresDb = dbDriverConfig.driver === 'postgres';
+// What load messages name: the file path in JSON mode (unchanged), the table in Postgres mode.
+const DB_SOURCE_LABEL = isPostgresDb ? 'the Postgres state (drinkme_state)' : DB_FILE;
+
 // A wrong path must not silently become an empty database. A first deploy sets ALLOW_EMPTY_DB=true once.
 if (isProduction) {
   const dbFileEnv = process.env.DB_FILE;
   if (dbFileEnv !== undefined && !path.isAbsolute(dbFileEnv.trim())) {
     exitOnInvalidProductionConfig(['DB_FILE (must be an absolute path)']);
   }
-  if (!fs.existsSync(DB_FILE)) {
+  // Postgres mode checks for its state row below, once connected.
+  if (!isPostgresDb && !fs.existsSync(DB_FILE)) {
     if (process.env.ALLOW_EMPTY_DB !== 'true') {
       exitOnInvalidProductionConfig(['DB_FILE (no database file at this path; set ALLOW_EMPTY_DB=true only for a first deploy)']);
     }
     console.warn('[db] ALLOW_EMPTY_DB=true and no database file — starting empty. Remove the flag after this deploy.');
-  } else if (process.env.ALLOW_EMPTY_DB === 'true') {
+  } else if (!isPostgresDb && process.env.ALLOW_EMPTY_DB === 'true') {
     console.warn('[db] ALLOW_EMPTY_DB=true but the database file exists. Remove the flag: it lets a corrupt database start empty.');
   }
 }
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+}
+
+// Postgres mode: connect, create the tables if missing and read the stored document before anything
+// else runs (the server listens only after loadDb). loadDb() then takes the same validation and
+// migration path as a file that was read.
+let postgresStore = null;
+let postgresWriteQueue = null;
+let preloadedDbText; // Postgres mode: the stored JSON text, or null when there is no state row yet
+if (isPostgresDb) {
+  try {
+    postgresStore = await openPostgresStore({ connectionString: dbDriverConfig.databaseUrl, ssl: dbDriverConfig.ssl });
+    await postgresStore.ensureSchema();
+    preloadedDbText = (await postgresStore.load())?.text ?? null;
+  } catch (err) {
+    console.error(`[db] FATAL: could not open the Postgres database (${describePgError(err)}). Refusing to start.`);
+    process.exit(1);
+  }
+  if (isProduction) {
+    if (preloadedDbText === null) {
+      if (process.env.ALLOW_EMPTY_DB !== 'true') {
+        exitOnInvalidProductionConfig(['DATABASE_URL (no DrinkMe state in this database; run npm run db:migrate-to-postgres, or set ALLOW_EMPTY_DB=true only for a first deploy)']);
+      }
+      console.warn('[db] ALLOW_EMPTY_DB=true and no Postgres state — starting empty. Remove the flag after this deploy.');
+    } else if (process.env.ALLOW_EMPTY_DB === 'true') {
+      console.warn('[db] ALLOW_EMPTY_DB=true but a Postgres state exists. Remove the flag: it lets a corrupt database start empty.');
+    }
+  }
+  postgresWriteQueue = createWriteBehindQueue({ write: (snapshot) => postgresStore.write(snapshot) });
+  console.log('[db] Using Postgres (write-behind). A crash can lose the last moments of changes; see server/README.md.');
 }
 
 const app = express();
@@ -551,43 +599,68 @@ function renameDbFileWithRetry(tmpFile) {
   runDbFileOperationWithRetry('Save', DB_RENAME_RETRY_CODES, () => fs.renameSync(tmpFile, DB_FILE));
 }
 
+// The whole database as one plain object, the shape of DB_FILE and of the Postgres JSONB document.
+function buildDbDocument() {
+  return {
+    drinks,
+    nextDrinkId,
+    nextNotificationId,
+    nextCommentId,
+    nextReportId,
+    nextAuditId,
+    dbSchemaVersion,
+    users: Array.from(userIndex.values()),
+    reports,
+    cheersByUser: Object.fromEntries(
+      Array.from(cheersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    savedByUser: Object.fromEntries(
+      Array.from(savedByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    smartBarByUser: Object.fromEntries(smartBarByUser.entries()),
+    partnersByUser: Object.fromEntries(
+      Array.from(partnersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    notificationsByUser: Object.fromEntries(notificationsByUser.entries()),
+    commentsByDrink: Object.fromEntries(
+      Array.from(commentsByDrink.entries()).map(([k, v]) => [String(k), v])
+    ),
+    limitEventsByUser: Object.fromEntries(limitEventsByUser.entries()),
+    blocksByUser: Object.fromEntries(
+      Array.from(blocksByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    partnerRequestsByUser: Object.fromEntries(partnerRequestsByUser.entries()),
+    pendingAccountDeletions,
+    auditLog,
+    ...(recoveryStartedAt !== undefined && { recoveryStartedAt }),
+  };
+}
+
+// Postgres mode. The document is serialised now, so the snapshot is consistent, and written behind:
+// true means queued, not stored. A failed write is retried in the background until it succeeds or a
+// newer snapshot replaces it (storage/postgres-store.js), so routes cannot answer 503 for it and a crash
+// can lose the changes not yet written. False only when serialising fails (routes then answer 503).
+function queuePostgresSave() {
+  try {
+    const { text, replaced } = toJsonbSafeText(JSON.stringify(buildDbDocument()));
+    if (replaced > 0) console.warn(`[db] Replaced ${replaced} escape(s) Postgres cannot store (NUL or a lone surrogate) with U+FFFD.`);
+    lastSavedDbBytes = Buffer.byteLength(text, 'utf8');
+    // While a recovery hold may be on, history keeps every hourly snapshot (30-day ceiling only), so
+    // snapshots from before a lost start are not pushed out by the row limit.
+    postgresWriteQueue.enqueue({ text, schemaVersion: dbSchemaVersion, keepAllHistory: recoveryStartedAt !== undefined });
+    return true;
+  } catch (err) {
+    console.error(`[db] Failed to serialise the database for Postgres, nothing queued (${err.code ?? err.name}).`);
+    return false;
+  }
+}
+
 // Atomic write: a crash or failed rename leaves the previous DB_FILE intact.
 function saveDb() {
+  if (isPostgresDb) return queuePostgresSave();
   const tmpFile = `${DB_FILE}.tmp-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
   try {
-    const data = {
-      drinks,
-      nextDrinkId,
-      nextNotificationId,
-      nextCommentId,
-      nextReportId,
-      nextAuditId,
-      dbSchemaVersion,
-      users: Array.from(userIndex.values()),
-      reports,
-      cheersByUser: Object.fromEntries(
-        Array.from(cheersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      savedByUser: Object.fromEntries(
-        Array.from(savedByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      smartBarByUser: Object.fromEntries(smartBarByUser.entries()),
-      partnersByUser: Object.fromEntries(
-        Array.from(partnersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      notificationsByUser: Object.fromEntries(notificationsByUser.entries()),
-      commentsByDrink: Object.fromEntries(
-        Array.from(commentsByDrink.entries()).map(([k, v]) => [String(k), v])
-      ),
-      limitEventsByUser: Object.fromEntries(limitEventsByUser.entries()),
-      blocksByUser: Object.fromEntries(
-        Array.from(blocksByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      partnerRequestsByUser: Object.fromEntries(partnerRequestsByUser.entries()),
-      pendingAccountDeletions,
-      auditLog,
-      ...(recoveryStartedAt !== undefined && { recoveryStartedAt }),
-    };
+    const data = buildDbDocument();
     const serialized = JSON.stringify(data, null, 2);
     const bytes = Buffer.from(serialized, 'utf8');
     const fd = fs.openSync(tmpFile, 'wx', 0o600);
@@ -631,7 +704,7 @@ const isPlainObject = (value) => value !== null && typeof value === 'object' && 
 
 // Starting empty after these failures could let the next mutation overwrite a good database.
 function exitOnDbLoadFailure(action, reason) {
-  console.error(`[db] FATAL: could not ${action} ${DB_FILE} (${reason}). Refusing to start so the database file is not overwritten.`);
+  console.error(`[db] FATAL: could not ${action} ${DB_SOURCE_LABEL} (${reason}). Refusing to start so the database file is not overwritten.`);
   process.exit(1);
 }
 
@@ -725,7 +798,7 @@ function preserveCorruptDb(rawBytes, reason) {
   }
   if (existingHash === sha256(rawBytes)) {
     exitIfEmptyStartNotAllowed(reason, 'an identical backup already exists');
-    console.error(`[db] Failed to load ${DB_FILE} (${reason}), an identical backup already exists, starting empty.`);
+    console.error(`[db] Failed to load ${DB_SOURCE_LABEL} (${reason}), an identical backup already exists, starting empty.`);
     return;
   }
 
@@ -736,7 +809,7 @@ function preserveCorruptDb(rawBytes, reason) {
     exitOnDbLoadFailure(`back up (${reason}) to ${backupFile}`, describeDbError(err));
   }
   exitIfEmptyStartNotAllowed(reason, `saved a copy to ${backupFile}`);
-  console.error(`[db] Failed to load ${DB_FILE} (${reason}), saved a copy to ${backupFile}, starting empty.`);
+  console.error(`[db] Failed to load ${DB_SOURCE_LABEL} (${reason}), saved a copy to ${backupFile}, starting empty.`);
 }
 
 // Leftovers from a crash mid-write. Failing to remove one is harmless, so it never stops startup.
@@ -833,8 +906,18 @@ function migrateLegacyDbText(rawBytes) {
   }
 }
 
-function loadDb() {
-  let prunedAuditAtLoad = false;
+// Postgres mode reads nothing here: preloadedDbText was fetched at startup, and is handled from this
+// point exactly like the bytes of a file (a missing row like a missing file).
+function readDbSourceOrStartEmpty() {
+  if (isPostgresDb) {
+    if (preloadedDbText === null) {
+      console.log('[db] No saved state found in Postgres — starting with empty database.');
+      return null;
+    }
+    const bytes = Buffer.from(preloadedDbText, 'utf8');
+    preloadedDbText = undefined; // not kept in memory twice
+    return bytes;
+  }
   let dbStats;
   try {
     dbStats = fs.statSync(DB_FILE, { throwIfNoEntry: false });
@@ -843,12 +926,19 @@ function loadDb() {
   }
   if (dbStats === undefined) {
     console.log(`[db] No saved state found at ${DB_FILE} — starting with empty database.`);
+    return null;
+  }
+  return readDbFileWithRetry();
+}
+
+function loadDb() {
+  let prunedAuditAtLoad = false;
+  const rawBytes = readDbSourceOrStartEmpty();
+  if (rawBytes === null) {
     recoveryStartedAt = Date.now();
     saveDb();
     return;
   }
-
-  const rawBytes = readDbFileWithRetry();
 
   let data;
   try {
@@ -1386,7 +1476,13 @@ const IMAGE_STORAGE_MAX_BYTES = parseTestOnlyLimit(process.env.IMAGE_STORAGE_MAX
 // when it holds far fewer characters. Stopping growth below that, in bytes, keeps the server able
 // to restart, and keeps saves working for the routes that stay open.
 const DEFAULT_DB_GROWTH_MAX_BYTES = 450_000_000;
-const DB_GROWTH_MAX_BYTES = parseTestOnlyLimit(process.env.DB_GROWTH_MAX_BYTES, DEFAULT_DB_GROWTH_MAX_BYTES);
+// Postgres mode: one jsonb value cannot exceed about 256 MiB, so growth stops lower there, counted on
+// the compact JSON text that is sent (the stored jsonb is of a similar size).
+const DEFAULT_POSTGRES_DB_GROWTH_MAX_BYTES = 200_000_000;
+const DB_GROWTH_MAX_BYTES = parseTestOnlyLimit(
+  process.env.DB_GROWTH_MAX_BYTES,
+  isPostgresDb ? DEFAULT_POSTGRES_DB_GROWTH_MAX_BYTES : DEFAULT_DB_GROWTH_MAX_BYTES,
+);
 const isDbGrowthBlocked = () => lastSavedDbBytes > DB_GROWTH_MAX_BYTES;
 const respondDbGrowthBlocked = (res) => res.status(507).json({
   error: 'Storage is full. Please try again later.',
@@ -5115,12 +5211,25 @@ const purgeExpiredAuditEntries = () => {
   if (removed > 0 && saveDb()) console.log(`[audit] Removed ${removed} entr${removed === 1 ? 'y' : 'ies'} past the ${AUDIT_RETENTION_DAYS}-day retention.`);
 };
 
+// Postgres mode: every write prunes the history table too, but an idle server writes nothing, so the
+// timer also applies the 30-day ceiling (the row limit is left to the writes). Never throws.
+const purgePostgresHistoryPastCeiling = () => {
+  if (!postgresStore) return;
+  postgresStore.pruneHistory({ byCount: false }).then(
+    (removed) => {
+      if (removed > 0) console.log(`[db] Removed ${removed} Postgres history snapshot(s) older than the ${DB_BACKUP_HARD_MAX_DAYS}-day ceiling.`);
+    },
+    (err) => console.warn(`[db] Could not prune the Postgres history (${describePgError(err)}); retried at the next run.`),
+  );
+};
+
 // Every 24 hours, or sooner when a backup expires sooner, so none outlives the period by up to a day.
 // unref: this timer alone never keeps the process alive.
 function scheduleDbBackupPurge(nextExpiry) {
   const wait = Math.max(DB_BACKUP_PURGE_MIN_WAIT_MS, Math.min(DB_BACKUP_PURGE_INTERVAL_MS, nextExpiry - Date.now()));
   setTimeout(() => {
     purgeExpiredAuditEntries();
+    purgePostgresHistoryPastCeiling();
     scheduleDbBackupPurge(purgeExpiredDbBackups());
   }, wait).unref();
 }
@@ -5132,6 +5241,29 @@ else scheduleDbBackupPurge(Math.min(recoveryStartedAt + DB_RECOVERY_PURGE_HOLD_M
 
 resumePendingAccountDeletions();
 setInterval(retryAccountDeletions, ACCOUNT_DELETION_RETRY_INTERVAL_MS).unref();
+
+// Postgres mode: on SIGTERM/SIGINT (a host stop or redeploy, Ctrl+C) the queued snapshot is written
+// before exit. Kept under Docker's default 10-second stop grace. JSON mode registers nothing: every save
+// there is already on disk when the route answers.
+const POSTGRES_SHUTDOWN_FLUSH_MS = 8000;
+if (isPostgresDb) {
+  let isShuttingDown = false;
+  const flushPostgresAndExit = async (signal) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    const flushed = await postgresWriteQueue.flush(POSTGRES_SHUTDOWN_FLUSH_MS);
+    if (flushed) console.log(`[db] ${signal}: every change is written to Postgres, exiting.`);
+    else console.error(`[db] ${signal}: changes not yet written to Postgres could not be saved within ${POSTGRES_SHUTDOWN_FLUSH_MS} ms and are lost.`);
+    try {
+      await postgresStore.close();
+    } catch (err) {
+      console.warn(`[db] Could not close the Postgres pool (${describePgError(err)}).`);
+    }
+    process.exit(flushed ? 0 : 1);
+  };
+  process.on('SIGTERM', () => flushPostgresAndExit('SIGTERM'));
+  process.on('SIGINT', () => flushPostgresAndExit('SIGINT'));
+}
 
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';

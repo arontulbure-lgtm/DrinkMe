@@ -8,4 +8,5 @@ server/*
 !server/package-lock.json
 !server/server.js
 !server/app-check.js
+!server/storage/
 !server/scripts/

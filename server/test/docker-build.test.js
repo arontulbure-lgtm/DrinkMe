@@ -15,12 +15,25 @@ const dockerignore = fs.readFileSync(path.join(ROOT, '.dockerignore'), 'utf8');
 
 const staticLocalImports = [...serverSource.matchAll(/^import\s[^;]*?from\s+'\.\/([\w./-]+)'/gm)].map((m) => m[1]);
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A module in a subfolder (./storage/x.js) may instead be covered by its whole top folder: `!server/storage/`
+// in .dockerignore and `COPY server/storage ./storage` in the Dockerfile, as server/scripts is.
 test('every local module server.js imports statically is in the image', () => {
   assert.ok(staticLocalImports.length > 0);
   for (const file of staticLocalImports) {
-    assert.match(dockerignore, new RegExp(`^!server/${file.replace(/[.]/g, '\.')}$`, 'm'), `${file} missing from .dockerignore`);
-    assert.match(dockerfile, new RegExp(`COPY[^\n]*server/${file.replace(/[.]/g, '\.')}`), `${file} missing from the Dockerfile COPY`);
+    const folder = file.includes('/') ? file.split('/')[0] : null;
+    const inIgnore = new RegExp(`^!server/${escapeRegExp(file)}$`, 'm').test(dockerignore)
+      || (folder !== null && new RegExp(`^!server/${escapeRegExp(folder)}/?$`, 'm').test(dockerignore));
+    const inCopy = new RegExp(`COPY[^\n]*server/${escapeRegExp(file)}`).test(dockerfile)
+      || (folder !== null && new RegExp(`^COPY server/${escapeRegExp(folder)}/? \\./${escapeRegExp(folder)}/?$`, 'm').test(dockerfile));
+    assert.ok(inIgnore, `${file} missing from .dockerignore`);
+    assert.ok(inCopy, `${file} missing from the Dockerfile COPY`);
   }
+});
+
+test('the storage module is imported statically, so the check above covers it', () => {
+  assert.ok(staticLocalImports.includes('storage/postgres-store.js'));
 });
 
 test('the development-only log bridge stays out of the image and is imported dynamically only', () => {

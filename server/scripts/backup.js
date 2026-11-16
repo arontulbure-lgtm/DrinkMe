@@ -9,15 +9,18 @@
 // wrong file clock cannot extend it. A failed backup never prunes: older copies are kept until a new
 // one has been written and checked.
 //
-// DB-agnostic: everything database-specific sits in an adapter ({ extension, dump(destFile) }). Only the
-// JSON file adapter exists today; a Postgres adapter would run pg_dump into destFile. Choose it with
-// BACKUP_SOURCE.
+// DB-agnostic: everything database-specific sits in an adapter ({ extension, dump(destFile) }):
+// json-file copies DB_FILE; postgres exports the DrinkMe state stored in Postgres (DB_DRIVER=postgres)
+// as a JSON database file in the format server.js writes, usable as DB_FILE for a rollback. Choose it
+// with BACKUP_SOURCE.
 //
 // Environment:
 //   DB_FILE        database file (default: server/data/db.json, the same default as server.js)
 //   BACKUP_DIR     where backups go (default: server/backups). Use a different disk or bucket mount
 //                  in production, so one failure cannot take both.
-//   BACKUP_SOURCE  adapter name (default: json-file)
+//   BACKUP_SOURCE  adapter name: json-file or postgres (default: postgres when DB_DRIVER=postgres,
+//                  otherwise json-file)
+//   DATABASE_URL, DATABASE_SSL  for the postgres adapter (the same values as the server)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -44,6 +47,26 @@ export const adapters = {
       const parsed = JSON.parse(text); // throws on a corrupt or truncated copy
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('database file is not a JSON object');
+      }
+    },
+  }),
+  postgres: () => ({
+    extension: '.json',
+    async dump(destFile) {
+      // Imported here, so the json-file adapter never loads pg.
+      const { openStoreFromEnv } = await import('./postgres-cli.mjs');
+      const store = await openStoreFromEnv();
+      try {
+        const stored = await store.load();
+        if (!stored) throw new Error('Postgres holds no DrinkMe state');
+        const data = JSON.parse(stored.text);
+        if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+          throw new Error('the Postgres state is not a JSON object');
+        }
+        await fs.promises.writeFile(destFile, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        JSON.parse(await fs.promises.readFile(destFile, 'utf8')); // throws on a truncated copy
+      } finally {
+        await store.close().catch(() => {});
       }
     },
   }),
@@ -84,7 +107,7 @@ const writeChecked = async (adapter, destFile) => {
 export async function runBackup({
   dbFile = process.env.DB_FILE?.trim() ? path.resolve(process.env.DB_FILE.trim()) : path.join(SERVER_DIR, 'data', 'db.json'),
   backupDir = process.env.BACKUP_DIR?.trim() ? path.resolve(process.env.BACKUP_DIR.trim()) : path.join(SERVER_DIR, 'backups'),
-  source = process.env.BACKUP_SOURCE?.trim() || 'json-file',
+  source = process.env.BACKUP_SOURCE?.trim() || (process.env.DB_DRIVER?.trim() === 'postgres' ? 'postgres' : 'json-file'),
   now = Date.now(),
 } = {}) {
   const makeAdapter = adapters[source];

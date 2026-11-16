@@ -25,7 +25,10 @@
     "testusers:reset": "node server/scripts/testusers.mjs reset",
     "testusers:delete": "node server/scripts/testusers.mjs delete",
     "testapi": "node server/scripts/testapi.mjs",
-    "agent:feature": "tsx agents/tasks/implement-feature.ts"
+    "agent:feature": "tsx agents/tasks/implement-feature.ts",
+    "db:migrate-to-postgres": "node server/scripts/migrate-to-postgres.mjs",
+    "db:export-from-postgres": "node server/scripts/export-from-postgres.mjs",
+    "test:postgres": "npm --prefix server run test:postgres"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
