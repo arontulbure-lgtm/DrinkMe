@@ -41,6 +41,10 @@ export default {
       ["expo-image-picker", {
         "photosPermission": "DrinkMe needs access to your photos to add drink images.",
         "cameraPermission": "DrinkMe needs the camera to photograph your drinks."
+      }],
+      ["expo-camera", {
+        "cameraPermission": "DrinkMe uses the camera to scan bottle labels and barcodes.",
+        "recordAudioAndroid": false
       }]
     ],
     extra: {

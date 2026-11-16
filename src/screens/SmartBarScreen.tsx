@@ -22,30 +22,41 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch, ApiError } from '../lib/api';
-import { Drink, Page, SmartBarItem, Recipe } from '../types/api';
+import { Drink, Page, SmartBarItem } from '../types/api';
+import { getAiErrorKey, useAcceptAiNotice, useAiStatus, useSavedRecipes, useToggleSavedRecipe } from '../lib/ai';
+import AiNoticeCard from '../components/AiNoticeCard';
+import AiRecipeCard from '../components/AiRecipeCard';
 import { useLocalization } from '../context/LocalizationContext';
 import DrinkPostCard from '../components/DrinkPostCard';
 import CommentDrawer from '../components/CommentDrawer';
 
-// ── Beta flag — set to true to re-enable AI recipe generation ────────────────
-const AI_RECIPES_ENABLED = false;
+// ── Kill switch: real AI recipes only while this is true AND GET /api/ai/status says available; otherwise the
+// "coming soon" preview stays. Never delete the preview.
+const AI_RECIPES_ENABLED = true;
 
 type Tab = 'inventory' | 'recipes' | 'saved';
+type SavedSection = 'posts' | 'recipes';
 
 export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'>) {
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newItemName, setNewItemName] = useState('');
   const [newItemQuantity, setNewItemQuantity] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('inventory');
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [savedSection, setSavedSection] = useState<SavedSection>('posts');
   const [commentDrinkId, setCommentDrinkId] = useState<number | null>(null);
   const [actionsDrink, setActionsDrink] = useState<Drink | null>(null);
 
   const { serverUserId, getJwtToken, profile } = useAuth();
   const isAgeConfirmed = profile?.ageConfirmed === true;
   const queryClient = useQueryClient();
-  const { t } = useLocalization();
+  const { t, locale } = useLocalization();
   const insets = useSafeAreaInsets();
+  const aiStatus = useAiStatus(locale, AI_RECIPES_ENABLED);
+  const acceptNotice = useAcceptAiNotice();
+  const isAiAvailable = AI_RECIPES_ENABLED && aiStatus.data?.available === true;
+  const savedRecipesQuery = useSavedRecipes(activeTab === 'saved' && savedSection === 'recipes');
+  const savedRecipes = useMemo(() => savedRecipesQuery.data ?? [], [savedRecipesQuery.data]);
+  const toggleSavedRecipe = useToggleSavedRecipe();
   const extraScrollInset = useMemo(() => insets.bottom + 120, [insets.bottom]);
 
   const { data: inventory = [], isLoading } = useQuery<SmartBarItem[]>({
@@ -129,29 +140,6 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
     },
   });
 
-  const generateRecipesMutation = useMutation({
-    mutationFn: async (ingredients: string[]) => {
-      const token = await getJwtToken();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return apiFetch<Recipe[]>('/api/smart-bar/generate-recipes', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ ingredients, nonAlcoholicOnly: profile?.ageConfirmed !== true }),
-      });
-    },
-    onSuccess: (recipes, ingredients) => {
-      navigation.navigate('RecipeResults', {
-        product: ingredients.join(', '),
-        recipes,
-        isAlcoholic: null,
-      });
-    },
-    onError: () => {
-      Alert.alert(t('common.errorTitle'), t('scanner.error'));
-    },
-  });
-
   const handleAddItem = () => {
     if (!newItemName.trim() || !newItemQuantity.trim()) {
       Alert.alert(t('common.errorTitle'), t('smartBar.fillAllFields'));
@@ -174,14 +162,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
           {
             text: t('common.remove'),
             style: 'destructive',
-            onPress: () => {
-              deleteItemMutation.mutate(itemId);
-              setSelectedIds((prev) => {
-                const next = new Set(prev);
-                next.delete(itemId);
-                return next;
-              });
-            },
+            onPress: () => deleteItemMutation.mutate(itemId),
           },
         ]
       );
@@ -189,39 +170,11 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
     [deleteItemMutation, t]
   );
 
-  const toggleSelect = useCallback((id: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
+  const handleToggleSavedRecipe = useCallback((recipe: (typeof savedRecipes)[number]) => {
+    toggleSavedRecipe.mutate({ recipe, save: false }, {
+      onError: (error) => Alert.alert(t('common.errorTitle'), t(getAiErrorKey(error) === 'ai.errors.generic' ? 'ai.recipes.saveFailed' : getAiErrorKey(error))),
     });
-  }, []);
-
-  const allSelected = inventory.length > 0 && inventory.every((item) => selectedIds.has(item.id));
-
-  const handleSelectAll = useCallback(() => {
-    if (allSelected) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(inventory.map((item) => item.id)));
-    }
-  }, [allSelected, inventory]);
-
-  // mutate is stable across renders (TanStack Query v5), unlike the mutation result object.
-  const generateRecipes = generateRecipesMutation.mutate;
-  const handleGenerateRecipes = useCallback(() => {
-    const selectedItems = inventory.filter((item) => selectedIds.has(item.id));
-    if (selectedItems.length === 0) {
-      Alert.alert(t('smartBar.generateRecipes'), t('smartBar.selectIngredientsHint'));
-      return;
-    }
-    const ingredientNames = selectedItems.map((item) => item.name);
-    generateRecipes(ingredientNames);
-  }, [generateRecipes, inventory, selectedIds, t]);
+  }, [t, toggleSavedRecipe]);
 
   const { toggleCheer, toggleSave } = useDrinkToggles();
 
@@ -308,7 +261,7 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
       );
     }
 
-    if (!AI_RECIPES_ENABLED) {
+    if (!isAiAvailable) {
       return (
         <View style={styles.betaContainer}>
           {/* Coming soon badge */}
@@ -352,89 +305,116 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
             </View>
           </View>
 
-          <Text style={styles.betaNote}>{t('smartBar.betaNote')}</Text>
+          <Text style={styles.betaNote}>
+            {AI_RECIPES_ENABLED && (aiStatus.isError || aiStatus.data?.available === false) ? t('ai.unavailable') : t('smartBar.betaNote')}
+          </Text>
         </View>
       );
     }
 
+    if (!aiStatus.data?.noticeAccepted) {
+      return (
+        <AiNoticeCard
+          onAccept={() => acceptNotice.mutate()}
+          isAccepting={acceptNotice.isPending}
+          errorText={acceptNotice.isError ? t(getAiErrorKey(acceptNotice.error)) : null}
+        />
+      );
+    }
+
+    // Option (b): only the Smart Bar items plus the user's basics. The server enforces it (rule S10).
     return (
-      <View>
-        <Text style={styles.recipesHint}>{t('smartBar.selectIngredients')}</Text>
-
-        {/* Select All */}
-        <TouchableOpacity style={styles.selectAllRow} onPress={handleSelectAll}>
-          <View style={[styles.checkbox, allSelected && styles.checkboxChecked]}>
-            {allSelected && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-          </View>
-          <Text style={styles.selectAllText}>{t('smartBar.selectAll')}</Text>
-          <Text style={styles.selectedCount}>
-            {selectedIds.size}/{inventory.length}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Ingredient checkboxes */}
-        <View style={styles.ingredientList}>
-          {inventory.map((item) => {
-            const checked = selectedIds.has(item.id);
-            return (
-              <TouchableOpacity
-                key={item.id}
-                style={[styles.ingredientRow, checked && styles.ingredientRowChecked]}
-                onPress={() => toggleSelect(item.id)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-                  {checked && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                </View>
-                <View style={styles.ingredientInfo}>
-                  <Text style={styles.ingredientName}>{item.name}</Text>
-                  <Text style={styles.ingredientQty}>{item.quantity}</Text>
-                </View>
-                <Ionicons
-                  name="wine-outline"
-                  size={18}
-                  color={checked ? '#8B5FBF' : '#374151'}
-                />
-              </TouchableOpacity>
-            );
-          })}
+      <View style={styles.aiGenerateCard}>
+        <View style={styles.aiGenerateTitleRow}>
+          <Ionicons name="flask" size={20} color="#8B5FBF" />
+          <Text style={styles.aiGenerateTitle}>{t('ai.recipes.generateTitle')}</Text>
         </View>
-
-        {/* Generate button */}
+        <Text style={styles.betaDesc}>{t('ai.recipes.generateIntro')}</Text>
+        <Text style={styles.aiBasicsLabel}>{t('ai.recipes.basics')}</Text>
+        <View style={styles.aiBasicsRow}>
+          {aiStatus.data.settings.basics.map((basic) => (
+            <View key={basic} style={styles.aiBasicChip}>
+              <Text style={styles.aiBasicChipText}>{basic}</Text>
+            </View>
+          ))}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('AiSettings')}
+            style={styles.aiEditBasics}
+            hitSlop={8}
+            accessibilityRole="button"
+          >
+            <Ionicons name="create-outline" size={14} color="#8B5FBF" />
+            <Text style={styles.aiEditBasicsText}>{t('ai.recipes.editBasics')}</Text>
+          </TouchableOpacity>
+        </View>
+        {!isAgeConfirmed && <Text style={styles.betaNote}>{t('ai.recipes.mocktailsOnly')}</Text>}
         <TouchableOpacity
-          style={[
-            styles.generateButton,
-            (selectedIds.size === 0 || generateRecipesMutation.isPending) && styles.generateButtonDisabled,
-          ]}
-          onPress={handleGenerateRecipes}
-          disabled={selectedIds.size === 0 || generateRecipesMutation.isPending}
+          style={styles.generateButton}
+          onPress={() => navigation.navigate('AiRecipes', { mode: 'smart_bar' })}
+          accessibilityRole="button"
         >
-          {generateRecipesMutation.isPending ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <Ionicons name="flask" size={20} color="#FFFFFF" />
-          )}
-          <Text style={styles.generateButtonText}>
-            {generateRecipesMutation.isPending ? t('scanner.detecting') : t('smartBar.generateRecipes')}
-          </Text>
+          <Ionicons name="sparkles" size={20} color="#FFFFFF" />
+          <Text style={styles.generateButtonText}>{t('ai.recipes.generate')}</Text>
         </TouchableOpacity>
+        <Text style={styles.betaNote}>{t('ai.recipes.disclaimer')}</Text>
       </View>
     );
   }, [
-    allSelected,
-    generateRecipesMutation.isPending,
-    handleGenerateRecipes,
-    handleSelectAll,
-    inventory,
+    acceptNotice,
+    aiStatus.data,
+    aiStatus.isError,
+    inventory.length,
     isAgeConfirmed,
+    isAiAvailable,
     isLoading,
-    selectedIds,
+    navigation,
     t,
-    toggleSelect,
   ]);
 
-  // ── Saved tab ──────────────────────────────────────────────────
-  const savedContent = useMemo(() => {
+  // ── Saved tab: saved posts, and (AI v1) saved recipes ─────────
+  const savedRecipesContent = useMemo(() => {
+    if (savedRecipesQuery.isLoading) {
+      return (
+        <View style={styles.loadingState}>
+          <ActivityIndicator color="#8B5FBF" />
+        </View>
+      );
+    }
+    if (savedRecipesQuery.isError) {
+      return (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptySubtitle}>{t(getAiErrorKey(savedRecipesQuery.error))}</Text>
+          <TouchableOpacity style={styles.addButton} onPress={() => savedRecipesQuery.refetch()} accessibilityRole="button">
+            <Text style={styles.addButtonText}>{t('common.retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    if (savedRecipes.length === 0) {
+      return (
+        <View style={styles.emptyState}>
+          <Ionicons name="flask-outline" size={40} color="#6B7280" />
+          <Text style={styles.emptyTitle}>{t('ai.saved.recipesEmptyTitle')}</Text>
+          <Text style={styles.emptySubtitle}>{t('ai.saved.recipesEmptySubtitle')}</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={{ gap: 12 }}>
+        {savedRecipes.map((recipe) => (
+          <AiRecipeCard
+            key={recipe.id}
+            recipe={recipe}
+            isSaved
+            onPress={() => navigation.navigate('AiRecipeDetail', { recipe })}
+            onToggleSave={() => handleToggleSavedRecipe(recipe)}
+          />
+        ))}
+      </View>
+    );
+  }, [handleToggleSavedRecipe, navigation, savedRecipes, savedRecipesQuery, t]);
+
+  const savedPostsContent = useMemo(() => {
     if (isSavedLoading) {
       return (
         <View style={styles.loadingState}>
@@ -479,6 +459,28 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
       </View>
     );
   }, [applyLocalUser, fetchMoreSaved, hasMoreSaved, isFetchingMoreSaved, isSavedLoading, navigation, savedDrinks, serverUserId, t, toggleCheer, toggleSave]);
+
+  const savedContent = (
+    <View style={{ gap: 16 }}>
+      <View style={styles.segment} accessibilityRole="tablist">
+        {(['posts', 'recipes'] as const).map((section) => {
+          const selected = savedSection === section;
+          return (
+            <TouchableOpacity
+              key={section}
+              style={[styles.segmentItem, selected && styles.segmentItemActive]}
+              onPress={() => setSavedSection(section)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+            >
+              <Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{t(`ai.saved.${section}`)}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {savedSection === 'posts' ? savedPostsContent : savedRecipesContent}
+    </View>
+  );
 
   return (
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
@@ -594,6 +596,27 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
 }
 
 const styles = StyleSheet.create({
+  aiGenerateCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: 14,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#8B5FBF44',
+  },
+  aiGenerateTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  aiGenerateTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', flexShrink: 1 },
+  aiBasicsLabel: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+  aiBasicsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  aiBasicChip: { backgroundColor: '#1F2937', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#374151' },
+  aiBasicChipText: { color: '#FFFFFF', fontSize: 12 },
+  aiEditBasics: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, minHeight: 28 },
+  aiEditBasicsText: { color: '#8B5FBF', fontSize: 13, fontWeight: '600' },
+  segment: { flexDirection: 'row', backgroundColor: '#1F2937', borderRadius: 10, padding: 3 },
+  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 38, borderRadius: 8 },
+  segmentItemActive: { backgroundColor: '#8B5FBF' },
+  segmentText: { color: '#9CA3AF', fontSize: 14, fontWeight: '600' },
+  segmentTextActive: { color: '#FFFFFF' },
   container: {
     flex: 1,
     backgroundColor: '#000000',

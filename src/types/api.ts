@@ -282,3 +282,86 @@ export interface Recipe {
   garnish: string | null;
   instructions: string;
 }
+
+// ── AI v1 (server/ai, ai-service/schemas). Enums must match .claude/skills/ingredient-taxonomy and recipe-schema.
+export type AiCategory =
+  | 'spirit' | 'liqueur' | 'wine' | 'sparkling_wine' | 'beer' | 'cider' | 'vermouth_aperitif' | 'bitters'
+  | 'syrup' | 'juice' | 'soda_mixer' | 'energy_drink' | 'dairy_cream' | 'fresh_fruit' | 'herb_spice' | 'water';
+export const AI_CATEGORIES: AiCategory[] = [
+  'spirit', 'liqueur', 'wine', 'sparkling_wine', 'beer', 'cider', 'vermouth_aperitif', 'bitters',
+  'syrup', 'juice', 'soda_mixer', 'energy_drink', 'dairy_cream', 'fresh_fruit', 'herb_spice', 'water',
+];
+export type AiScanStatus = 'recognized' | 'low_confidence' | 'water' | 'not_ingredient' | 'unclear';
+
+export interface AiScanItem {
+  category: AiCategory;
+  brand: string | null;
+  product: string | null;
+  style: string | null;
+  abv: number | null;
+  volumeMl: number | null;
+  isAlcoholic: boolean;
+  flags: ('energy_drink' | 'contains_caffeine')[];
+  confidence: number;
+}
+
+export interface AiScanResult {
+  schemaVersion: '1';
+  source: 'photo' | 'barcode';
+  status: AiScanStatus;
+  item: AiScanItem | null;
+  suggestBarcode: boolean;
+}
+
+export interface AiSettings {
+  basics: string[];
+  basicsCustomized: boolean;
+  photoOptIn: boolean;
+}
+
+export interface AiStatus {
+  schemaVersion: '1';
+  available: boolean;
+  provider: 'local' | 'openai' | 'off';
+  scan: boolean;
+  recipes: boolean;
+  barcode: boolean;
+  noticeVersion: number;
+  noticeAccepted: boolean;
+  settings: AiSettings;
+}
+
+export interface AiRecipeIngredient {
+  name: string;
+  amount: number;
+  unit: 'ml' | 'g' | 'piece';
+  abv: number;
+  optional: boolean;
+}
+
+export interface AiRecipe {
+  id: string;
+  name: string;
+  description: string;
+  ingredients: AiRecipeIngredient[];
+  steps: string[];
+  glass: string;
+  garnish: string | null;
+  method: 'build' | 'stir' | 'shake' | 'blend' | 'muddle';
+  estimatedAbv: number;
+  standardDrinks: number;
+  isAlcoholic: boolean;
+  tags: string[];
+  language: 'en' | 'ro';
+  aiGenerated: true;
+  youWillAlsoNeed: string[];
+  warnings: ('raw_egg' | 'energy_alcohol')[];
+  responsibleNote: string | null;
+  savedAt?: string;
+}
+
+export interface AiRecipeBatch {
+  schemaVersion: '1';
+  recipes: AiRecipe[];
+  exhausted: boolean;
+}

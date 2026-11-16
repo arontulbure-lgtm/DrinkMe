@@ -5,6 +5,7 @@
 //   npm run ai:health  prints the ai-service health and exits 0 when it is ok
 //   npm run ai:stop    stops the ai-service (and Ollama if this script started it)
 // Paths and env vars are documented in docs/ai/LOCAL_SETUP.md.
+/* global Buffer, setTimeout, AbortSignal */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

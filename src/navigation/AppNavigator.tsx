@@ -25,6 +25,9 @@ import VerifyEmailScreen from '../screens/VerifyEmailScreen';
 import AgeGateScreen from '../screens/AgeGateScreen';
 import OnboardingScreen, { PRIVACY_NOTICE_VERSION } from '../screens/OnboardingScreen';
 import BlockedUsersScreen from '../screens/BlockedUsersScreen';
+import AiRecipesScreen from '../screens/AiRecipesScreen';
+import AiRecipeDetailScreen from '../screens/AiRecipeDetailScreen';
+import AiSettingsScreen from '../screens/AiSettingsScreen';
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
@@ -177,6 +180,13 @@ export function AppNavigator() {
             name="BlockedUsers"
             component={BlockedUsersScreen}
             options={{ headerShown: false }}
+          />
+          <Stack.Screen name="AiRecipes" component={AiRecipesScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="AiRecipeDetail" component={AiRecipeDetailScreen} options={{ headerShown: false }} />
+          <Stack.Screen
+            name="AiSettings"
+            component={AiSettingsScreen}
+            options={{ headerShown: false, presentation: 'modal' }}
           />
         </>
       )}

@@ -1,7 +1,7 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
 import type { StackScreenProps } from '@react-navigation/stack';
-import { Recipe } from '../types/api';
+import { AiRecipe, AiScanItem, Recipe } from '../types/api';
 
 // Route params for every screen. Keep these in sync with the navigate() calls: TypeScript checks them
 // through the global RootParamList below.
@@ -29,6 +29,10 @@ export type RootStackParamList = {
   PartnersList: { userId?: string } | undefined;
   UserProfile: { userId: string };
   BlockedUsers: undefined;
+  // AI recipes: from a confirmed scan (item) or from the whole Smart Bar.
+  AiRecipes: { mode: 'scan'; item: AiScanItem } | { mode: 'smart_bar' };
+  AiRecipeDetail: { recipe: AiRecipe };
+  AiSettings: undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> = StackScreenProps<RootStackParamList, T>;
