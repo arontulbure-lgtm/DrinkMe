@@ -10,6 +10,7 @@ import { useRefreshIfSuspended } from '../lib/useRefreshIfSuspended';
 import { BaseUser } from '../types/api';
 import { useLocalization } from '../context/LocalizationContext';
 import DeleteAccountModal from '../components/DeleteAccountModal';
+import LegalLinks from '../components/LegalLinks';
 import { RootStackScreenProps } from '../navigation/types';
 
 type Props = RootStackScreenProps<'EditProfile'>;
@@ -162,6 +163,11 @@ export default function EditProfileScreen({ navigation }: Props) {
             <Text style={styles.deleteRowText}>{t('deleteAccount.action')}</Text>
             <Ionicons name="chevron-forward" size={18} color="#EF4444" />
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>{t('legal.sectionTitle')}</Text>
+          <LegalLinks />
         </View>
       </ScrollView>
 

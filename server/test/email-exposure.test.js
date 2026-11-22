@@ -380,7 +380,7 @@ describe('request logs', () => {
   for (const [label, env, pattern] of [
     ['the dev format', {}, /GET \/api\/drinks\b/],
     [
-      'the combined format',
+      'the production format (no IP, user agent or referrer)',
       {
         NODE_ENV: 'production',
         ALLOW_INSECURE_DEV_AUTH: undefined,
@@ -393,7 +393,7 @@ describe('request logs', () => {
           client_email: 'log-test@drinkme-log-test.example.test',
         }),
       },
-      /"GET \/api\/drinks HTTP\/1\.1" 401/,
+      /\d{4}-\d\d-\d\dT[\d:.]+Z GET \/api\/drinks 401 /,
     ],
   ]) {
     // Logged out, so the answer is 401: the request is still logged.
@@ -403,6 +403,12 @@ describe('request logs', () => {
       assert.equal((await get(server.baseUrl, `/api/drinks?city=${CANARY}`)).status, 401);
       await waitForLogLine(server, pattern);
       assert.ok(!server.getOutput().includes(CANARY));
+      // Legal T-05: in production neither the client address nor its user agent is logged.
+      if (env.NODE_ENV === 'production') {
+        const requestLines = server.getOutput().split('\n').filter((line) => / GET \/api\/drinks /.test(line));
+        assert.ok(requestLines.length > 0);
+        for (const line of requestLines) assert.doesNotMatch(line, /127\.0\.0\.1|::ffff:|::1|undici|node|Mozilla/i);
+      }
     });
   }
 });

@@ -27,6 +27,8 @@ const CANCELLED_CODES = new Set([
 const CODE_TO_KEY: Record<string, string> = {
   'auth/email-already-in-use': 'auth.errors.emailInUse',
   'auth/weak-password': 'auth.errors.weakPassword',
+  // The project's password policy (ENFORCE: 8+, uppercase, digit, special) refuses with this code.
+  'auth/password-does-not-meet-requirements': 'auth.errors.weakPassword',
   'auth/invalid-email': 'auth.errors.invalidEmail',
   'auth/missing-email': 'auth.errors.invalidEmail',
   'auth/too-many-requests': 'auth.errors.tooManyRequests',

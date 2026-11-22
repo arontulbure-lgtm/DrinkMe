@@ -6,7 +6,10 @@
     "dev": "node server.js",
     "start": "node server.js",
     "backup": "node scripts/backup.js",
-    "test": "node --test --test-concurrency=1 \"test/*.test.js\""
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
+    "db:migrate-to-postgres": "node scripts/migrate-to-postgres.mjs",
+    "db:export-from-postgres": "node scripts/export-from-postgres.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -19,6 +22,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.5.0",
     "openai": "^4.71.1",
+    "pg": "~8.23.1",
     "validator": "^13.15.35"
   }
 }

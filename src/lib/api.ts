@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { devHooks } from './devHooks';
+import { getAppCheckHeaders } from './appCheck';
 
 // What MediaImage (expo-image) needs to load one image: no uri means no image.
 export type MediaSource = { uri?: string; headers?: Record<string, string> };
@@ -111,6 +112,8 @@ export async function apiFetch<T>(path: string, config: RequestConfig = {}): Pro
   const finalHeaders: Record<string, string> = {
     Accept: 'application/json',
     ...(!isFormData && rest.body ? { 'Content-Type': 'application/json' } : {}),
+    // Empty unless App Check is on and a native provider is registered (src/lib/appCheck.ts).
+    ...(await getAppCheckHeaders()),
     ...(headers as Record<string, string> | undefined),
   };
 

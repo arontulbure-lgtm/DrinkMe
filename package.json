@@ -21,13 +21,20 @@
     "official:check": "node server/scripts/official.mjs check",
     "official:find": "node server/scripts/official.mjs find",
     "official:set": "node server/scripts/official.mjs set",
+    "official:keys": "node server/scripts/official.mjs keys",
     "firebase:configure": "node server/scripts/firebase-configure.mjs",
+    "firebase:use-key": "node server/scripts/firebase-configure.mjs --use-key",
     "env:remove": "node server/scripts/env-remove.mjs",
     "firebase:auth-check": "node server/scripts/firebase-auth-check.mjs",
     "testusers:create": "node server/scripts/testusers.mjs create",
     "testusers:reset": "node server/scripts/testusers.mjs reset",
     "testusers:delete": "node server/scripts/testusers.mjs delete",
-    "agent:feature": "tsx agents/tasks/implement-feature.ts"
+    "testapi": "node server/scripts/testapi.mjs",
+    "agent:feature": "tsx agents/tasks/implement-feature.ts",
+    "db:migrate-to-postgres": "node server/scripts/migrate-to-postgres.mjs",
+    "db:export-from-postgres": "node server/scripts/export-from-postgres.mjs",
+    "test:postgres": "npm --prefix server run test:postgres",
+    "docker:smoke": "node server/scripts/docker-smoke.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

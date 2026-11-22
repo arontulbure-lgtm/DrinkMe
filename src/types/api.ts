@@ -4,6 +4,7 @@ export interface BaseUser {
   ageConfirmed?: boolean; // only returned to the account owner
   needsName?: boolean; // only returned to the account owner: no name is public yet
   privacyNoticeVersion?: number | null; // only returned to the account owner
+  termsVersion?: number | null; // only returned to the account owner (legal T-06)
   // Owner only, while needsName: the Google or Apple name was not kept because it is reserved for the
   // official DrinkMe account. The name prompt explains it.
   nameReservedAtSignIn?: boolean;

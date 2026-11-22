@@ -23,7 +23,7 @@ import PartnersListScreen from '../screens/PartnersListScreen';
 import SessionErrorScreen from '../screens/SessionErrorScreen';
 import VerifyEmailScreen from '../screens/VerifyEmailScreen';
 import AgeGateScreen from '../screens/AgeGateScreen';
-import OnboardingScreen, { PRIVACY_NOTICE_VERSION } from '../screens/OnboardingScreen';
+import OnboardingScreen, { PRIVACY_NOTICE_VERSION, needsTermsAcceptance } from '../screens/OnboardingScreen';
 import BlockedUsersScreen from '../screens/BlockedUsersScreen';
 import AiRecipesScreen from '../screens/AiRecipesScreen';
 import AiRecipeDetailScreen from '../screens/AiRecipeDetailScreen';
@@ -123,7 +123,9 @@ export function AppNavigator() {
     isAuthenticated &&
     sessionStatus === 'ready' &&
     profile &&
-    ((profile.privacyNoticeVersion ?? 0) < PRIVACY_NOTICE_VERSION || (profile.needsName === true && skippedNameUid !== serverUserId))
+    ((profile.privacyNoticeVersion ?? 0) < PRIVACY_NOTICE_VERSION
+      || needsTermsAcceptance(profile)
+      || (profile.needsName === true && skippedNameUid !== serverUserId))
   ) {
     return <OnboardingScreen onLater={() => setSkippedNameUid(serverUserId)} />;
   }

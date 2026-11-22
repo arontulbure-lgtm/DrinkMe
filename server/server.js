@@ -76,6 +76,11 @@ function exitOnInvalidProductionConfig(problems) {
 // a fallback that trusts the client uid. That fallback is insecure and development-only.
 import { initializeApp as adminInitializeApp, getApps as adminGetApps, cert } from 'firebase-admin/app';
 import { getAuth as adminGetAuth } from 'firebase-admin/auth';
+import { getAppCheck as adminGetAppCheck } from 'firebase-admin/app-check';
+import { createAppCheckMiddleware, createAppCheckStats, parseAppCheckMode } from './app-check.js';
+import {
+  DEFAULT_HISTORY_MAX_AGE_MS, createWriteBehindQueue, describePgError, openPostgresStore, readDbDriverConfig, toJsonbSafeText,
+} from './storage/postgres-store.js';
 
 let firebaseAuth = null;
 
@@ -133,6 +138,9 @@ if (isProduction) {
   if (!firebaseAuth) {
     missingConfig.push('FIREBASE_SERVICE_ACCOUNT_KEY (a valid service account)');
   }
+  if (!parseAppCheckMode(process.env.APP_CHECK_MODE).valid) {
+    missingConfig.push('APP_CHECK_MODE (off, monitor or enforce)');
+  }
   if (missingConfig.length) exitOnInvalidProductionConfig(missingConfig);
   if (!REQUIRE_VERIFIED_EMAIL) {
     console.warn('[auth] REQUIRE_VERIFIED_EMAIL is off: accounts with an unconfirmed email can use the API.');
@@ -163,24 +171,78 @@ const DB_FILE  = process.env.DB_FILE?.trim()
   : path.join(__dirname, 'data', 'db.json');
 const DATA_DIR = path.dirname(DB_FILE);
 
+// DATA-1: DB_DRIVER=json (default) keeps the database in DB_FILE. DB_DRIVER=postgres keeps the same
+// document as JSONB in Postgres (DATABASE_URL), written behind by storage/postgres-store.js; DB_FILE's
+// directory then only receives the rare .corrupt-/.pre-migration- copies. See server/README.md,
+// "Database: JSON or Postgres". Setting names only in these messages, never values.
+const dbDriverConfig = readDbDriverConfig(process.env, { production: isProduction });
+if (dbDriverConfig.problems.length > 0) {
+  if (isProduction) exitOnInvalidProductionConfig(dbDriverConfig.problems);
+  console.error(`[db] FATAL: invalid database settings. Fix: ${dbDriverConfig.problems.join('; ')}.`);
+  process.exit(1);
+}
+for (const warning of dbDriverConfig.warnings) console.warn(`[db] ${warning}`);
+const isPostgresDb = dbDriverConfig.driver === 'postgres';
+// What load messages name: the file path in JSON mode (unchanged), the table in Postgres mode.
+const DB_SOURCE_LABEL = isPostgresDb ? 'the Postgres state (drinkme_state)' : DB_FILE;
+
 // A wrong path must not silently become an empty database. A first deploy sets ALLOW_EMPTY_DB=true once.
 if (isProduction) {
   const dbFileEnv = process.env.DB_FILE;
   if (dbFileEnv !== undefined && !path.isAbsolute(dbFileEnv.trim())) {
     exitOnInvalidProductionConfig(['DB_FILE (must be an absolute path)']);
   }
-  if (!fs.existsSync(DB_FILE)) {
+  // Postgres mode checks for its state row below, once connected.
+  if (!isPostgresDb && !fs.existsSync(DB_FILE)) {
     if (process.env.ALLOW_EMPTY_DB !== 'true') {
       exitOnInvalidProductionConfig(['DB_FILE (no database file at this path; set ALLOW_EMPTY_DB=true only for a first deploy)']);
     }
     console.warn('[db] ALLOW_EMPTY_DB=true and no database file — starting empty. Remove the flag after this deploy.');
-  } else if (process.env.ALLOW_EMPTY_DB === 'true') {
+  } else if (!isPostgresDb && process.env.ALLOW_EMPTY_DB === 'true') {
     console.warn('[db] ALLOW_EMPTY_DB=true but the database file exists. Remove the flag: it lets a corrupt database start empty.');
   }
 }
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+}
+
+// Postgres mode: connect, create the tables if missing and read the stored document before anything
+// else runs (the server listens only after loadDb). loadDb() then takes the same validation and
+// migration path as a file that was read.
+let postgresStore = null;
+let postgresWriteQueue = null;
+let preloadedDbText; // Postgres mode: the stored JSON text, or null when there is no state row yet
+if (isPostgresDb) {
+  let hasInstanceLock = false;
+  try {
+    postgresStore = await openPostgresStore({ connectionString: dbDriverConfig.databaseUrl, ssl: dbDriverConfig.ssl });
+    // One server per database: two would overwrite each other's whole document.
+    hasInstanceLock = await postgresStore.acquireInstanceLock();
+    if (hasInstanceLock) {
+      await postgresStore.ensureSchema();
+      preloadedDbText = (await postgresStore.load())?.text ?? null;
+    }
+  } catch (err) {
+    console.error(`[db] FATAL: could not open the Postgres database (${describePgError(err)}). Refusing to start.`);
+    process.exit(1);
+  }
+  if (!hasInstanceLock) {
+    console.error('[db] FATAL: another DrinkMe server (or a migration) is using this Postgres database. DB_DRIVER=postgres allows one server per database. Refusing to start.');
+    process.exit(1);
+  }
+  if (isProduction) {
+    if (preloadedDbText === null) {
+      if (process.env.ALLOW_EMPTY_DB !== 'true') {
+        exitOnInvalidProductionConfig(['DATABASE_URL (no DrinkMe state in this database; run npm run db:migrate-to-postgres, or set ALLOW_EMPTY_DB=true only for a first deploy)']);
+      }
+      console.warn('[db] ALLOW_EMPTY_DB=true and no Postgres state — starting empty. Remove the flag after this deploy.');
+    } else if (process.env.ALLOW_EMPTY_DB === 'true') {
+      console.warn('[db] ALLOW_EMPTY_DB=true but a Postgres state exists. Remove the flag: it lets a corrupt database start empty.');
+    }
+  }
+  postgresWriteQueue = createWriteBehindQueue({ write: (snapshot) => postgresStore.write(snapshot) });
+  console.log('[db] Using Postgres (write-behind). A crash can lose the last moments of changes; see server/README.md.');
 }
 
 const app = express();
@@ -258,7 +320,10 @@ morgan.token('url', (req) => (
   (req.originalUrl || req.url).split('?')[0].replace(/^(\/api\/users\/)[^/]+(\/delete-account\/?)$/i, '$1:id$2')
 ));
 // The app's dev log batches (development only) would fill the console with one line every few seconds.
-app.use(morgan(isProduction ? 'combined' : 'dev', { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
+// Production (legal T-05, GDPR minimisation): time, method, path, status, size and duration only; no IP
+// address, user agent or referrer, which morgan's 'combined' format would keep for every request.
+const PRODUCTION_LOG_FORMAT = ':date[iso] :method :url :status :res[content-length] - :response-time ms';
+app.use(morgan(isProduction ? PRODUCTION_LOG_FORMAT : 'dev', { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
 
 // ── Media ─────────────────────────────────────────────────────────────────────
 // Images leave the JSON responses and come from here. Mounted before the body parsers, which a GET
@@ -363,6 +428,35 @@ const mutationLimiter = rateLimit({
   skip: (req) => req.method === 'GET', // only rate-limit writes
 });
 app.use('/api', mutationLimiter);
+// App Check (SEC-I, docs/APP_CHECK_PLAN.md): APP_CHECK_MODE off (default), monitor or enforce. After the
+// limiters, so a flood of bad tokens is rate-limited first; before the sign-in gate, so an app without a
+// valid token learns nothing else. Tokens are verified with Firebase (cached keys, no call per request).
+// Test mode only: APP_CHECK_TEST_TOKEN is accepted as the one valid token, since tests cannot get real ones.
+{
+  const appCheck = parseAppCheckMode(process.env.APP_CHECK_MODE);
+  if (!appCheck.valid) console.warn('[app-check] APP_CHECK_MODE is not off, monitor or enforce: App Check is OFF.');
+  const testToken = process.env.NODE_ENV === 'test' ? process.env.APP_CHECK_TEST_TOKEN : undefined;
+  if (appCheck.mode !== 'off') {
+    if (!firebaseAuth && !testToken) {
+      console.warn(`[app-check] APP_CHECK_MODE=${appCheck.mode} needs FIREBASE_SERVICE_ACCOUNT_KEY: every token counts as invalid.`);
+    }
+    const stats = createAppCheckStats();
+    const verify = testToken
+      ? async (token) => { if (token !== testToken) throw new Error('invalid'); }
+      : async (token) => {
+        if (!firebaseAuth) throw new Error('no firebase admin');
+        return adminGetAppCheck().verifyToken(token);
+      };
+    app.use('/api', createAppCheckMiddleware({ mode: appCheck.mode, verify, onResult: (result) => stats.record(result) }));
+    if (appCheck.mode === 'monitor') {
+      setInterval(() => {
+        const line = stats.summary();
+        if (line) console.log(line);
+      }, process.env.NODE_ENV === 'test' ? 500 : 15 * 60 * 1000).unref();
+    }
+    console.log(`[app-check] ${appCheck.mode} mode for /api.`);
+  }
+}
 // Before the body parsers, so a refused request is never parsed. See requireSignedInAdult.
 app.use('/api', requireSignedInAdult);
 
@@ -566,44 +660,69 @@ function renameDbFileWithRetry(tmpFile) {
   runDbFileOperationWithRetry('Save', DB_RENAME_RETRY_CODES, () => fs.renameSync(tmpFile, DB_FILE));
 }
 
+// The whole database as one plain object, the shape of DB_FILE and of the Postgres JSONB document.
+function buildDbDocument() {
+  return {
+    drinks,
+    nextDrinkId,
+    nextNotificationId,
+    nextCommentId,
+    nextReportId,
+    nextAuditId,
+    dbSchemaVersion,
+    users: Array.from(userIndex.values()),
+    reports,
+    cheersByUser: Object.fromEntries(
+      Array.from(cheersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    savedByUser: Object.fromEntries(
+      Array.from(savedByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    smartBarByUser: Object.fromEntries(smartBarByUser.entries()),
+    savedRecipesByUser: Object.fromEntries(savedRecipesByUser.entries()),
+    partnersByUser: Object.fromEntries(
+      Array.from(partnersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    notificationsByUser: Object.fromEntries(notificationsByUser.entries()),
+    commentsByDrink: Object.fromEntries(
+      Array.from(commentsByDrink.entries()).map(([k, v]) => [String(k), v])
+    ),
+    limitEventsByUser: Object.fromEntries(limitEventsByUser.entries()),
+    blocksByUser: Object.fromEntries(
+      Array.from(blocksByUser.entries()).map(([k, v]) => [k, Array.from(v)])
+    ),
+    partnerRequestsByUser: Object.fromEntries(partnerRequestsByUser.entries()),
+    pendingAccountDeletions,
+    auditLog,
+    ...(recoveryStartedAt !== undefined && { recoveryStartedAt }),
+  };
+}
+
+// Postgres mode. The document is serialised now, so the snapshot is consistent, and written behind:
+// true means queued, not stored. A failed write is retried in the background until it succeeds or a
+// newer snapshot replaces it (storage/postgres-store.js), so routes cannot answer 503 for it and a crash
+// can lose the changes not yet written. False only when serialising fails (routes then answer 503).
+function queuePostgresSave() {
+  try {
+    const { text, replaced } = toJsonbSafeText(JSON.stringify(buildDbDocument()));
+    if (replaced > 0) console.warn(`[db] Replaced ${replaced} escape(s) Postgres cannot store (NUL or a lone surrogate) with U+FFFD.`);
+    lastSavedDbBytes = Buffer.byteLength(text, 'utf8');
+    // While a recovery hold may be on, history keeps every hourly snapshot (30-day ceiling only), so
+    // snapshots from before a lost start are not pushed out by the row limit.
+    postgresWriteQueue.enqueue({ text, schemaVersion: dbSchemaVersion, keepAllHistory: recoveryStartedAt !== undefined });
+    return true;
+  } catch (err) {
+    console.error(`[db] Failed to serialise the database for Postgres, nothing queued (${err.code ?? err.name}).`);
+    return false;
+  }
+}
+
 // Atomic write: a crash or failed rename leaves the previous DB_FILE intact.
 function saveDb() {
+  if (isPostgresDb) return queuePostgresSave();
   const tmpFile = `${DB_FILE}.tmp-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
   try {
-    const data = {
-      drinks,
-      nextDrinkId,
-      nextNotificationId,
-      nextCommentId,
-      nextReportId,
-      nextAuditId,
-      dbSchemaVersion,
-      users: Array.from(userIndex.values()),
-      reports,
-      cheersByUser: Object.fromEntries(
-        Array.from(cheersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      savedByUser: Object.fromEntries(
-        Array.from(savedByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      smartBarByUser: Object.fromEntries(smartBarByUser.entries()),
-      savedRecipesByUser: Object.fromEntries(savedRecipesByUser.entries()),
-      partnersByUser: Object.fromEntries(
-        Array.from(partnersByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      notificationsByUser: Object.fromEntries(notificationsByUser.entries()),
-      commentsByDrink: Object.fromEntries(
-        Array.from(commentsByDrink.entries()).map(([k, v]) => [String(k), v])
-      ),
-      limitEventsByUser: Object.fromEntries(limitEventsByUser.entries()),
-      blocksByUser: Object.fromEntries(
-        Array.from(blocksByUser.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      partnerRequestsByUser: Object.fromEntries(partnerRequestsByUser.entries()),
-      pendingAccountDeletions,
-      auditLog,
-      ...(recoveryStartedAt !== undefined && { recoveryStartedAt }),
-    };
+    const data = buildDbDocument();
     const serialized = JSON.stringify(data, null, 2);
     const bytes = Buffer.from(serialized, 'utf8');
     const fd = fs.openSync(tmpFile, 'wx', 0o600);
@@ -632,10 +751,47 @@ function saveDb() {
 // call sites, cheer and save included. These do not: marking notifications read, deleting a Smart
 // Bar item, and a new user at sign-in (no token was issued and a retry reuses the record, but until
 // then it is visible to other users, and the next successful save writes it to disk).
+const respondSaveFailed = (res) => res.status(503).json({ error: 'Could not save your changes. Please try again.' });
 const saveDbOrRespond = (res) => {
   if (saveDb()) return true;
-  res.status(503).json({ error: 'Could not save your changes. Please try again.' });
+  respondSaveFailed(res);
   return false;
+};
+
+// ── Durable saves (Postgres write-behind) ──
+// A few changes must be stored before the server acts on them or answers: the pending account deletion
+// (before any data or the Firebase user goes), session generation bumps (logging out stolen JWTs) and
+// admin suspensions. JSON mode: saveDb already wrote the file, so these behave exactly as before.
+// Postgres mode: they also wait until the queued snapshot is in Postgres, at most this long.
+const DURABLE_SAVE_TIMEOUT_MS = 10_000;
+
+/** Postgres mode: resolves whether every change made so far is stored. JSON mode: true. */
+const waitForDbWritten = () => (isPostgresDb ? postgresWriteQueue.flush(DURABLE_SAVE_TIMEOUT_MS) : Promise.resolve(true));
+
+/** saveDb, then (Postgres mode) wait until it is stored. Resolves false when either fails. */
+async function saveDbDurable() {
+  if (!saveDb()) return false;
+  return waitForDbWritten();
+}
+
+/** saveDbOrRespond with the durable wait: false means the 503 was already sent. */
+const saveDbDurableOrRespond = async (res) => {
+  if (await saveDbDurable()) return true;
+  respondSaveFailed(res);
+  return false;
+};
+
+/**
+ * Saves a session generation bump that is kept even when the save fails. JSON mode as before: a failed
+ * save is logged by saveDb and the bump stays in memory (resolves true, the caller answers as usual).
+ * Postgres mode: resolves false when it is not stored in time, and the caller answers 503.
+ */
+const saveSessionBumpDurably = async () => {
+  if (!isPostgresDb) {
+    saveDb();
+    return true;
+  }
+  return saveDbDurable();
 };
 
 // A raw SyntaxError message can quote file content, so it never reaches the logs.
@@ -647,7 +803,7 @@ const isPlainObject = (value) => value !== null && typeof value === 'object' && 
 
 // Starting empty after these failures could let the next mutation overwrite a good database.
 function exitOnDbLoadFailure(action, reason) {
-  console.error(`[db] FATAL: could not ${action} ${DB_FILE} (${reason}). Refusing to start so the database file is not overwritten.`);
+  console.error(`[db] FATAL: could not ${action} ${DB_SOURCE_LABEL} (${reason}). Refusing to start so the database file is not overwritten.`);
   process.exit(1);
 }
 
@@ -733,6 +889,12 @@ function exitIfEmptyStartNotAllowed(reason, backupNote) {
 // see purgeExpiredDbBackups, which never runs on a start like this one.
 function preserveCorruptDb(rawBytes, reason) {
   recoveryStartedAt = Date.now();
+  // Postgres mode: the stored row was copied into drinkme_state_history before loadDb (see its call site).
+  if (isPostgresDb) {
+    exitIfEmptyStartNotAllowed(reason, 'a copy is in drinkme_state_history');
+    console.error(`[db] Failed to load ${DB_SOURCE_LABEL} (${reason}), a copy is in drinkme_state_history, starting empty.`);
+    return;
+  }
   let existingHash = null;
   try {
     existingHash = newestDbBackup('.corrupt-')?.hash ?? null;
@@ -741,7 +903,7 @@ function preserveCorruptDb(rawBytes, reason) {
   }
   if (existingHash === sha256(rawBytes)) {
     exitIfEmptyStartNotAllowed(reason, 'an identical backup already exists');
-    console.error(`[db] Failed to load ${DB_FILE} (${reason}), an identical backup already exists, starting empty.`);
+    console.error(`[db] Failed to load ${DB_SOURCE_LABEL} (${reason}), an identical backup already exists, starting empty.`);
     return;
   }
 
@@ -752,7 +914,7 @@ function preserveCorruptDb(rawBytes, reason) {
     exitOnDbLoadFailure(`back up (${reason}) to ${backupFile}`, describeDbError(err));
   }
   exitIfEmptyStartNotAllowed(reason, `saved a copy to ${backupFile}`);
-  console.error(`[db] Failed to load ${DB_FILE} (${reason}), saved a copy to ${backupFile}, starting empty.`);
+  console.error(`[db] Failed to load ${DB_SOURCE_LABEL} (${reason}), saved a copy to ${backupFile}, starting empty.`);
 }
 
 // Leftovers from a crash mid-write. Failing to remove one is harmless, so it never stops startup.
@@ -849,8 +1011,18 @@ function migrateLegacyDbText(rawBytes) {
   }
 }
 
-function loadDb() {
-  let prunedAuditAtLoad = false;
+// Postgres mode reads nothing here: preloadedDbText was fetched at startup, and is handled from this
+// point exactly like the bytes of a file (a missing row like a missing file).
+function readDbSourceOrStartEmpty() {
+  if (isPostgresDb) {
+    if (preloadedDbText === null) {
+      console.log('[db] No saved state found in Postgres — starting with empty database.');
+      return null;
+    }
+    const bytes = Buffer.from(preloadedDbText, 'utf8');
+    preloadedDbText = undefined; // not kept in memory twice
+    return bytes;
+  }
   let dbStats;
   try {
     dbStats = fs.statSync(DB_FILE, { throwIfNoEntry: false });
@@ -859,12 +1031,19 @@ function loadDb() {
   }
   if (dbStats === undefined) {
     console.log(`[db] No saved state found at ${DB_FILE} — starting with empty database.`);
+    return null;
+  }
+  return readDbFileWithRetry();
+}
+
+function loadDb() {
+  let prunedAuditAtLoad = false;
+  const rawBytes = readDbSourceOrStartEmpty();
+  if (rawBytes === null) {
     recoveryStartedAt = Date.now();
     saveDb();
     return;
   }
-
-  const rawBytes = readDbFileWithRetry();
 
   let data;
   try {
@@ -1409,7 +1588,13 @@ const IMAGE_STORAGE_MAX_BYTES = parseTestOnlyLimit(process.env.IMAGE_STORAGE_MAX
 // when it holds far fewer characters. Stopping growth below that, in bytes, keeps the server able
 // to restart, and keeps saves working for the routes that stay open.
 const DEFAULT_DB_GROWTH_MAX_BYTES = 450_000_000;
-const DB_GROWTH_MAX_BYTES = parseTestOnlyLimit(process.env.DB_GROWTH_MAX_BYTES, DEFAULT_DB_GROWTH_MAX_BYTES);
+// Postgres mode: one jsonb value cannot exceed about 256 MiB, so growth stops lower there, counted on
+// the compact JSON text that is sent (the stored jsonb is of a similar size).
+const DEFAULT_POSTGRES_DB_GROWTH_MAX_BYTES = 200_000_000;
+const DB_GROWTH_MAX_BYTES = parseTestOnlyLimit(
+  process.env.DB_GROWTH_MAX_BYTES,
+  isPostgresDb ? DEFAULT_POSTGRES_DB_GROWTH_MAX_BYTES : DEFAULT_DB_GROWTH_MAX_BYTES,
+);
 const isDbGrowthBlocked = () => lastSavedDbBytes > DB_GROWTH_MAX_BYTES;
 const respondDbGrowthBlocked = (res) => res.status(507).json({
   error: 'Storage is full. Please try again later.',
@@ -2019,6 +2204,7 @@ const AUDIT_SYSTEM_MAX_ENTRIES = 20_000;
 const AUDIT_META_KEYS = {
   'ack.age_confirmed': [],
   'ack.privacy_accepted': ['version'],
+  'ack.terms_accepted': ['version'],
   // reason: 'tokens_revoked' when Firebase revoked the refresh tokens (password reset or change, email
   // change, revokeRefreshTokens); 'account_disabled' / 'account_gone' when Firebase reports the account
   // disabled or deleted outside the app; absent for the email takeover guard's bump.
@@ -2036,7 +2222,7 @@ const AUDIT_ACTIONS = new Set(Object.keys(AUDIT_META_KEYS));
 // The user's own actions. Lead decision (data minimisation): they are deleted with the account, not
 // anonymised; account.deletion_completed under the anonymous id stays as the record. Admin entries keep
 // the anonymous id instead of the uid.
-const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'auth.session_revoked', 'account.deletion_requested', 'ai.output_reported']);
+const AUDIT_SELF_ACTIONS = new Set(['ack.age_confirmed', 'ack.privacy_accepted', 'ack.terms_accepted', 'auth.session_revoked', 'account.deletion_requested', 'ai.output_reported']);
 const isUserAuditEntry = (entry) => AUDIT_SELF_ACTIONS.has(entry.action);
 const auditCapFor = (entry) => (isUserAuditEntry(entry) ? AUDIT_USER_MAX_ENTRIES : AUDIT_SYSTEM_MAX_ENTRIES);
 
@@ -2172,6 +2358,26 @@ const listAuditEntries = ({ action, limit, before }) => {
 };
 
 // ── Load persisted state on startup ──────────────────────────────────────────
+// Postgres mode: a stored document that will not load as it is (invalid JSON or shape, or text from before
+// schema version 2) is copied into drinkme_state_history first, in place of the .corrupt- file, because
+// the start that follows overwrites the row. A failed copy stops the start with the row unchanged.
+if (isPostgresDb && preloadedDbText) {
+  let needsCopy;
+  try {
+    const parsed = JSON.parse(preloadedDbText);
+    needsCopy = findDbShapeProblem(parsed) !== null || !(parsed.dbSchemaVersion >= DB_SCHEMA_VERSION);
+  } catch {
+    needsCopy = true;
+  }
+  if (needsCopy) {
+    try {
+      await postgresStore.snapshotCurrentToHistory();
+      console.warn('[db] Copied the stored Postgres state to drinkme_state_history before loading it (it needs recovery or migration).');
+    } catch (err) {
+      exitOnDbLoadFailure('copy the state to drinkme_state_history', describePgError(err));
+    }
+  }
+}
 loadDb();
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -2394,6 +2600,12 @@ const toPublicUser = (user, viewerId) => {
 // the 90-day audit log, and the reported version kept when a reported post is edited.
 const PRIVACY_NOTICE_VERSION = 2;
 
+// Legal T-06: the Terms of Use version the user accepted (docs/legal/terms.md). Raise it when the Terms change in
+// a way that needs new acceptance; the app asks again (T-07, behind EXPO_PUBLIC_TERMS_STEP_ENABLED until the
+// text is reviewed, D-01). Owner default N-2: the server records acceptance but refuses nothing without it.
+const TERMS_VERSION = 1;
+const getTermsVersion = (user) => (Number.isInteger(user.termsVersion) ? user.termsVersion : null);
+
 const getPrivacyNoticeVersion = (user) => (Number.isInteger(user.privacyNoticeVersion) ? user.privacyNoticeVersion : null);
 
 // What the owner gets back. An allowlist too, so internal fields such as nameSetByUser stay private.
@@ -2416,6 +2628,7 @@ const toOwnerUser = (user) => {
     ageConfirmed: isAgeConfirmed(id),
     needsName,
     privacyNoticeVersion: getPrivacyNoticeVersion(user),
+    termsVersion: getTermsVersion(user),
     // Only while the name prompt is due: the Google or Apple name was dropped as reserved at sign-in.
     ...(needsName && user.nameReservedAtSignIn === true && { nameReservedAtSignIn: true }),
     // Only while true, so the client can explain it.
@@ -2755,6 +2968,13 @@ const finishAccountDeletion = (uid, { clearWithoutFirebase = false } = {}) => {
   if (running) return running;
   const run = (async () => {
     if (incompleteAccountCascades.has(uid) && runAccountCascade(uid)) saveDb();
+    // Postgres mode: the pending entry (and the cascade) must be stored before the Firebase user goes, or
+    // a crash could leave a live server record without its Firebase user. Not stored in time: nothing is
+    // deleted in Firebase now, and the entry stays for the retry timer. JSON mode: always true here.
+    if (!(await waitForDbWritten())) {
+      console.warn('[account] A deletion waits for Postgres before removing the Firebase user. It is retried.');
+      return false;
+    }
     const firebaseDeleted = firebaseAuth ? await deleteFirebaseUser(uid) : false;
     if ((firebaseDeleted || (!firebaseAuth && clearWithoutFirebase)) && !incompleteAccountCascades.has(uid)) settleAccountDeletion(uid);
     return firebaseDeleted;
@@ -2836,13 +3056,14 @@ const respondAccountDeleted = (res) => res.status(410).json({
 // Firebase reports an existing, live account as disabled or gone (Console action): raise sessionGen so every
 // API JWT ends, once per state (firebaseSessionEndedReason, cleared by the next good lookup), in its own
 // save. A failed save keeps the bump in memory, like the other bumps. Writes nothing for an unknown uid.
-const endSessionsForFirebaseState = (uid, reason) => {
+// Resolves false only in Postgres mode when the bump is not stored in time (the caller answers 503).
+const endSessionsForFirebaseState = async (uid, reason) => {
   const user = userIndex.get(uid);
-  if (!user || !isLiveAccount(uid) || user.firebaseSessionEndedReason === reason) return;
+  if (!user || !isLiveAccount(uid) || user.firebaseSessionEndedReason === reason) return true;
   user.sessionGen = getSessionGen(user) + 1;
   user.firebaseSessionEndedReason = reason;
   appendSessionRevokedAudit(uid, reason);
-  saveDb();
+  return saveSessionBumpDurably();
 };
 
 // Retryable: the client shows its session error screen with Retry.
@@ -2931,11 +3152,11 @@ app.post('/api/auth/mobile', async (req, res) => {
     // Disabled or deleted outside the app (Firebase Console): every API session of an existing account
     // ends too. The answers stay the usual ones, and a brand-new uid writes nothing.
     if (lookup.status === 'gone') {
-      endSessionsForFirebaseState(verifiedUid, 'account_gone');
+      if (!(await endSessionsForFirebaseState(verifiedUid, 'account_gone'))) return respondSaveFailed(res);
       return respondAccountDeleted(res);
     }
     if (lookup.disabled) {
-      endSessionsForFirebaseState(verifiedUid, 'account_disabled');
+      if (!(await endSessionsForFirebaseState(verifiedUid, 'account_disabled'))) return respondSaveFailed(res);
       return res.status(401).json({ error: 'Invalid Firebase ID token' });
     }
     firebaseTokensValidAfterMs = lookup.tokensValidAfterMs;
@@ -3017,7 +3238,7 @@ app.post('/api/auth/mobile', async (req, res) => {
     firebaseAuth && isPasswordToken && Number.isFinite(existingUser?.verifiedAuthFloor)
     && !(authTimeSeconds >= existingUser.verifiedAuthFloor)
   ) {
-    if (revocationBumped) saveDb();
+    if (revocationBumped && !(await saveSessionBumpDurably())) return respondSaveFailed(res);
     return res.status(403).json({ error: 'Please sign in again.', code: 'sign_in_again' });
   }
   // Once the owner has signed in through a provider that confirms the address, an unverified token
@@ -3034,7 +3255,11 @@ app.post('/api/auth/mobile', async (req, res) => {
         existingUser.emailVerified = false;
         if (Number.isFinite(issuedAtSeconds)) existingUser.lastIdTokenIat = issuedAtSeconds;
       }
-      if (losesVerifiedState || revocationBumped) saveDb();
+      if (revocationBumped) {
+        if (!(await saveSessionBumpDurably())) return respondSaveFailed(res);
+      } else if (losesVerifiedState) {
+        saveDb();
+      }
       return res.status(403).json({ error: 'Please confirm your email address.', code: 'email_not_verified' });
     }
     // A wrong clock on either side would refuse every password sign-in here, so it should be visible.
@@ -3053,7 +3278,7 @@ app.post('/api/auth/mobile', async (req, res) => {
     const isBelowFloor = isPasswordToken && hasAuthFloor && !(authTimeSeconds >= existingUser.verifiedAuthFloor);
     const isNotFreshEnough = establishesAuthFloor && (typeof signInProvider !== 'string' || (isPasswordToken && !isRecentTokenTime(authTimeSeconds)));
     if (isBelowFloor || isNotFreshEnough) {
-      if (revocationBumped) saveDb();
+      if (revocationBumped && !(await saveSessionBumpDurably())) return respondSaveFailed(res);
       return res.status(403).json({ error: 'Please sign in again.', code: 'sign_in_again' });
     }
   }
@@ -3105,6 +3330,8 @@ app.post('/api/auth/mobile', async (req, res) => {
   // Not rolled back when the save fails, like the rest of sign-in: earlier JWTs stay logged out in
   // memory, and a retry finds the work done and issues a JWT at the new generation.
   if (!saveDbOrRespond(res)) return;
+  // Postgres mode: a session generation bump must be stored before the new JWT goes out (see saveDbDurable).
+  if ((revocationBumped || bumpsSessionGen) && !(await waitForDbWritten())) return respondSaveFailed(res);
 
   const token = signApiToken(verifiedUid, emailVerified === true, getSessionGen(user));
   res.json({ token });
@@ -3245,6 +3472,26 @@ app.post('/api/users/:id/acknowledgements', requireAuth, (req, res) => {
   const user = userIndex.get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const { type, confirmed, version } = req.body || {};
+  if (type === 'terms') {
+    if (!Number.isInteger(version) || version < 1 || version > TERMS_VERSION) {
+      return res.status(400).json({ error: 'Invalid acknowledgement' });
+    }
+    // The highest stays; a repeat or a lower version writes nothing.
+    if (version <= (getTermsVersion(user) ?? 0)) return res.json(toOwnerUser(user));
+    const { termsVersion: previousVersion, termsAcceptedAt: previousAt } = user;
+    user.termsVersion = version;
+    user.termsAcceptedAt = new Date().toISOString();
+    const undoAudit = appendAudit('ack.terms_accepted', { actorId: user.id, meta: { version } });
+    if (!saveDbOrRespond(res)) {
+      undoAudit();
+      if (previousVersion === undefined) delete user.termsVersion;
+      else user.termsVersion = previousVersion;
+      if (previousAt === undefined) delete user.termsAcceptedAt;
+      else user.termsAcceptedAt = previousAt;
+      return;
+    }
+    return res.json(toOwnerUser(user));
+  }
   if (type === 'privacy') {
     if (!Number.isInteger(version) || version < 1 || version > PRIVACY_NOTICE_VERSION) {
       return res.status(400).json({ error: 'Invalid acknowledgement' });
@@ -3348,9 +3595,12 @@ const deleteAccountDurably = async (uid, res) => {
   pendingAccountDeletions.push({ uid, anonId: newDeletionAnonId() });
   // Removed again by the cascade below, with the user's other own entries.
   const undoAudit = appendAudit('account.deletion_requested', { actorId: uid });
-  if (!saveDbOrRespond(res)) {
+  // Durable: in Postgres mode the entry must be stored before any data goes (see saveDbDurable).
+  if (!(await saveDbDurableOrRespond(res))) {
     undoAudit();
     pendingAccountDeletions.splice(0, pendingAccountDeletions.length, ...previousEntries);
+    // Postgres mode: the queued snapshot still holds the entry; queue the undone state after it.
+    if (isPostgresDb) saveDb();
     return;
   }
 
@@ -4531,7 +4781,7 @@ const ALREADY_SUSPENDED_MESSAGE = 'This account is already suspended. Send perma
 // already gone (409 suspend_target_gone) resolves nothing. An owner who is already suspended is not
 // suspended again unless permanent: true escalates it; the report is still resolved, and the answer's
 // suspension says applied: false with code already_suspended.
-app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, async (req, res) => {
   const reportId = parsePositiveInteger(req.params.id);
   const report = reports.find((r) => r.id === reportId);
   if (!report) return res.status(404).json({ error: 'Report not found' });
@@ -4590,7 +4840,8 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
       actorId: req.userId, targetId: userToSuspend.id, meta: { permanent: getActiveSuspension(userToSuspend)?.permanent === true },
     }));
   }
-  if (!saveDbOrRespond(res)) {
+  // A suspension is saved durably like the direct route (Postgres mode); the rest as before.
+  if (!(undoSuspension ? await saveDbDurableOrRespond(res) : saveDbOrRespond(res))) {
     for (const undo of undoAudits.reverse()) undo();
     undoSuspension?.();
     undoRemoval?.();
@@ -4604,6 +4855,8 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
       delete item.resolvedBy;
     });
     markReportsChanged();
+    // Postgres mode: the queued snapshot still holds the resolve; queue the undone state after it.
+    if (isPostgresDb && undoSuspension) saveDb();
     return;
   }
   res.json({
@@ -4622,7 +4875,7 @@ app.post('/api/admin/reports/:id/resolve', requireAuth, requireAdmin, (req, res)
 // later counted one is permanent. One in force answers 409 already_suspended with the current state,
 // unless permanent: true escalates a temporary one, so a double tap changes nothing.
 // No growth check: the entry is small, and moderation must keep working once storage is full.
-app.post('/api/admin/users/:id/suspend', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/admin/users/:id/suspend', requireAuth, requireAdmin, async (req, res) => {
   const { reason, permanent } = req.body || {};
   if (reason !== undefined && reason !== null && typeof reason !== 'string') return res.status(400).json({ error: 'Invalid reason' });
   if (permanent !== undefined && typeof permanent !== 'boolean') return res.status(400).json({ error: 'Invalid permanent' });
@@ -4637,9 +4890,11 @@ app.post('/api/admin/users/:id/suspend', requireAuth, requireAdmin, (req, res) =
   const undoAudit = appendAudit('admin.user_suspended', {
     actorId: req.userId, targetId: user.id, meta: { permanent: getActiveSuspension(user)?.permanent === true },
   });
-  if (!saveDbOrRespond(res)) {
+  // Durable (Postgres mode: stored before the admin is told it worked); undone and re-queued otherwise.
+  if (!(await saveDbDurableOrRespond(res))) {
     undoAudit();
     undoSuspension();
+    if (isPostgresDb) saveDb();
     return;
   }
   res.json(toAdminSuspensionResult(user));
@@ -4648,7 +4903,7 @@ app.post('/api/admin/users/:id/suspend', requireAuth, requireAdmin, (req, res) =
 // Ends a suspension in force now. The entry stays in the history, so a later suspension is still permanent,
 // unless { void: true } marks it voided: a suspension made by mistake, kept for the record, that does not
 // count towards a permanent repeat. Nothing in force: nothing changes.
-app.post('/api/admin/users/:id/unsuspend', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/admin/users/:id/unsuspend', requireAuth, requireAdmin, async (req, res) => {
   const { void: isVoid } = req.body || {};
   if (isVoid !== undefined && typeof isVoid !== 'boolean') return res.status(400).json({ error: 'Invalid void' });
   const user = isLiveAccount(req.params.id) ? userIndex.get(req.params.id) : undefined;
@@ -4661,9 +4916,10 @@ app.post('/api/admin/users/:id/unsuspend', requireAuth, requireAdmin, (req, res)
     entry === active ? { ...entry, endedAt, endedBy: req.userId, ...(isVoid === true && { voided: true }) } : entry
   ));
   const undoAudit = appendAudit('admin.user_unsuspended', { actorId: req.userId, targetId: user.id, meta: { void: isVoid === true } });
-  if (!saveDbOrRespond(res)) {
+  if (!(await saveDbDurableOrRespond(res))) {
     undoAudit();
     user.suspensions = previous;
+    if (isPostgresDb) saveDb();
     return;
   }
   res.json(toAdminSuspensionResult(user));
@@ -5495,23 +5751,61 @@ const purgeExpiredAuditEntries = () => {
   if (removed > 0 && saveDb()) console.log(`[audit] Removed ${removed} entr${removed === 1 ? 'y' : 'ies'} past the ${AUDIT_RETENTION_DAYS}-day retention.`);
 };
 
+// Postgres mode: every write prunes the history table too, but an idle server writes nothing, so this
+// also runs at start and with the purge timer (at least every 24 hours): snapshots older than 28 days go,
+// so none outlives the 30 days the app promises (the row limit is left to the writes). Never throws.
+const purgePostgresHistoryPastCeiling = () => {
+  if (!postgresStore) return;
+  postgresStore.pruneHistory({ byCount: false }).then(
+    (removed) => {
+      if (removed > 0) console.log(`[db] Removed ${removed} Postgres history snapshot(s) older than ${Math.round(DEFAULT_HISTORY_MAX_AGE_MS / MS_PER_DAY)} days.`);
+    },
+    (err) => console.warn(`[db] Could not prune the Postgres history (${describePgError(err)}); retried at the next run.`),
+  );
+};
+
 // Every 24 hours, or sooner when a backup expires sooner, so none outlives the period by up to a day.
 // unref: this timer alone never keeps the process alive.
 function scheduleDbBackupPurge(nextExpiry) {
   const wait = Math.max(DB_BACKUP_PURGE_MIN_WAIT_MS, Math.min(DB_BACKUP_PURGE_INTERVAL_MS, nextExpiry - Date.now()));
   setTimeout(() => {
     purgeExpiredAuditEntries();
+    purgePostgresHistoryPastCeiling();
     scheduleDbBackupPurge(purgeExpiredDbBackups());
   }, wait).unref();
 }
 
 // A start that lost its data purges only past the ceiling: an operator may need the rest to recover, so
 // the full look comes when the hold ends. A start that just migrated applies the ceiling and waits for the timer.
+purgePostgresHistoryPastCeiling();
 if (isDbLoaded) scheduleDbBackupPurge(didBackUpDbOnLoad ? purgeDbBackupsPastCeiling() : purgeExpiredDbBackups());
 else scheduleDbBackupPurge(Math.min(recoveryStartedAt + DB_RECOVERY_PURGE_HOLD_MS, purgeDbBackupsPastCeiling()));
 
 resumePendingAccountDeletions();
 setInterval(retryAccountDeletions, ACCOUNT_DELETION_RETRY_INTERVAL_MS).unref();
+
+// Postgres mode: on SIGTERM/SIGINT (a host stop or redeploy, Ctrl+C) the queued snapshot is written
+// before exit. Kept under Docker's default 10-second stop grace. JSON mode registers nothing: every save
+// there is already on disk when the route answers.
+const POSTGRES_SHUTDOWN_FLUSH_MS = 8000;
+if (isPostgresDb) {
+  let isShuttingDown = false;
+  const flushPostgresAndExit = async (signal) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    const flushed = await postgresWriteQueue.flush(POSTGRES_SHUTDOWN_FLUSH_MS);
+    if (flushed) console.log(`[db] ${signal}: every change is written to Postgres, exiting.`);
+    else console.error(`[db] ${signal}: changes not yet written to Postgres could not be saved within ${POSTGRES_SHUTDOWN_FLUSH_MS} ms and are lost.`);
+    try {
+      await postgresStore.close();
+    } catch (err) {
+      console.warn(`[db] Could not close the Postgres pool (${describePgError(err)}).`);
+    }
+    process.exit(flushed ? 0 : 1);
+  };
+  process.on('SIGTERM', () => flushPostgresAndExit('SIGTERM'));
+  process.on('SIGINT', () => flushPostgresAndExit('SIGINT'));
+}
 
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
