@@ -586,3 +586,17 @@ npx expo start
 git diff package.json
 ```
 `git diff package.json` should show no changes.
+
+## Launch run (branch auto/launch-2026-11-17), Part A – 2026-11-22
+Done and committed (all on the launch branch):
+- Quality gates: i18n en/ro parity test (85eb14d), icon-only buttons need an accessibilityLabel (4a8c5bc), dependency plan `docs/DEPENDENCY_PLAN.md` (64dfb3f; app 6 high, all build-time or unused Firestore; server 0 high).
+- Mobile release config (32b3152): v1.0.0, build 1, EAS development/preview/production (AAB), en/ro iOS permission texts, no microphone/Face ID, RECORD_AUDIO and SYSTEM_ALERT_WINDOW blocked, black splash, dev-note strings out of release bundles (export checked), `docs/RELEASE_BUILD.md`.
+- Server production readiness (adafdbc): `GET /readyz`, `LOG_FORMAT=json`, `AI_PROVIDER` required in production, docker-compose (server, `ai` GPU profile, `postgres` profile), `docs/deploy/` Railway, Render, EU GPU.
+- Legal final pass (a869825): AI sections (inactive until AI ships), logs without IP, retention, compliance matrix with a launch go/no-go section, store kit v0.2, public pages rebuilt.
+- Store: screenshot plan (0397bbb), App Review notes (c179c13). Emulator screenshots postponed to after the SDK 58 upgrade (they would be retaken).
+- Security review: no BLOCKER. Fixed (4f508df and the next commit): Apple sign-in nonce, Android allowBackup off, compose pins NODE_ENV and binds loopback, review account guidance, DB encryption wording, /api limiter per user with a 1000/IP ceiling, `AI_PROVIDER=openai` refused in production without `AI_OPENAI_PRODUCTION_ACK=true`.
+- Full server suite after A2: 1350 pass, 0 fail, 8 skipped.
+
+Open from the reviews (for John or later steps): EXIF/GPS in post photos needs a device check (blocker if GPS survives); Sign in with Apple in Firebase; Google sign-in in a release build; Explore discount card (D-18); API URL and EAS env vars; new artwork; delete dev test users before launch.
+
+Part B waits: `D:\DrinkMeApp\_handoff\AI_DONE.md` does not exist yet.

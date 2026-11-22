@@ -544,7 +544,9 @@ test('readAiProviderConfig: names, legacy AI_ENABLED and the production rules', 
   assert.match(read({ AI_PROVIDER: 'gpt-canary' }, true).problems.join(), /^AI_PROVIDER \(off, local or openai\)$/);
   assert.match(read({ AI_PROVIDER: 'local' }, true).problems.join(), /local needs the AI service integration/);
   assert.deepEqual(read({ AI_PROVIDER: 'off' }, true).problems, []);
-  assert.deepEqual(read({ AI_PROVIDER: 'openai' }, true).problems, []);
+  assert.match(read({ AI_PROVIDER: 'openai' }, true).problems.join(), /AI_OPENAI_PRODUCTION_ACK=true/);
+  assert.deepEqual(read({ AI_PROVIDER: 'openai', AI_OPENAI_PRODUCTION_ACK: 'true' }, true).problems, []);
+  assert.deepEqual(read({ AI_PROVIDER: 'openai' }).problems, [], 'outside production no acknowledgement is needed');
 });
 
 test('production with AI_PROVIDER unset refuses to start, names it and creates nothing', async (t) => {
@@ -588,7 +590,7 @@ test('production starts with AI_PROVIDER=off (any case) or openai; off overrides
   assert.doesNotMatch(off.getOutput(), noKeyWarning, 'AI stays off');
   assert.match(off.getOutput(), /\[ai\] AI_ENABLED=true is ignored because AI_PROVIDER is set/);
 
-  const openai = await startOn(t, productionEnv({ AI_PROVIDER: 'openai' }));
+  const openai = await startOn(t, productionEnv({ AI_PROVIDER: 'openai', AI_OPENAI_PRODUCTION_ACK: 'true' }));
   await openai.stop();
   assert.match(openai.getOutput(), noKeyWarning, 'openai is on (and still needs its key)');
   assert.doesNotMatch(openai.getOutput(), /FATAL/);

@@ -97,5 +97,11 @@ export const readAiProviderConfig = (env, { production }) => {
     else warnings.push('AI_PROVIDER=local needs the AI service integration, which this build does not include - AI stays off.');
   }
 
+  // The privacy policy (§5a) says photos and ingredients never go to an outside AI company, so production
+  // runs OpenAI only after an explicit acknowledgement that the notice and subprocessor list were updated.
+  if (provider === 'openai' && production && env.AI_OPENAI_PRODUCTION_ACK !== 'true') {
+    problems.push('AI_PROVIDER (openai in production needs AI_OPENAI_PRODUCTION_ACK=true after the privacy policy names OpenAI; use off)');
+  }
+
   return { provider, explicit: raw !== '', aiEnabled: provider === 'openai', problems, warnings };
 };

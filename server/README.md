@@ -112,7 +112,7 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `OFFICIAL_USER_IDS` | empty | server | Comma-separated Firebase uids of the official DrinkMe account, parsed like `ADMIN_USER_IDS`. Gives `official: true` (the app's "Official" badge), the right to use the brand name in the profile name, and no auto-hide by reports. Not an admin, and must never also be in `ADMIN_USER_IDS` (it could not be suspended; startup warns). Ids are logged as counts only; startup also warns while `ALLOW_INSECURE_DEV_AUTH=true`. See Official account below |
 | `PARTNER_CONSENT_REQUIRED` | on | server | Off only for exactly `false`, an emergency rollback that makes partner lists effectively public (see below) |
 | `REQUIRE_VERIFIED_EMAIL` | off | server | On only for exactly `true`; needs Firebase. See the rollout note |
-| `AI_PROVIDER` | unset | server | `off`, `local` or `openai` (case and spaces ignored; names shared with the AI track). **Required in production**: unset or unknown stops the start. `openai` runs the AI routes with OpenAI (needs `OPENAI_API_KEY`). `local` needs the ai-service integration from the AI track, not in this build: production refuses it, elsewhere AI stays off with a warning. Use `off` until the AI merge. When set, it wins over `AI_ENABLED` (a warning if `AI_ENABLED=true` is then ignored) |
+| `AI_PROVIDER` | unset | server | `off`, `local` or `openai` (case and spaces ignored; names shared with the AI track). **Required in production**: unset or unknown stops the start. `openai` runs the AI routes with OpenAI (needs `OPENAI_API_KEY`; in production also `AI_OPENAI_PRODUCTION_ACK=true`, only after the privacy policy and subprocessor list name OpenAI). `local` needs the ai-service integration from the AI track, not in this build: production refuses it, elsewhere AI stays off with a warning. Use `off` until the AI merge. When set, it wins over `AI_ENABLED` (a warning if `AI_ENABLED=true` is then ignored) |
 | `AI_ENABLED` | off | server | Legacy. Read only when `AI_PROVIDER` is unset (outside production): exactly `true` means `openai` |
 | `LOG_FORMAT` | `text` | server | `text`: the request log as before (production `<iso time> <method> <path> <status> <size> - <ms> ms`, `dev` format outside production). `json`: one JSON object per request, `{"ts","method","path","status","ms","size"}`, in any environment. Same privacy rules either way: no IP address, user agent, referrer or query string, and the account deletion uid masked. Anything else warns and uses `text`. Production keeps `text` as the default so existing log alerts keep matching; use `json` where the host indexes JSON (Railway, Render, Grafana/Loki) |
 | `OPENAI_API_KEY` | none | server | Required for AI, not enough on its own |
@@ -141,7 +141,7 @@ Every sign-in (Firebase mode) makes one `getUser(uid)` call and reads `tokensVal
 With production rules, the server exits at startup and names the setting to fix, never its value, when any of these fail:
 - `JWT_SECRET` meets the rules above. The old hardcoded default is refused in every environment.
 - `FIREBASE_SERVICE_ACCOUNT_KEY` gives a working service account.
-- `AI_PROVIDER` is set explicitly to `off` or `openai` (`local` is refused until the AI service merge).
+- `AI_PROVIDER` is set explicitly to `off` or `openai` (`local` is refused until the AI service merge; `openai` needs `AI_OPENAI_PRODUCTION_ACK=true`).
 - `DB_FILE`, if set, is absolute.
 - `DB_DRIVER` is `json` or `postgres`, and with `postgres`, `DATABASE_URL` is a `postgres://` URL and `DATABASE_SSL` is empty, `require` or `disable` and agrees with the URL's `sslmode` (outside production these stop the server too).
 - With `postgres`, the connection is TLS with a verified certificate (`DATABASE_SSL=require`, or `sslmode=verify-full`, `verify-ca` or `require` in the URL), unless `DATABASE_SSL=disable` is set on purpose (a warning; private networks only).
@@ -154,7 +154,8 @@ Reviewed 2026-11-22 (launch run). All in memory (`express-rate-limit`), per proc
 | Route group | Window | Max | Key |
 |---|---|---|---|
 | `/media/*` (images) | 15 min | 600 | IP |
-| `/api/*`, every method | 15 min | 100 | IP |
+| `/api/*`, every method (ceiling for shared networks: bar Wi-Fi, carrier CGNAT) | 15 min | 1000 | IP |
+| `/api/*`, every method | 15 min | 100 | user (valid API token), else IP |
 | `/api/*` writes (POST, PUT, PATCH, DELETE) | 1 min | 30 | user (valid API token), else IP |
 | `GET /api/users/search` | 15 min | 60 | user |
 | `POST /api/users/:id/delete-account`, `POST /api/account/delete-unverified` | 15 min | 5 | user |

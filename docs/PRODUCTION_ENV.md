@@ -23,7 +23,7 @@ Host-independent: Railway, Render, Fly.io, a VPS with Docker, or any platform th
 | `DATABASE_URL`, `DATABASE_SSL` | Postgres mode only | `DATABASE_SSL=require` (verified TLS) unless the database is on a private network. |
 | `APP_CHECK_MODE` | `off` until the app sends tokens, then `monitor`, then `enforce` | docs/APP_CHECK_PLAN.md. A typo stops the start. |
 | `REQUIRE_VERIFIED_EMAIL` | unset until decided (docs/DEVICE_CHECKS.md section 2 passed on the server side) | Turning it on signs every app out once. |
-| `AI_PROVIDER` | `off` | **Required**: production refuses to start when it is unset or unknown. `off` until the AI service is merged and deployed (`local` is refused until then; `openai` is possible but see server/README.md, Enabling AI). |
+| `AI_PROVIDER` | `off` | **Required**: production refuses to start when it is unset or unknown. `off` until the AI service is merged and deployed (`local` is refused until then; `openai` is refused unless `AI_OPENAI_PRODUCTION_ACK=true`, which may be set only after the privacy policy names OpenAI: the current policy promises no outside AI company). |
 | `AI_ENABLED`, `OPENAI_API_KEY` | unset | Legacy; ignored once `AI_PROVIDER` is set. AI stays off for the beta. |
 | `LOG_FORMAT` | unset (`text`) or `json` | `json` writes one object per request `{ts, method, path, status, ms, size}` for hosts that index JSON; same privacy rules. Update log alerts if you switch. |
 | `CORRUPT_BACKUP_RETENTION_DAYS` | unset (21) | Never above 21: the app promises removal from backups within 30 days. |

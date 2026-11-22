@@ -408,14 +408,35 @@ app.get('/media/avatars/:userId', (req, res) => {
   sendStoredImage(req, res, `avatar:${req.params.userId}`, avatar);
 });
 
-// Global: 100 req / 15 min / IP
+// Rate-limit key: the user id from a valid API token, else the client IP (signed-out calls such as sign-in).
+const rateLimitKey = (req) => {
+  try {
+    const auth = req.headers.authorization;
+    if (auth?.startsWith('Bearer ')) {
+      const decoded = verifyApiToken(auth.slice(7));
+      return `user:${decoded.uid}`;
+    }
+  } catch {}
+  return req.ip;
+};
+
+// Ceiling per IP: 1000 req / 15 min. Many users share one IP (bar Wi-Fi, mobile carrier CGNAT), so the
+// per-IP limit is high and the real per-person limit is the one below.
+const apiIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+// Global: 100 req / 15 min per user (signed in) or per IP (signed out).
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKey,
 });
-app.use('/api', apiLimiter);
+app.use('/api', apiIpLimiter, apiLimiter);
 
 // SEC-B: per-user rate limit for mutation endpoints (30 actions / min / user)
 const mutationLimiter = rateLimit({
@@ -423,17 +444,7 @@ const mutationLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Use userId from JWT if available, else fall back to IP
-    try {
-      const auth = req.headers.authorization;
-      if (auth?.startsWith('Bearer ')) {
-        const decoded = verifyApiToken(auth.slice(7));
-        return `user:${decoded.uid}`;
-      }
-    } catch {}
-    return req.ip;
-  },
+  keyGenerator: rateLimitKey,
   skip: (req) => req.method === 'GET', // only rate-limit writes
 });
 app.use('/api', mutationLimiter);
