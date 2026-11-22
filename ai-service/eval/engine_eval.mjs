@@ -24,12 +24,13 @@ for (const c of chosen) {
   const row = { id: c.id, mode: c.mode, language: c.language, batches: [] };
   for (const newSession of [true, false]) {
     const t0 = Date.now();
+    let firstMs = null;
     try {
       const out = await generateRecipeBatch({
         provider, userId: `eval-${c.id}`, adult: true, mode: c.mode, language: c.language,
-        inputs: c.ingredients, scannedAliases: [], knownItems: known ? [known] : [], basics: BASICS[c.language], newSession,
-      });
-      row.batches.push({ ms: Date.now() - t0, count: out.recipes.length, exhausted: out.exhausted, dropped: out.dropped,
+        inputs: c.ingredients, scannedAliases: [], knownItems: known ? [known] : [], basics: BASICS[c.language], newSession, concurrency: 2,
+      }, { onRecipe: () => { if (firstMs === null) firstMs = Date.now() - t0; } });
+      row.batches.push({ ms: Date.now() - t0, firstMs, count: out.recipes.length, exhausted: out.exhausted, dropped: out.dropped,
         mocktail: out.recipes.some((r) => !r.isAlcoholic), names: out.recipes.map((r) => r.name),
         maxStandardDrinks: Math.max(0, ...out.recipes.map((r) => r.standardDrinks)) });
     } catch (err) {
@@ -54,6 +55,8 @@ const repeats = rows.reduce((n, r) => {
   return n + b.names.filter((x) => seen.has(foldText(x))).length;
 }, 0);
 const ms = ok.map((b) => b.ms).sort((x, y) => x - y);
+const firstTimes = ok.map((b) => b.firstMs).filter((v) => v !== null).sort((x, y) => x - y);
+const q = (arr, p) => arr[Math.min(arr.length - 1, Math.max(0, Math.round(arr.length * p) - 1))];
 const summary = {
   inputs: rows.length,
   batches: all.length,
@@ -62,6 +65,7 @@ const summary = {
   firstBatchMocktailWhenPossible: `${mocktailPossible.filter((r) => r.batches[0].mocktail).length}/${mocktailPossible.length}`,
   repeatsAcrossBatches: repeats,
   maxStandardDrinksSeen: Math.max(0, ...ok.map((b) => b.maxStandardDrinks)),
+  firstRecipeMs: { p50: q(firstTimes, 0.5), p90: q(firstTimes, 0.9), max: firstTimes.at(-1) },
   latencyMs: { p50: ms[Math.floor(ms.length / 2)], p95: ms[Math.min(ms.length - 1, Math.round(ms.length * 0.95) - 1)], max: ms.at(-1) },
 };
 fs.writeFileSync(path.join(dir, 'engine-eval.json'), JSON.stringify({ summary, rows }, null, 2));

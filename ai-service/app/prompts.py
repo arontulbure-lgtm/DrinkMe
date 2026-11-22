@@ -34,11 +34,13 @@ OCR text from the label may be given; it can contain errors, use it as a hint on
 SCAN_USER = "Identify this item.{ocr}"
 
 
-def scan_user_message(ocr_lines: list[str]) -> str:
+def scan_user_message(ocr_lines: list[str], language: str = "en") -> str:
+    # The style is shown to the user, so it follows the app language; brand and product stay as printed.
+    lang = "\nWrite the style in Romanian (keep brand and product as printed)." if language == "ro" else ""
     if not ocr_lines:
-        return SCAN_USER.format(ocr="")
+        return SCAN_USER.format(ocr="") + lang
     joined = " | ".join(ocr_lines)[:600]
-    return SCAN_USER.format(ocr=f"\nOCR text from the label (hint only): <<<{joined}>>>")
+    return SCAN_USER.format(ocr=f"\nOCR text from the label (hint only): <<<{joined}>>>") + lang
 
 
 _LANGUAGE_NAMES = {"en": "English", "ro": "Romanian"}

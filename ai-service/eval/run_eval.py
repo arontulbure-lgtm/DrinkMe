@@ -80,7 +80,8 @@ def score_scan(row: dict, res: dict | None, labels: str = "reviewed") -> dict:
     item = res.get("item") or {}
     status = res["status"]
     out.update(status=status, category=item.get("category"), brand=item.get("brand"), product=item.get("product"),
-               suggestBarcode=res["suggestBarcode"], ms=res["timings"]["totalMs"])
+               suggestBarcode=res["suggestBarcode"], ms=res["timings"]["totalMs"],
+               secondPassMs=res["timings"].get("secondPassMs", 0))
     if exp["status"] == "not_ingredient":
         out["correct"] = status in ("not_ingredient", "unclear")
         return out
@@ -91,7 +92,7 @@ def score_scan(row: dict, res: dict | None, labels: str = "reviewed") -> dict:
         out["correct"] = status == "water"
         out["categoryOk"] = item.get("category") == "water"
         return out
-    allowed = CATEGORY_ALIASES.get(exp["category"], {exp["category"]})
+    allowed = set(row.get("acceptCategories") or []) | CATEGORY_ALIASES.get(exp["category"], {exp["category"]})
     out["categoryOk"] = item.get("category") in allowed
     packaged = exp["category"] not in ("fresh_fruit", "herb_spice")
     predicted_text = " ".join(filter(None, [item.get("brand"), item.get("product"), item.get("style")]))
@@ -107,7 +108,8 @@ def score_scan(row: dict, res: dict | None, labels: str = "reviewed") -> dict:
 async def eval_scan(out_dir: Path, ocr: bool, limit: int | None) -> dict:
     rows = [json.loads(line) for line in (DATASET / "manifest.jsonl").read_text(encoding="utf-8").splitlines() if line]
     rows = rows[:limit] if limit else rows
-    settings = dataclasses.replace(load_settings(), ocr_enabled=ocr, max_image_side=768, ollama_timeout_s=180)
+    settings = dataclasses.replace(load_settings(), ocr_enabled=ocr, max_image_side=768, ollama_timeout_s=180,
+                                   second_pass_model=SECOND_PASS or None, second_pass_budget_s=SECOND_PASS_BUDGET)
     client = OllamaClient(settings)
     results, peak = [], vram_mb() or 0
     try:
@@ -126,10 +128,11 @@ async def eval_scan(out_dir: Path, ocr: bool, limit: int | None) -> dict:
                 print(f"  [{'ocr' if ocr else 'no-ocr'}] {i + 1}/{len(rows)}", flush=True)
     finally:
         await client.close()
-    path = out_dir / f"scan-{'ocr' if ocr else 'noocr'}.jsonl"
+    path = out_dir / f"scan-{'ocr' if ocr else 'noocr'}{'-2pass' if SECOND_PASS else ''}.jsonl"
     path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in results) + "\n", encoding="utf-8")
     summary = summarise_scan(results)
-    summary.update(ocr=ocr, model=settings.vision_model, vramPeakMb=peak)
+    summary.update(ocr=ocr, model=settings.vision_model, secondPass=SECOND_PASS or None, vramPeakMb=peak,
+                   secondPassUsed=sum(1 for r in results if r.get("secondPassMs")))
     return summary
 
 
@@ -291,7 +294,15 @@ def main() -> None:
     ap.add_argument("--ocr", choices=["on", "off", "both"], default="on")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--out")
+    ap.add_argument("--dataset", help="dataset folder with manifest.jsonl (default scan-v1)")
+    ap.add_argument("--second-pass", default="", help="Ollama tag of the second-pass model (default: none)")
+    ap.add_argument("--second-pass-budget", type=float, default=60.0, help="seconds; eval default is generous to measure the 8B itself")
     args = ap.parse_args()
+    global DATASET, SECOND_PASS, SECOND_PASS_BUDGET
+    if args.dataset:
+        DATASET = Path(args.dataset)
+    SECOND_PASS = args.second_pass
+    SECOND_PASS_BUDGET = args.second_pass_budget
     out_dir = Path(args.out) if args.out else REPORTS / f"eval-{time.strftime('%Y%m%d-%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.what == "rescore":

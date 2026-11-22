@@ -380,3 +380,20 @@ describe('alcohol-free qualifiers (engine eval 2026-11-16)', () => {
     assert.equal(out.recipe?.isAlcoholic, false);
   });
 });
+
+describe('confirmed alcohol-free items (device test 2026-11-22)', () => {
+  test('a scanned 0 % soda from a beer brand is not alcohol; an alcoholic category cannot be edited down to 0', () => {
+    const cooler = [knownItemFor({ names: ['URSUS Cooler', 'Cooler', 'URSUS'], category: 'soda_mixer', abv: 0 })];
+    const r = mocktail({ name: 'Ursus Highball', ingredients: [{ name: 'URSUS Cooler', amount: 200, unit: 'ml', abv: 0 }, { name: 'lemonade', amount: 100, unit: 'ml', abv: 0 }] });
+    assert.equal(normalizeRecipe(r, 'en').ingredients[0].abv, 5, 'the brand floor applies before the scan item is known');
+    const out = check(r, { scannedName: 'URSUS Cooler', knownItems: cooler });
+    assert.equal(out.recipe.isAlcoholic, false);
+    assert.equal(out.recipe.standardDrinks, 0);
+    const zeroBeer = [knownItemFor({ names: ['Ursus Fără Alcool'], category: 'beer', abv: 0 })];
+    const beerMocktail = mocktail({ name: 'Zero Shandy', ingredients: [{ name: 'Ursus Fără Alcool', amount: 250, unit: 'ml', abv: 0 }] });
+    assert.equal(check(beerMocktail, { scannedName: 'Ursus Fără Alcool', knownItems: zeroBeer }).recipe.isAlcoholic, false);
+    const editedGin = [knownItemFor({ names: ['Tanqueray Gin'], category: 'spirit', abv: 0 })];
+    const gin = base({ ingredients: [{ name: 'Tanqueray Gin', amount: 50, unit: 'ml', abv: 0 }, { name: 'tonic', amount: 100, unit: 'ml', abv: 0 }] });
+    assert.equal(check(gin, { scannedName: 'Tanqueray Gin', knownItems: editedGin }).recipe.isAlcoholic, true, 'gin edited to 0 % still counts its 40 % floor');
+  });
+});

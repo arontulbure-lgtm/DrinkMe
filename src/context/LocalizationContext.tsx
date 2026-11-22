@@ -557,7 +557,7 @@ const translations = {
       notice: {
         title: 'Before you use AI',
         body:
-          'DrinkMe\'s scanner and recipes use AI. Your photo goes to DrinkMe\'s own AI server, where an open-weights model that we run ourselves reads it – no outside AI company receives it. The photo is used only to answer you and is not stored, unless you turn on "Help improve the scanner" in AI settings. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
+          'DrinkMe\'s scanner and recipes use AI. Your photo goes to DrinkMe\'s own AI server, where an open-weights model that we run ourselves reads it – no outside AI company receives it. The photo is used only to answer you and is deleted right after; it is never stored. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
         accept: 'I understand',
         privacyLink: 'Read the privacy policy',
       },
@@ -630,7 +630,8 @@ const translations = {
         fromItem: 'Built around {{name}}',
         fromBar: 'Only with what is in your Smart Bar',
         generating: 'Mixing ideas…',
-        generatingHint: 'Creating 3 to 5 recipes. This can take up to a minute.',
+        generatingHint: 'Each recipe appears as soon as it is ready.',
+        progress: 'Recipe {{count}} of {{total}} ready…',
         another: 'Generate another batch',
         exhausted: 'That is every new idea for these ingredients for now.',
         youWillAlsoNeed: 'You\'ll also need',
@@ -714,6 +715,7 @@ const translations = {
         image_too_large: 'This photo is too large. Please try another one.',
         image_invalid: 'This photo could not be read. Use a JPEG or PNG photo.',
         ai_bad_request: 'The AI could not use this input. Please check it and try again.',
+        ai_daily_limit: 'You have reached today\'s AI limit. Try again tomorrow.',
         offline: 'You seem to be offline. Check your connection and try again.',
         generic: 'Something went wrong. Please try again.',
       },
@@ -1263,7 +1265,7 @@ const translations = {
       notice: {
         title: 'Înainte să folosești AI',
         body:
-          'Scanerul și rețetele DrinkMe folosesc AI. Fotografia ta ajunge la propriul server AI al DrinkMe, unde un model cu ponderi deschise, rulat de noi, o citește – nicio companie AI externă nu o primește. Fotografia este folosită doar pentru a-ți răspunde și nu este stocată, cu excepția cazului în care activezi „Ajută la îmbunătățirea scannerului” din Setări AI. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
+          'Scanerul și rețetele DrinkMe folosesc AI. Fotografia ta ajunge la propriul server AI al DrinkMe, unde un model cu ponderi deschise, rulat de noi, o citește – nicio companie AI externă nu o primește. Fotografia este folosită doar pentru a-ți răspunde și este ștearsă imediat după; nu este stocată niciodată. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
         accept: 'Am înțeles',
         privacyLink: 'Citește politica de confidențialitate',
       },
@@ -1336,7 +1338,8 @@ const translations = {
         fromItem: 'Construite în jurul: {{name}}',
         fromBar: 'Doar cu ce ai în Smart Bar',
         generating: 'Amestecăm idei…',
-        generatingHint: 'Creăm 3–5 rețete. Poate dura până la un minut.',
+        generatingHint: 'Fiecare rețetă apare imediat ce e gata.',
+        progress: 'Rețeta {{count}} din {{total}} e gata…',
         another: 'Generează alt set',
         exhausted: 'Acestea sunt toate ideile noi pentru aceste ingrediente, deocamdată.',
         youWillAlsoNeed: 'Îți mai trebuie',
@@ -1420,6 +1423,7 @@ const translations = {
         image_too_large: 'Fotografia este prea mare. Încearcă alta.',
         image_invalid: 'Fotografia nu a putut fi citită. Folosește o poză JPEG sau PNG.',
         ai_bad_request: 'AI-ul nu a putut folosi aceste date. Verifică-le și încearcă din nou.',
+        ai_daily_limit: 'Ai atins limita zilnică pentru AI. Încearcă din nou mâine.',
         offline: 'Se pare că nu ai conexiune. Verifică internetul și încearcă din nou.',
         generic: 'Ceva nu a mers. Încearcă din nou.',
       },

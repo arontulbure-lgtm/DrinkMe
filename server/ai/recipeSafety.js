@@ -3,7 +3,7 @@
 // (lower case, no accents), so they are written without diacritics.
 import { textMentionsAlcohol } from './alcoholWords.js';
 import { computeStrength } from './schemas.js';
-import { DEFAULT_ABV, foldText, isAlcoholicCategory } from './taxonomy.js';
+import { ALCOHOLIC_CATEGORIES, DEFAULT_ABV, foldText, isAlcoholicCategory } from './taxonomy.js';
 
 export const MAX_STANDARD_DRINKS = 2;
 
@@ -139,13 +139,20 @@ export const isAllowedIngredient = (name, allowedNames) => {
 export const knownItemFor = ({ names, category, abv }) => {
   if (!category) return null;
   const alcoholic = isAlcoholicCategory(category, abv ?? null);
+  const kept = names.filter(Boolean);
   return {
-    names: names.filter(Boolean),
+    names: kept,
     category,
     // The label's ABV when known, else the category default (a spirit without a readable ABV counts as 40 %).
     abv: alcoholic ? (typeof abv === 'number' ? abv : (DEFAULT_ABV[category] ?? 40)) : 0,
+    // A confirmed alcohol-free item overrides brand guesses ("Ursus" counts as beer by default): only for a
+    // non-alcoholic category, or an alcoholic one whose name says it is alcohol-free ("0.0", "fara alcool").
+    // An alcoholic category can never be talked down to 0 by an edited ABV alone.
+    zeroIsCertain: !alcoholic && (!ALCOHOLIC_CATEGORIES.has(category) || ALCOHOL_FREE_NAME.test(foldText(kept.join(' ')))),
   };
 };
+
+const ALCOHOL_FREE_NAME = /(?:\b0[.,]0\b|alcohol[\s-]*free|non[\s-]*alcoholic|fara alcool|zero alcohol|alkoholfrei|sin alcohol|sans alcool)/;
 
 const matchesKnown = (ingredientName, known) => known.names.some((name) => (
   isAllowedIngredient(ingredientName, [name]) || isAllowedIngredient(name, [ingredientName])
@@ -160,13 +167,16 @@ const applyKnownItems = (recipe, knownItems) => {
   let changed = false;
   const ingredients = recipe.ingredients.map((ingredient) => {
     const known = knownItems.find((k) => matchesKnown(ingredient.name, k));
-    if (!known || known.abv <= ingredient.abv) return ingredient;
-    changed = true;
-    return { ...ingredient, abv: known.abv };
+    if (!known) return ingredient;
+    if (known.abv > ingredient.abv || (known.zeroIsCertain && ingredient.abv > 0)) {
+      changed = true;
+      return { ...ingredient, abv: known.abv };
+    }
+    return ingredient;
   });
   if (!changed) return recipe;
   const { estimatedAbv, standardDrinks } = computeStrength(ingredients);
-  return { ...recipe, ingredients, estimatedAbv, standardDrinks, isAlcoholic: recipe.isAlcoholic || standardDrinks > 0 };
+  return { ...recipe, ingredients, estimatedAbv, standardDrinks, isAlcoholic: standardDrinks > 0 };
 };
 
 /**

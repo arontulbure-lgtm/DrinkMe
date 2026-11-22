@@ -82,15 +82,12 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | POST | `/api/notifications/read` | signed in | Marks all read |
 | GET, POST | `/api/smart-bar` | signed in | |
 | DELETE | `/api/smart-bar/:itemId` | signed in | |
-| POST | `/api/smart-bar/generate-recipes` | signed in | Legacy OpenAI route, 503 `ai_disabled` unless the provider is `openai` |
-| POST | `/api/detect-product` | signed in | Legacy OpenAI route, upload field `image` |
-| POST | `/api/generate-recipes` | signed in | Legacy OpenAI route |
 | GET | `/api/ai/status` | signed in | `?language=en\|ro`. The app's AI flag: `available`, `provider`, `noticeAccepted`, `settings` (basics, photo opt-in) |
 | POST | `/api/ai/notice` | signed in | `{ version: 1 }` accepts the AI notice; scan and recipes need it (403 `ai_notice_required`) |
 | PUT | `/api/ai/settings` | signed in | `{ basics?: string[] \| null, photoOptIn?: boolean }`; turning the opt-in off deletes kept photos |
 | POST | `/api/ai/scan` | signed in, AI notice | JSON `{ imageBase64, language }` (JPEG/PNG/WebP, 7 MB). See Local AI |
 | POST | `/api/ai/barcode` | signed in | `{ ean, language }`, Open Food Facts lookup; works with AI off |
-| POST | `/api/ai/recipes` | signed in, AI notice | `{ mode: 'scan'\|'smart_bar', item?, language, newSession? }` → `{ recipes, exhausted }` |
+| POST | `/api/ai/recipes` | signed in, AI notice | `{ mode: 'scan'\|'smart_bar', item?, language, newSession?, stream? }` → `{ recipes, exhausted }`; with `stream: true`, NDJSON lines (start / recipe / done / error), one recipe as soon as it passes validation |
 | GET, POST | `/api/recipes/saved` | signed in | Saved AI recipes (max 200); POST `{ recipe }` re-validates it |
 | DELETE | `/api/recipes/saved/:recipeId` | signed in | |
 | GET | `/api/admin/reports` | admin | `?status=open\|resolved`, see Moderation |
@@ -119,14 +116,16 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `OFFICIAL_USER_IDS` | empty | server | Comma-separated Firebase uids of the official DrinkMe account, parsed like `ADMIN_USER_IDS`. Gives `official: true` (the app's "Official" badge), the right to use the brand name in the profile name, and no auto-hide by reports. Not an admin, and must never also be in `ADMIN_USER_IDS` (it could not be suspended; startup warns). Ids are logged as counts only; startup also warns while `ALLOW_INSECURE_DEV_AUTH=true`. See Official account below |
 | `PARTNER_CONSENT_REQUIRED` | on | server | Off only for exactly `false`, an emergency rollback that makes partner lists effectively public (see below) |
 | `REQUIRE_VERIFIED_EMAIL` | off | server | On only for exactly `true`; needs Firebase. See the rollout note |
-| `AI_PROVIDER` | `off` | server | `local` (ai-service + Ollama), `openai` or `off`. Unset + `AI_ENABLED=true` means `openai` (legacy) |
-| `AI_ENABLED` | off | server | Legacy switch for the OpenAI provider, used only while `AI_PROVIDER` is unset |
-| `OPENAI_API_KEY` | none | server | Needed for `openai`, not enough on its own |
+| `AI_PROVIDER` | off | server | AI runs only with exactly `local` (ai-service + Ollama). Anything else is off; the OpenAI provider and `AI_ENABLED` were removed (D-24, 2026-11-22) |
 | `AI_SERVICE_URL` | `http://127.0.0.1:8088` | server | ai-service base URL (`AI_PROVIDER=local`) |
 | `AI_SERVICE_TOKEN` | none | server + ai-service | Shared secret sent as `X-AI-Service-Token`. Required whenever the ai-service is not on the same machine |
 | `AI_SERVICE_TIMEOUT_MS` | `60000` | server | Recipe timeout; scans use at most 20 s |
 | `AI_RATE_LIMIT_PER_HOUR` | `30` | server | Scans + recipe batches per user per hour on `/api/ai/*` |
-| `AI_PHOTO_DIR` | `server/data/ai-scans` | server | Only for users who opted in to keeping scan photos |
+| `AI_PHOTO_OPT_IN_ENABLED` | off | server | `true` offers the photo opt-in. Off at launch (D-21/D-22): no scan photo is ever kept |
+| `AI_PHOTO_DIR` | `server/data/ai-scans` | server | Only used while the opt-in is offered and a user turned it on |
+| `AI_DAILY_SCAN_LIMIT` | `20` | server | Scans per user per rolling 24 h (429 `ai_daily_limit`); outages and timeouts give the unit back |
+| `AI_DAILY_RECIPE_LIMIT` | `10` | server | Recipe batches per user per rolling 24 h |
+| `AI_RECIPE_CONCURRENCY` | `2` | server | Recipe slots generated in parallel (1-4); match Ollama `OLLAMA_NUM_PARALLEL` |
 | `AI_PHOTO_RETENTION_DAYS` | `90` | server | Kept photos are deleted after this, on opt-out and with the account |
 | `ALLOW_INSECURE_DEV_AUTH` | off | server | `true` makes sign-in trust the client uid when no Firebase key is set. Ignored in production |
 | `BACKUP_DIR` | `server/backups` | backup script | Where `npm run backup` writes. Use separate storage in production |
@@ -337,13 +336,8 @@ and models: `docs/ai/LOCAL_SETUP.md`; contracts: `.claude/skills/drinkme-ai-serv
 Every recipe passes the safety rules S1-S13 in `server/ai/recipeSafety.js` whichever provider made it. Photos are
 processed in memory and never stored or logged unless the user opted in.
 
-## Enabling the OpenAI provider (legacy)
-AI needs `AI_PROVIDER=openai` (or the legacy `AI_ENABLED=true`), `OPENAI_API_KEY`, and the client flags in `ScannerScreen.tsx` and `SmartBarScreen.tsx`. Only users who confirmed 18+ reach the AI routes, and the server still gives mocktail recipes to anyone unconfirmed as defence in depth. Do not enable AI where real users can reach it until all of these are done:
-- A global daily AI cap and a hard monthly budget in the OpenAI dashboard.
-- A privacy disclosure and data agreement for photos sent to OpenAI.
-- One real OpenAI call; only a local mock has been used so far.
-- A rebuilt scanner screen, since its AI path currently returns null.
-- `SmartBarScreen.tsx` sending `nonAlcoholicOnly`.
+## OpenAI (removed)
+The OpenAI provider and its routes (`/api/detect-product`, `/api/generate-recipes`, `/api/smart-bar/generate-recipes`) were removed on 2026-11-22 (decision D-24: never an outside AI company for AI flows). `AI_ENABLED` and `OPENAI_API_KEY` have no effect.
 
 ## Privacy notice
 `PRIVACY_NOTICE_VERSION` (currently 2) in `server.js` and `src/screens/OnboardingScreen.tsx` must match. The notice text is under `onboarding.privacy*` in `src/context/LocalizationContext.tsx` and describes what this server lets others read, moderation and the 30-day backup rule. Change the text whenever those rules change, and raise both version numbers when it changes in substance. Deploy the server before releasing the client.
@@ -370,4 +364,4 @@ Deploy variables:
 - Storage: Mount a volume writable by uid 1000 at `/app/server/data`, or set an absolute `DB_FILE` in a directory of its own. Without a volume, data is lost on redeploy.
 - Backups: schedule `npm run backup` daily in the same image (for example `docker run ... drinkme-api npm run backup` with the same volume and `-e BACKUP_DIR` pointing at separate storage), and keep host or volume snapshots 30 days or less.
 
-Leave `PARTNER_CONSENT_REQUIRED` unset and `REQUIRE_VERIFIED_EMAIL` off unless you have read the notes above. Never pass secrets with `--build-arg`. Do not set `DEBUG=true` in production, because the OpenAI SDK may log request bodies.
+Leave `PARTNER_CONSENT_REQUIRED` unset and `REQUIRE_VERIFIED_EMAIL` off unless you have read the notes above. Never pass secrets with `--build-arg`. Do not set `DEBUG=true` in production.

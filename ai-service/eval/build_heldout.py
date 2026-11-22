@@ -60,7 +60,9 @@ BRANDS = [  # OFF brand tags of drinks sold in Romania
     "izvorul-minunilor", "perla-harghitei", "prigat", "cappy", "tymbark", "santal", "hell", "burn", "zuzu",
     "napolact", "olympus", "pitoresti", "carpathian", "stalinskaya", "unirea", "tuica-zetea", "zetea",
 ]
-RO_CATEGORIES = ["beers", "wines", "mineral-waters", "juices", "spirits", "sodas", "energy-drinks", "syrups", "sparkling-wines"]
+RO_CATEGORIES = ["beers", "lagers", "wines", "red-wines", "white-wines", "rose-wines", "mineral-waters", "juices", "nectars",
+                 "spirits", "fruit-brandies", "liqueurs", "sodas", "colas", "iced-teas", "energy-drinks", "syrups",
+                 "sparkling-wines", "milks", "ciders", "tonic-water"]
 NEGATIVES = [(OFF, "en:biscuits"), (OFF, "en:chips-and-fries"), (OFF, "en:chocolates"), (OFF, "en:canned-vegetables"),
              (OPF, "en:medicines"), (OPF, "en:dishwashing-liquids"), (OBF, "en:shower-gels"), (OBF, "en:deodorants")]
 # (query, status, category, brand)
@@ -188,7 +190,7 @@ def main() -> None:
             off_rows(client, OFF, {"brands_tags": brand, "countries_tags_en": "romania"}, None, seen, 4, rows, f"brand:{brand}")
         for cat in RO_CATEGORIES:
             off_rows(client, OFF, {"categories_tags_en": cat, "countries_tags_en": "romania", "sort_by": "unique_scans_n"},
-                     None, seen, 4, rows, f"ro:{cat}")
+                     None, seen, 6, rows, f"ro:{cat}")
         for host, tag in NEGATIVES:
             params = {"categories_tags_en": tag.removeprefix("en:")}
             if host == OFF:

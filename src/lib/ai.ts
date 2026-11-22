@@ -3,7 +3,7 @@
 // GET /api/ai/status → available. Contracts: .claude/skills/drinkme-ai-service/SKILL.md.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { apiFetch, ApiError } from './api';
+import { API_BASE_URL, apiFetch, ApiError, getApiToken } from './api';
 import { useAuth } from '../context/AuthContext';
 import { AI_CATEGORIES, type AiRecipe, type AiRecipeBatch, type AiScanItem, type AiScanResult, type AiSettings, type AiStatus } from '../types/api';
 
@@ -99,6 +99,62 @@ export const generateRecipes = (request: RecipeRequest, language: string, newSes
     method: 'POST', body: JSON.stringify({ ...request, language: appLanguage(language), newSession }), signal,
   })).then((batch) => ({ ...batch, recipes: batch.recipes.map(normalizeRecipe) }));
 
+export type RecipeStreamHandle = { cancel: () => void; done: Promise<{ exhausted: boolean; count: number }> };
+
+/**
+ * Streams one batch: onRecipe is called for each recipe as soon as the server has validated it (NDJSON over XHR –
+ * React Native's fetch cannot read a body incrementally). done resolves with { exhausted, count } or rejects with
+ * an ApiError carrying the server's code (ai_daily_limit, ai_unavailable, ...).
+ */
+export function streamRecipes(
+  request: RecipeRequest, language: string, newSession: boolean, onRecipe: (recipe: AiRecipe) => void,
+): RecipeStreamHandle {
+  const xhr = new XMLHttpRequest();
+  let consumed = 0;
+  let finished = false;
+  let cancelled = false;
+  const done = new Promise<{ exhausted: boolean; count: number }>((resolve, reject) => {
+    const fail = (error: unknown) => { if (!finished) { finished = true; reject(error); } };
+    const handleLines = () => {
+      const text = xhr.responseText ?? '';
+      let newline = text.indexOf('\n', consumed);
+      while (newline !== -1) {
+        const line = text.slice(consumed, newline).trim();
+        consumed = newline + 1;
+        newline = text.indexOf('\n', consumed);
+        if (!line) continue;
+        let event: { type?: string; recipe?: AiRecipe; exhausted?: boolean; count?: number; code?: string; error?: string };
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event.type === 'recipe' && event.recipe) onRecipe(normalizeRecipe(event.recipe));
+        else if (event.type === 'done') { finished = true; resolve({ exhausted: event.exhausted === true, count: event.count ?? 0 }); }
+        else if (event.type === 'error') fail(new ApiError(event.error ?? 'AI error', 503, event.code));
+      }
+    };
+    xhr.open('POST', `${API_BASE_URL}/api/ai/recipes`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('Accept', 'application/x-ndjson');
+    const token = getApiToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.timeout = RECIPES_TIMEOUT_MS;
+    // onprogress makes React Native deliver the body incrementally.
+    xhr.onprogress = handleLines;
+    xhr.onload = () => {
+      if (xhr.status !== 200) {
+        let code: string | undefined;
+        try { code = JSON.parse(xhr.responseText)?.code; } catch { /* not JSON */ }
+        fail(new ApiError(xhr.responseText || 'AI error', xhr.status, code));
+        return;
+      }
+      handleLines();
+      if (!finished) fail(new ApiError('stream ended early', 502, 'ai_invalid_output'));
+    };
+    xhr.onerror = () => fail(cancelled ? new ApiError('cancelled', 0, 'cancelled') : new TypeError('Network request failed'));
+    xhr.ontimeout = () => fail(new ApiError('timeout', 504, 'ai_timeout'));
+    xhr.send(JSON.stringify({ ...request, language: appLanguage(language), newSession, stream: true }));
+  });
+  return { cancel: () => { cancelled = true; xhr.abort(); }, done };
+}
+
 export function useSavedRecipes(enabled = true) {
   const { serverUserId } = useAuth();
   return useQuery<AiRecipe[]>({
@@ -141,7 +197,7 @@ export function useToggleSavedRecipe() {
 }
 
 const KNOWN_AI_ERRORS = new Set([
-  'ai_bad_request', 'ai_disabled', 'ai_unavailable', 'ai_timeout', 'ai_invalid_output', 'ai_rate_limit', 'ai_busy', 'ai_notice_required',
+  'ai_bad_request', 'ai_daily_limit', 'ai_disabled', 'ai_unavailable', 'ai_timeout', 'ai_invalid_output', 'ai_rate_limit', 'ai_busy', 'ai_notice_required',
   'barcode_unavailable', 'barcode_not_found', 'barcode_invalid', 'smart_bar_empty', 'water_no_recipes', 'recipe_limit',
   'recipe_invalid',
 ]);

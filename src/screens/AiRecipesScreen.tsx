@@ -6,15 +6,17 @@ import { Ionicons } from '@expo/vector-icons';
 import AiRecipeCard from '../components/AiRecipeCard';
 import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { generateRecipes, getAiErrorKey, itemDisplayName, useSavedRecipes, useToggleSavedRecipe } from '../lib/ai';
+import { getAiErrorKey, itemDisplayName, streamRecipes, useSavedRecipes, useToggleSavedRecipe, type RecipeStreamHandle } from '../lib/ai';
 import type { RootStackScreenProps } from '../navigation/types';
 import type { AiRecipe } from '../types/api';
 
 /**
  * AI recipe batches, either built around a scanned item (Smart Bar not used) or from the whole Smart Bar
  * (only its items + the user's basics). "Generate another batch" keeps the same input; the server remembers what
- * this session already showed and never repeats it.
+ * this session already showed and never repeats it. Recipes arrive one by one (streamed) as each passes the
+ * server's checks, so the first one is on screen long before the batch is complete.
  */
+const EXPECTED_PER_BATCH = 4;
 export default function AiRecipesScreen({ navigation, route }: RootStackScreenProps<'AiRecipes'>) {
   const request = route.params;
   const { t, locale } = useLocalization();
@@ -24,6 +26,9 @@ export default function AiRecipesScreen({ navigation, route }: RootStackScreenPr
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [exhausted, setExhausted] = useState(false);
   const isMounted = useRef(true);
+  const streamRef = useRef<RecipeStreamHandle | null>(null);
+  // Recipes of the batch being generated right now.
+  const [currentCount, setCurrentCount] = useState(0);
   const savedQuery = useSavedRecipes();
   const toggleSaved = useToggleSavedRecipe();
   const savedIds = useMemo(() => new Set((savedQuery.data ?? []).map((r) => r.id)), [savedQuery.data]);
@@ -31,22 +36,42 @@ export default function AiRecipesScreen({ navigation, route }: RootStackScreenPr
   const load = useCallback(async (newSession: boolean) => {
     setIsLoading(true);
     setErrorKey(null);
-    try {
-      const batch = await generateRecipes(request, locale, newSession);
+    setCurrentCount(0);
+    // A new batch starts as an empty group that fills while recipes arrive.
+    setBatches((previous) => (newSession ? [[]] : [...previous, []]));
+    const handle = streamRecipes(request, locale, newSession, (recipe) => {
       if (!isMounted.current) return;
-      if (batch.exhausted || batch.recipes.length === 0) setExhausted(true);
-      else setBatches((previous) => (newSession ? [batch.recipes] : [...previous, batch.recipes]));
+      setCurrentCount((n) => n + 1);
+      setBatches((previous) => {
+        const next = [...previous];
+        next[next.length - 1] = [...next[next.length - 1], recipe];
+        return next;
+      });
+    });
+    streamRef.current = handle;
+    try {
+      const result = await handle.done;
+      if (!isMounted.current) return;
+      if (result.exhausted || result.count === 0) setExhausted(true);
     } catch (error) {
-      if (isMounted.current) setErrorKey(getAiErrorKey(error));
+      if (isMounted.current && (error as { code?: string })?.code !== 'cancelled') setErrorKey(getAiErrorKey(error));
     } finally {
-      if (isMounted.current) setIsLoading(false);
+      if (isMounted.current) {
+        setIsLoading(false);
+        // Drop the group again if nothing arrived (error or exhausted).
+        setBatches((previous) => previous.filter((batch, i) => batch.length > 0 || i < previous.length - 1));
+      }
+      streamRef.current = null;
     }
   }, [locale, request]);
 
   useEffect(() => {
     isMounted.current = true;
     load(true);
-    return () => { isMounted.current = false; };
+    return () => {
+      isMounted.current = false;
+      streamRef.current?.cancel();
+    };
     // Only once per opening: "another batch" calls load(false) itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -97,8 +122,18 @@ export default function AiRecipesScreen({ navigation, route }: RootStackScreenPr
 
         {isLoading && (
           <View style={styles.loading} accessibilityLiveRegion="polite">
-            <ActivityIndicator size="large" color="#8B5FBF" />
-            <Text style={styles.loadingTitle}>{t('ai.recipes.generating')}</Text>
+            {Array.from({ length: Math.max(0, EXPECTED_PER_BATCH - currentCount) }, (_, i) => (
+              <View key={i} style={styles.placeholder} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <View style={styles.placeholderLine} />
+                <View style={[styles.placeholderLine, { width: '60%' }]} />
+              </View>
+            ))}
+            <View style={styles.progressRow}>
+              <ActivityIndicator color="#8B5FBF" />
+              <Text style={styles.loadingTitle}>
+                {currentCount === 0 ? t('ai.recipes.generating') : t('ai.recipes.progress', { count: String(currentCount), total: String(EXPECTED_PER_BATCH) })}
+              </Text>
+            </View>
             <Text style={styles.muted}>{t('ai.recipes.generatingHint')}</Text>
           </View>
         )}
@@ -139,7 +174,10 @@ const styles = StyleSheet.create({
   muted: { color: '#9CA3AF', fontSize: 13, textAlign: 'center' },
   batch: { gap: 12 },
   divider: { height: 1, backgroundColor: '#1F2937', marginVertical: 4 },
-  loading: { alignItems: 'center', gap: 8, paddingVertical: 32 },
+  loading: { alignItems: 'stretch', gap: 10, paddingVertical: 8 },
+  placeholder: { backgroundColor: '#1F2937', borderRadius: 14, padding: 14, gap: 8, opacity: 0.6 },
+  placeholderLine: { height: 12, borderRadius: 6, backgroundColor: '#374151', width: '85%' },
+  progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 6 },
   loadingTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
   errorBox: { backgroundColor: '#EF444422', borderRadius: 12, padding: 14, gap: 10, alignItems: 'center' },
   errorText: { color: '#FFFFFF', fontSize: 15, textAlign: 'center' },

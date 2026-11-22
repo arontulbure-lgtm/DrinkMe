@@ -33,8 +33,10 @@ const P = {
 };
 export const VISION_MODEL = process.env.DRINKME_VISION_MODEL || 'qwen3-vl:4b-instruct';
 export const TEXT_MODEL = process.env.DRINKME_TEXT_MODEL || VISION_MODEL;
-// Re-reads labels the first model was unsure about ('none' disables). Does not fit in 8 GB next to the 4B: Ollama swaps.
-export const SECOND_PASS_MODEL = process.env.DRINKME_SECOND_PASS_MODEL === 'none' ? '' : (process.env.DRINKME_SECOND_PASS_MODEL || 'qwen3-vl:8b-instruct');
+// Optional second pass with a larger model when the first is unsure. OFF by default: on an 8 GB GPU the 8B does not fit
+// next to the 4B, Ollama swaps them and scans time out (device test 2026-11-22, EVAL_REPORT). Turn it on only on a
+// GPU with >= 16 GB: DRINKME_SECOND_PASS_MODEL=qwen3-vl:8b-instruct.
+export const SECOND_PASS_MODEL = !process.env.DRINKME_SECOND_PASS_MODEL || process.env.DRINKME_SECOND_PASS_MODEL === 'none' ? '' : process.env.DRINKME_SECOND_PASS_MODEL;
 const OLLAMA_HOST = process.env.OLLAMA_HOST || '127.0.0.1:11434';
 const OLLAMA_URL = `http://${OLLAMA_HOST.replace(/^https?:\/\//, '')}`;
 export const AI_SERVICE_PORT = Number(process.env.AI_SERVICE_PORT || 8088);
@@ -135,7 +137,7 @@ async function setup() {
   log('Python packages installed.');
 
   await ensureOllama();
-  for (const model of new Set([VISION_MODEL, TEXT_MODEL, SECOND_PASS_MODEL].filter(Boolean))) {
+  for (const model of new Set([VISION_MODEL, TEXT_MODEL, SECOND_PASS_MODEL || 'qwen3-vl:8b-instruct'].filter(Boolean))) {
     log(`Pulling ${model} (stored in ${P.models}) ...`);
     run(P.ollamaExe, ['pull', model]);
   }

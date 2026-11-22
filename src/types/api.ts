@@ -318,6 +318,8 @@ export interface AiSettings {
   basics: string[];
   basicsCustomized: boolean;
   photoOptIn: boolean;
+  // False at launch (decision D-22): the switch is hidden.
+  photoOptInAvailable?: boolean;
 }
 
 export interface AiStatus {
@@ -332,6 +334,8 @@ export interface AiStatus {
   // Where photos and ingredients are processed: always DrinkMe's own AI server (D-24).
   processing?: 'drinkme';
   settings: AiSettings;
+  dailyLeft?: { scans: number; recipeBatches: number };
+  dailyLimits?: { scans: number; recipeBatches: number };
 }
 
 export interface AiRecipeIngredient {

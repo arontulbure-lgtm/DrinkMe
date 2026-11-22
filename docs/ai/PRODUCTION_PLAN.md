@@ -86,7 +86,7 @@ Express server env: `AI_PROVIDER=local`, `AI_SERVICE_URL=http://10.0.0.2:8088`, 
   The opt-in photo store lives on the Express host, not the GPU host.
 - **Hardening:** non-root containers, read-only filesystem, automatic security updates, SSH keys only, pinned
   image versions, `nvidia-smi` + disk alerts.
-- **Abuse:** per-user limits stay on the Express server (30 AI requests/hour, one at a time per user); add a
+- **Abuse:** per-user limits on the Express server: 30 AI requests/hour, one at a time per user, and daily limits (20 scans, 10 recipe batches; `AI_DAILY_SCAN_LIMIT`, `AI_DAILY_RECIPE_LIMIT`); add a
   global daily cap there before a public launch.
 - **Processor agreement:** the GPU host becomes a processor (photos in memory) → DPA with the provider, entry in
   `docs/legal/internal/subprocessors.md` (legal-compliance).
@@ -119,3 +119,42 @@ Express server env: `AI_PROVIDER=local`, `AI_SERVICE_URL=http://10.0.0.2:8088`, 
 - Scaleway L4 (aggregator): https://computeprices.com/providers/scaleway/gpus/l4
 - OVHcloud L4 (aggregator): https://computeprices.com/providers/ovhcloud/gpus/l4 · official table: https://www.ovhcloud.com/en-gb/public-cloud/prices/
 - RunPod pricing: https://www.runpod.io/pricing-page · L4 (aggregator): https://computeprices.com/providers/runpod/gpus/l4
+
+## 8. Scale-to-zero option (serverless GPU, EU only – decisions D-23/D-24, added 2026-11-22)
+Instead of a GPU that runs 24/7, a serverless GPU runs the ai-service + Ollama only while requests come in and is
+billed per second; with no traffic it scales to zero and costs nothing.
+
+| Provider | EU regions | GPU | Price (checked 2026-11-22) | Scale to zero | Notes |
+|---|---|---|---|---|---|
+| **Koyeb** (FR company) | Paris, Frankfurt | L4 24 GB | ~$0.70/h, billed per second (~$0.000194/s) | yes, opt-in; min instances 1 keeps it warm | EU company (joining Mistral AI – watch for changes); VM wake-up 1–5 s per Koyeb, GPU cold start not published |
+| **RunPod Serverless** (US company) | EU-RO-1 (Romania), EU-NL-1, EU-SE-1, EUR-NO-1 | 16 GB / 24 GB classes (A4000/RTX 4000 · L4/A5000) | flex ~$0.00016/s (16 GB) – $0.00019/s (24 GB), i.e. ~$0.58–0.68/h; cold start is billed | yes (flex workers), 5 s idle timeout by default | FlashBoot advertises sub-200 ms container start; needs a DPA + SCCs (US parent) |
+| Google Cloud Run GPU (reference) | europe-west1/-west4 | L4 | ~$0.67–1.05/h, per second | yes | US parent; more setup |
+Prices come from provider pages and aggregators with inconsistent dates – confirm in the console before ordering.
+
+**Cold starts.** Two parts: the container (seconds) and loading the model into VRAM. Measured on the dev PC: 4B
+first load from disk ~59 s, warm reload 10–12 s; the 8B second pass adds a model swap. On serverless, put the model
+in the image or a network volume in the same region and expect ~10–30 s for the first request after idle. The app
+already shows "Mixing ideas…" and streams recipes, but a 30 s first scan feels broken, so:
+- keep **one warm worker** in the evening peak (e.g. 18:00–24:00 Romanian time) and scale to zero the rest of the day;
+- the server marks AI as available only when `/v1/health` answers, and a scan that hits a cold worker gets the
+  normal timeout (20 s) – raise `AI_SERVICE_TIMEOUT_MS` / the scan cap to ~40 s for serverless.
+- On serverless, turn the 8B second pass off (`DRINKME_SECOND_PASS_MODEL=none`) unless the worker has ≥ 16 GB:
+  swapping 4B ↔ 8B costs more than the second pass gains (see EVAL_REPORT).
+
+**Cost with the daily limits** (server-side, per user, rolling 24 h: `AI_DAILY_SCAN_LIMIT=20`,
+`AI_DAILY_RECIPE_LIMIT=10`). GPU-busy time per call measured: scan ~3 s, recipe batch ~20–25 s.
+- Worst case per user per day: 20 × 3 s + 10 × 25 s ≈ 310 s ≈ 5 GPU-minutes ≈ **$0.06/day** at $0.70/h.
+- Typical (6 scans + 4 batches a month): ~1.6 GPU-minutes per AI user per month.
+
+| Monthly active users | AI users (40 %) | Busy GPU-hours / month | Serverless (≈ $0.70/h busy + warm evenings) | Dedicated (§3) |
+|---|---|---|---|---|
+| 100 | 40 | ~1 h | **~$1 busy + ~$130 if warm 6 h/day**, ~$5–10 with cold starts only | €0 (laptop beta) / €235 |
+| 1,000 | 400 | ~11 h | ~$8 busy + warm evenings ~$130 → **~$140** | ~€235 |
+| 10,000 | 4,000 | ~110 h | ~$77 busy + 2 warm workers in the evening ~$260 → **~$340** | ~€470 (2 × GEX44) |
+Serverless wins clearly below ~1,000 MAU and stays competitive at 10,000 if traffic is evening-heavy; dedicated wins
+on latency (no cold starts) and predictability. Recommendation: **start on Koyeb (EU company, Paris/Frankfurt) with
+scale-to-zero + a warm evening window**, move to a dedicated EU GPU when busy hours pass ~300/month.
+
+Sources (2026-11-22): Koyeb pricing https://koyeb.com/pricing · Koyeb L4 (aggregator) https://computeprices.com/providers/koyeb/gpus/l4 ·
+Koyeb scale-to-zero https://koyeb.com/blog/scale-to-zero-optimize-gpu-and-cpu-workloads · RunPod serverless https://runpod.io/product/serverless ·
+RunPod serverless pricing docs https://docs.runpod.io/serverless/pricing · Cloud Run GPUs https://cloud.google.com/blog/products/serverless/cloud-run-gpus-are-now-generally-available

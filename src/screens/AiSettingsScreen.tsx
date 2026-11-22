@@ -105,6 +105,7 @@ export default function AiSettingsScreen({ navigation }: RootStackScreenProps<'A
             </TouchableOpacity>
           )}
 
+          {status.data?.settings.photoOptInAvailable === true && (
           <View style={styles.optInCard}>
             <View style={styles.optInRow}>
               <Text style={styles.optInTitle}>{t('ai.settings.photoTitle')}</Text>
@@ -119,6 +120,7 @@ export default function AiSettingsScreen({ navigation }: RootStackScreenProps<'A
             </View>
             <Text style={styles.muted}>{t('ai.settings.photoBody')}</Text>
           </View>
+          )}
 
           <AiNoticeCard />
         </ScrollView>

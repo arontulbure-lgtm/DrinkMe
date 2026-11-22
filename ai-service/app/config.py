@@ -36,6 +36,7 @@ class Settings:
     max_image_side: int
     second_pass_model: str | None = None
     second_pass_keep_alive: str = "2m"
+    second_pass_budget_s: float = 12.0
 
     @property
     def is_loopback(self) -> bool:
@@ -62,4 +63,6 @@ def load_settings() -> Settings:
         # A larger model re-reads labels the first model was unsure about. Empty: no second pass.
         second_pass_model=os.environ.get("DRINKME_SECOND_PASS_MODEL") or None,
         second_pass_keep_alive=os.environ.get("DRINKME_SECOND_PASS_KEEP_ALIVE", "2m"),
+        # The server gives a scan 20 s in all; the second pass must leave room for the first and the answer.
+        second_pass_budget_s=_float("DRINKME_SECOND_PASS_BUDGET_S", 12.0),
     )

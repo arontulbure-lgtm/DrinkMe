@@ -76,7 +76,8 @@ def build_scan_result(raw: dict[str, Any], ocr_lines: list[str], settings: Setti
         category=category,
         brand=_clean(parsed.brand, 80),
         product=_clean(parsed.product, 120),
-        style=_clean(parsed.style, 80),
+        # A bare category code ("soda_mixer") is not a style a user should see.
+        style=None if (parsed.style or "").strip().lower() in CATEGORIES else _clean(parsed.style, 80),
         abv=abv,
         volumeMl=volume,
         isAlcoholic=is_alcoholic(category, abv),
@@ -106,14 +107,14 @@ async def run_scan(req: ScanRequest, client: OllamaClient, settings: Settings) -
     del img
     t1 = time.perf_counter()
     raw = await client.chat_json(
-        settings.vision_model, prompts.SCAN_SYSTEM, prompts.scan_user_message(ocr_lines), _SCAN_SCHEMA,
+        settings.vision_model, prompts.SCAN_SYSTEM, prompts.scan_user_message(ocr_lines, req.language), _SCAN_SCHEMA,
         images=[model_b64], temperature=0.1, num_predict=256,
     )
     vision_ms = int((time.perf_counter() - t1) * 1000)
     timings = ScanTimings(ocrMs=ocr_ms, visionMs=vision_ms, totalMs=int((time.perf_counter() - started) * 1000))
     result = build_scan_result(raw, ocr_lines, settings, settings.vision_model, timings)
     if settings.second_pass_model and result.status in ("low_confidence", "unclear"):
-        result = await _second_pass(result, model_b64, ocr_lines, client, settings, started)
+        result = await _second_pass(result, model_b64, ocr_lines, client, settings, started, req.language)
     return result
 
 
@@ -124,19 +125,21 @@ def _rank(result: ScanResult) -> tuple[int, float]:
 
 
 async def _second_pass(first: ScanResult, model_b64: str, ocr_lines: list[str], client: OllamaClient,
-                       settings: Settings, started: float) -> ScanResult:
+                       settings: Settings, started: float, language: str = "en") -> ScanResult:
     """Re-reads the label with the larger model; keeps whichever answer is better. A failure keeps the first."""
     t0 = time.perf_counter()
     try:
-        raw = await client.chat_json(
-            settings.second_pass_model, prompts.SCAN_SYSTEM, prompts.scan_user_message(ocr_lines), _SCAN_SCHEMA,
+        # Bounded: on an 8 GB GPU the larger model may first have to be loaded (a swap of ~20 s). Past the budget the
+        # first answer is returned, so the app offers the barcode instead of timing out.
+        raw = await asyncio.wait_for(client.chat_json(
+            settings.second_pass_model, prompts.SCAN_SYSTEM, prompts.scan_user_message(ocr_lines, language), _SCAN_SCHEMA,
             images=[model_b64], temperature=0.1, num_predict=256, keep_alive=settings.second_pass_keep_alive,
-        )
+        ), timeout=settings.second_pass_budget_s)
         second_ms = int((time.perf_counter() - t0) * 1000)
         timings = first.timings.model_copy(update={"secondPassMs": second_ms, "totalMs": int((time.perf_counter() - started) * 1000)})
         second = build_scan_result(raw, ocr_lines, settings, f"{settings.vision_model}+{settings.second_pass_model}", timings)
-    except (ModelInvalidOutput, ModelTimeout, ModelUnavailable) as exc:
-        log.warning("second pass failed: %s", type(exc).__name__)
+    except (ModelInvalidOutput, ModelTimeout, ModelUnavailable, asyncio.TimeoutError) as exc:
+        log.warning("second pass skipped: %s", type(exc).__name__)
         return first.model_copy(update={"timings": first.timings.model_copy(update={
             "secondPassMs": int((time.perf_counter() - t0) * 1000), "totalMs": int((time.perf_counter() - started) * 1000)})})
     if _rank(second) > _rank(first):
