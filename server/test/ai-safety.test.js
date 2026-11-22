@@ -216,12 +216,12 @@ describe('barcode helpers', () => {
 });
 
 describe('provider selection', () => {
-  test('AI_PROVIDER wins; legacy AI_ENABLED means openai; default off', () => {
+  test('only an explicit AI_PROVIDER=local turns AI on (D-24)', () => {
     assert.equal(resolveAiProviderName({}), 'off');
-    assert.equal(resolveAiProviderName({ AI_ENABLED: 'true' }), 'openai');
-    assert.equal(resolveAiProviderName({ AI_PROVIDER: 'local', AI_ENABLED: 'true' }), 'local');
+    assert.equal(resolveAiProviderName({ AI_ENABLED: 'true' }), 'off');
+    assert.equal(resolveAiProviderName({ AI_PROVIDER: 'openai' }), 'off');
+    assert.equal(resolveAiProviderName({ AI_PROVIDER: 'Local ' }), 'local');
     assert.equal(resolveAiProviderName({ AI_PROVIDER: 'off', AI_ENABLED: 'true' }), 'off');
-    assert.equal(resolveAiProviderName({ AI_PROVIDER: 'gpt' }), 'off');
   });
 });
 

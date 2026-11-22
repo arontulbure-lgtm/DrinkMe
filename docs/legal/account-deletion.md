@@ -1,8 +1,8 @@
-DRAFT v0.2 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.3 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Delete your DrinkMe account
 
-Version 0.2 · Public page for the App Store / Google Play "delete account" link · Developer: Tulbure Aron PFA (DrinkMe)
+Version 0.3 · Public page for the App Store / Google Play "delete account" link · Developer: Tulbure Aron PFA (DrinkMe)
 
 ## In the app (fastest)
 1. Open DrinkMe and go to **Profile → Edit Profile**.
@@ -15,7 +15,7 @@ You can also delete your account from the age-confirmation screen, without confi
 Write to **drinkmesocialapp@gmail.com** from the email address of your account, with the subject "Delete my account". We confirm it is you and delete the account within one month (usually much sooner).
 
 ## What is deleted
-Your profile (name, city, bio, photo), posts and their photos, comments, cheers, saved posts, drink partners and requests, blocks, notifications, Smart Bar, saved AI recipes and AI settings, scan photos kept with "Help improve the scanner", your entries in our security log, and your sign-in account (Firebase Authentication).
+Your profile (name, city, bio, photo), posts and their photos, comments, cheers, saved posts, drink partners and requests, blocks, notifications, Smart Bar, saved AI recipes and AI settings, your reports about AI answers, your entries in our security log, and your sign-in account (Firebase Authentication). Photos you scanned with the AI scanner are never kept, so there is nothing to delete for them.
 
 ## What is kept, and for how long
 - **Backups:** your data is removed from our backups within **30 days**.

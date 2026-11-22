@@ -10,7 +10,6 @@ import jwt from 'jsonwebtoken';
 import { startServer } from './helpers/harness.js';
 
 const HARNESS_JWT_SECRET = 'test-only-jwt-secret'; // the harness default
-const STUB_PRELOAD = new URL('./helpers/openai-stub-preload.js', import.meta.url).href;
 const FAULT_PRELOAD = new URL('./helpers/db-fault-preload.js', import.meta.url).href;
 const CONFIRMED_AT = '2026-01-02T03:04:05.000Z';
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
@@ -623,181 +622,22 @@ describe('acknowledgement limits and failures', () => {
   });
 });
 
-describe('AI recipes', () => {
-  let server;
-  let stubDir;
-  const stubFile = (name) => path.join(stubDir, name);
-  const MOCKTAIL = { title: 'Virgin Mule', difficulty: 'mocktail', ingredients: [{ name: 'Lime', amount_oz: 1, amount_ml: 30 }], garnish: null, instructions: 'Stir.' };
-  const COCKTAIL = { ...MOCKTAIL, title: 'Gin Tonic', difficulty: 'easy' };
-  const MOCKTAIL_RULE = /Every recipe must have difficulty "mocktail" and contain zero alcohol/;
-  const SMART_BAR = '/api/smart-bar/generate-recipes';
-  const FILTER_USERS = 40;
-  let nextFilterUser = 0;
-  const PRODUCT = '/api/generate-recipes';
-
-  before(async () => {
-    stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drinkme-age-stub-'));
-    fs.writeFileSync(stubFile('behavior.json'), JSON.stringify({ outputText: JSON.stringify({ recipes: [COCKTAIL, MOCKTAIL] }) }));
-    server = await startServer(
-      { AI_ENABLED: 'true', OPENAI_API_KEY: 'sk-fake', OPENAI_STUB_DIR: stubDir, NODE_OPTIONS: `--import=${STUB_PRELOAD}` },
-      { dbFixture: { users: [person('minor'), confirmed('adult'), ...Array.from({ length: FILTER_USERS }, (_, i) => confirmed(`filter${i}`))] } },
-    );
-  });
-  after(async () => {
-    await server?.stop();
-    fs.rmSync(stubDir, { recursive: true, force: true });
-  });
-
-  const lastCall = () => {
-    const lines = fs.readFileSync(stubFile('calls.jsonl'), 'utf8').split('\n').filter(Boolean);
-    return JSON.parse(lines[lines.length - 1]);
-  };
-  const titlesOf = (recipes) => recipes.map((recipe) => recipe.title);
-
-  const smartBar = (token, extra = {}) => call(server, SMART_BAR, { token, method: 'POST', body: { ingredients: ['gin'], ...extra } });
-  const product = (token, extra = {}) => call(server, PRODUCT, { token, method: 'POST', body: { productName: 'Gin', ...extra } });
-
-  // The routes still force mocktails for an unconfirmed user, but the gate in front of them refuses first.
-  test('an unconfirmed user gets age_required from both routes, and OpenAI is not called', async () => {
-    const callCount = () => (fs.existsSync(stubFile('calls.jsonl')) ? fs.readFileSync(stubFile('calls.jsonl'), 'utf8').split('\n').filter(Boolean).length : 0);
-    const before = callCount();
-    for (const extra of [{}, { nonAlcoholicOnly: false }, { nonAlcoholicOnly: true }]) {
-      assertAgeRequired(await smartBar(tokenFor('minor'), extra), JSON.stringify(extra));
-    }
-    for (const extra of [{}, { isAlcoholic: true }, { isAlcoholic: false }]) {
-      assertAgeRequired(await product(tokenFor('minor'), extra), JSON.stringify(extra));
-    }
-    assert.equal(callCount(), before);
-  });
-
-  test('a confirmed user keeps normal behaviour', async () => {
-    const adult = tokenFor('adult');
-    const bar = await smartBar(adult, { nonAlcoholicOnly: false });
-    assert.deepEqual(titlesOf(bar.body), ['Gin Tonic', 'Virgin Mule']);
-    assert.doesNotMatch(lastCall().instructions, MOCKTAIL_RULE);
-
-    const barDefault = await smartBar(adult);
-    assert.deepEqual(titlesOf(barDefault.body), ['Gin Tonic', 'Virgin Mule']);
-
-    const barMocktails = await smartBar(adult, { nonAlcoholicOnly: true });
-    assert.deepEqual(titlesOf(barMocktails.body), ['Virgin Mule']);
-    assert.match(lastCall().instructions, MOCKTAIL_RULE);
-
-    const withProduct = await product(adult, { isAlcoholic: true });
-    assert.deepEqual(titlesOf(withProduct.body.recipes), ['Gin Tonic', 'Virgin Mule']);
-    assert.doesNotMatch(lastCall().instructions, MOCKTAIL_RULE);
-
-    const mocktailProduct = await product(adult, { isAlcoholic: false });
-    assert.deepEqual(titlesOf(mocktailProduct.body.recipes), ['Virgin Mule']);
-  });
-
-  describe('the alcohol check on a mocktail-only answer', () => {
-    const behave = (...recipes) => fs.writeFileSync(stubFile('behavior.json'), JSON.stringify({ outputText: JSON.stringify({ recipes }) }));
-    const restore = () => behave(COCKTAIL, MOCKTAIL);
-    // A confirmed user who asks for mocktails gets the same check an unconfirmed one used to.
-    const ask = (route = SMART_BAR) => {
-      const token = tokenFor(`filter${nextFilterUser++ % FILTER_USERS}`);
-      return route === SMART_BAR ? smartBar(token, { nonAlcoholicOnly: true }) : product(token, { isAlcoholic: false });
-    };
-    const withField = (field, text) => ({
-      ...MOCKTAIL,
-      ...(field === 'ingredients' ? { ingredients: [{ name: text, amount_oz: 1, amount_ml: 30 }] } : { [field]: text }),
-    });
-
-    for (const route of [SMART_BAR, PRODUCT]) {
-      for (const field of ['title', 'ingredients', 'garnish', 'instructions']) {
-        test(`${route}: Whisky in ${field} is dropped, and nothing left is a 502`, async (t) => {
-          t.after(restore);
-          behave(withField(field, 'Add Whisky'));
-          const res = await ask(route);
-          assert.equal(res.status, 502);
-          assert.equal(res.body.code, 'ai_invalid_output');
-          assert.ok(!res.text.includes('Whisky'));
-        });
-      }
-    }
-
-    test('only the recipe that mentions alcohol is dropped', async (t) => {
-      t.after(restore);
-      behave(withField('instructions', 'Top with whiskey.'), MOCKTAIL);
-      const res = await ask();
-      assert.equal(res.status, 200);
-      assert.deepEqual(titlesOf(res.body), ['Virgin Mule']);
-    });
-
-    for (const word of [
-      'whisky', 'VODKA', 'gin', 'Gin,', 'rum.', 'tequila', 'brandy', 'white wine', 'beer', 'amaretto liqueur', 'Angostura bitters',
-      'vermouth', 'vermut', 'țuică', 'ŢUICĂ', 'tuica', 'palincă', 'Pălincă', 'bere', 'vin roșu', 'lichior', 'șampanie', 'coniac',
-      'triple-sec', 'wh\u200Bisky', 'alcohol',
-    ]) {
-      test(`"${word}" is refused`, async (t) => {
-        t.after(restore);
-        behave(withField('ingredients', word));
-        assert.equal((await ask()).status, 502);
-      });
-    }
-
-    for (const text of [
-      'Ginger', 'ginger syrup', 'Gingerbread', 'Virginia peach', 'Rummy lime', 'Drum of ice', 'non-alcoholic', 'Non alcoholic',
-      'alcohol-free', 'zero alcohol', 'fără alcool', 'nonalcoholic', 'ginger beer', 'root beer', 'Beverage', 'wine glass', 'apple cider vinegar',
-      'Rome', 'bitter lemon',
-    ]) {
-      test(`"${text}" is not a false hit`, async (t) => {
-        t.after(restore);
-        behave(withField('ingredients', text));
-        const res = await ask();
-        assert.equal(res.status, 200, text);
-        assert.deepEqual(titlesOf(res.body), ['Virgin Mule']);
-      });
-    }
-
-    test('an alcohol word next to a safe phrase is still refused', async (t) => {
-      t.after(restore);
-      behave(withField('instructions', 'A non-alcoholic base with a shot of vodka.'));
-      assert.equal((await ask()).status, 502);
-    });
-
-    test('a confirmed user who did not ask for mocktails is not checked', async (t) => {
-      t.after(restore);
-      behave(withField('title', 'Whisky Sour'));
-      const res = await smartBar(tokenFor('adult'));
-      assert.equal(res.status, 200);
-      assert.deepEqual(titlesOf(res.body), ['Whisky Sour']);
-    });
-
-    test('a confirmed user who asked for mocktails is checked', async (t) => {
-      t.after(restore);
-      behave(withField('title', 'Whisky Sour'));
-      assert.equal((await smartBar(tokenFor('adult'), { nonAlcoholicOnly: true })).status, 502);
-    });
-
-    test('the product instructions forbid using an alcoholic product', async () => {
-      await product(tokenFor('adult'), { isAlcoholic: false });
-      assert.match(lastCall().instructions, /If the product contains alcohol, do not use it; suggest alcohol-free recipes in a similar style\./);
-    });
-  });
-
-  test('confirming changes the answer at once', async () => {
-    const token = tokenFor('minor');
-    assertAgeRequired(await smartBar(token), 'before');
-    assert.equal((await call(server, '/api/users/minor/acknowledgements', { token, method: 'POST', body: { type: 'age', confirmed: true } })).status, 200);
-    assert.deepEqual(titlesOf((await smartBar(token)).body), ['Gin Tonic', 'Virgin Mule']);
-  });
-
-  test('an invalid flag still gets 400', async () => {
-    assert.equal((await smartBar(tokenFor('adult'), { nonAlcoholicOnly: 'yes' })).status, 400);
-    assert.equal((await product(tokenFor('adult'), { isAlcoholic: 'yes' })).status, 400);
-  });
-});
-
+// The AI routes sit behind the 18+ gate like every /api route. Without AI_PROVIDER=local they answer 503
+// ai_disabled to a confirmed adult; the removed OpenAI routes (D-24, 2026-11-22) no longer exist.
 describe('AI off', () => {
-  test('recipe routes answer age_required to an unconfirmed user and 503 to a confirmed one', async (t) => {
+  test('AI routes answer age_required to an unconfirmed user and 503 to a confirmed one; confirming changes it at once', async (t) => {
     const server = await startServer({}, { dbFixture: { users: [person('minor'), confirmed('adult')] } });
     t.after(() => server.stop());
-    const body = { productName: 'Gin' };
-    assertAgeRequired(await call(server, '/api/generate-recipes', { token: tokenFor('minor'), method: 'POST', body }), 'minor');
-    const res = await call(server, '/api/generate-recipes', { token: tokenFor('adult'), method: 'POST', body });
+    const body = { mode: 'smart_bar' };
+    assertAgeRequired(await call(server, '/api/ai/recipes', { token: tokenFor('minor'), method: 'POST', body }), 'minor');
+    const res = await call(server, '/api/ai/recipes', { token: tokenFor('adult'), method: 'POST', body });
     assert.equal(res.status, 503);
     assert.equal(res.body.code, 'ai_disabled');
+    const token = tokenFor('minor');
+    assert.equal((await call(server, '/api/users/minor/acknowledgements', { token, method: 'POST', body: { type: 'age', confirmed: true } })).status, 200);
+    assert.equal((await call(server, '/api/ai/recipes', { token, method: 'POST', body })).body.code, 'ai_disabled');
+    for (const legacy of ['/api/generate-recipes', '/api/smart-bar/generate-recipes', '/api/detect-product']) {
+      assert.equal((await call(server, legacy, { token: tokenFor('adult'), method: 'POST', body: {} })).status, 404, legacy);
+    }
   });
 });

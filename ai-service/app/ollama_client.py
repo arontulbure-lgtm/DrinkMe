@@ -55,6 +55,7 @@ class OllamaClient:
         temperature: float = 0.2,
         num_predict: int = 512,
         num_ctx: int = 4096,
+        keep_alive: str | None = None,
     ) -> dict[str, Any]:
         message: dict[str, Any] = {"role": "user", "content": user}
         if images:
@@ -65,7 +66,7 @@ class OllamaClient:
             "format": schema,
             "stream": False,
             "think": False,
-            "keep_alive": self._settings.keep_alive,
+            "keep_alive": keep_alive or self._settings.keep_alive,
             "options": {"temperature": temperature, "num_predict": num_predict, "num_ctx": num_ctx},
         }
         try:

@@ -33,6 +33,8 @@ const P = {
 };
 export const VISION_MODEL = process.env.DRINKME_VISION_MODEL || 'qwen3-vl:4b-instruct';
 export const TEXT_MODEL = process.env.DRINKME_TEXT_MODEL || VISION_MODEL;
+// Re-reads labels the first model was unsure about ('none' disables). Does not fit in 8 GB next to the 4B: Ollama swaps.
+export const SECOND_PASS_MODEL = process.env.DRINKME_SECOND_PASS_MODEL === 'none' ? '' : (process.env.DRINKME_SECOND_PASS_MODEL || 'qwen3-vl:8b-instruct');
 const OLLAMA_HOST = process.env.OLLAMA_HOST || '127.0.0.1:11434';
 const OLLAMA_URL = `http://${OLLAMA_HOST.replace(/^https?:\/\//, '')}`;
 export const AI_SERVICE_PORT = Number(process.env.AI_SERVICE_PORT || 8088);
@@ -54,6 +56,10 @@ export const aiEnv = () => ({
   TEMP: P.tmp,
   DRINKME_VISION_MODEL: VISION_MODEL,
   DRINKME_TEXT_MODEL: TEXT_MODEL,
+  DRINKME_SECOND_PASS_MODEL: SECOND_PASS_MODEL,
+  DRINKME_MAX_IMAGE_SIDE: process.env.DRINKME_MAX_IMAGE_SIDE || '768',
+  // Two recipe slots at once on the GPU (the server's AI_RECIPE_CONCURRENCY, default 2).
+  OLLAMA_NUM_PARALLEL: process.env.OLLAMA_NUM_PARALLEL || '2',
   AI_SERVICE_PORT: String(AI_SERVICE_PORT),
   PYTHONDONTWRITEBYTECODE: '1',
 });
@@ -129,7 +135,7 @@ async function setup() {
   log('Python packages installed.');
 
   await ensureOllama();
-  for (const model of new Set([VISION_MODEL, TEXT_MODEL])) {
+  for (const model of new Set([VISION_MODEL, TEXT_MODEL, SECOND_PASS_MODEL].filter(Boolean))) {
     log(`Pulling ${model} (stored in ${P.models}) ...`);
     run(P.ollamaExe, ['pull', model]);
   }

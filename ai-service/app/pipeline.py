@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from . import imaging, prompts
 from .config import Settings
-from .ollama_client import ModelInvalidOutput, OllamaClient
+from .ollama_client import ModelInvalidOutput, ModelTimeout, ModelUnavailable, OllamaClient
 from .schemas import (
     ModelRecipe, ModelRecipes, ModelScan, Recipe, RecipeRequest, RecipeResponse, RecipeTimings, ScanItem, ScanRequest,
     ScanResult, ScanTimings,
@@ -111,7 +111,37 @@ async def run_scan(req: ScanRequest, client: OllamaClient, settings: Settings) -
     )
     vision_ms = int((time.perf_counter() - t1) * 1000)
     timings = ScanTimings(ocrMs=ocr_ms, visionMs=vision_ms, totalMs=int((time.perf_counter() - started) * 1000))
-    return build_scan_result(raw, ocr_lines, settings, settings.vision_model, timings)
+    result = build_scan_result(raw, ocr_lines, settings, settings.vision_model, timings)
+    if settings.second_pass_model and result.status in ("low_confidence", "unclear"):
+        result = await _second_pass(result, model_b64, ocr_lines, client, settings, started)
+    return result
+
+
+def _rank(result: ScanResult) -> tuple[int, float]:
+    """Higher is better: a confident answer beats an unsure one; then confidence."""
+    order = {"recognized": 3, "water": 3, "not_ingredient": 2, "low_confidence": 1, "unclear": 0}
+    return order[result.status], result.item.confidence if result.item else 0.0
+
+
+async def _second_pass(first: ScanResult, model_b64: str, ocr_lines: list[str], client: OllamaClient,
+                       settings: Settings, started: float) -> ScanResult:
+    """Re-reads the label with the larger model; keeps whichever answer is better. A failure keeps the first."""
+    t0 = time.perf_counter()
+    try:
+        raw = await client.chat_json(
+            settings.second_pass_model, prompts.SCAN_SYSTEM, prompts.scan_user_message(ocr_lines), _SCAN_SCHEMA,
+            images=[model_b64], temperature=0.1, num_predict=256, keep_alive=settings.second_pass_keep_alive,
+        )
+        second_ms = int((time.perf_counter() - t0) * 1000)
+        timings = first.timings.model_copy(update={"secondPassMs": second_ms, "totalMs": int((time.perf_counter() - started) * 1000)})
+        second = build_scan_result(raw, ocr_lines, settings, f"{settings.vision_model}+{settings.second_pass_model}", timings)
+    except (ModelInvalidOutput, ModelTimeout, ModelUnavailable) as exc:
+        log.warning("second pass failed: %s", type(exc).__name__)
+        return first.model_copy(update={"timings": first.timings.model_copy(update={
+            "secondPassMs": int((time.perf_counter() - t0) * 1000), "totalMs": int((time.perf_counter() - started) * 1000)})})
+    if _rank(second) > _rank(first):
+        return second
+    return first.model_copy(update={"model": second.model, "timings": second.timings})
 
 
 # ── Recipes ──────────────────────────────────────────────────────────────────
@@ -196,7 +226,7 @@ async def run_recipes(req: RecipeRequest, client: OllamaClient, settings: Settin
     started = time.perf_counter()
     names = [i.name for i in req.ingredients]
     system = prompts.recipe_system(req.language, req.mode, req.basics, req.mocktailsOnly, req.count)
-    user = prompts.recipe_user_message(req.mode, names, req.excludeNames, req.count, req.basics)
+    user = prompts.recipe_user_message(req.mode, names, req.excludeNames, req.count, req.basics, req.styleHint)
     raw = await client.chat_json(
         settings.text_model, system, user, _RECIPES_SCHEMA, temperature=0.7, num_predict=2600, num_ctx=6144,
     )

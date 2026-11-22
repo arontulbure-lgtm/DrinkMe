@@ -9,12 +9,10 @@ type Props = {
   onAccept?: () => void;
   isAccepting?: boolean;
   errorText?: string | null;
-  // 'openai' shows the notice that names OpenAI as the recipient (AI_PROVIDER=openai on the server).
-  processing?: 'drinkme' | 'openai';
 };
 
 /** The AI transparency notice: what the scanner does with the photo, AI recipes can be wrong, 18+. */
-export default function AiNoticeCard({ onAccept, isAccepting = false, errorText, processing = 'drinkme' }: Props) {
+export default function AiNoticeCard({ onAccept, isAccepting = false, errorText }: Props) {
   const { t } = useLocalization();
   return (
     <View style={styles.card} accessibilityRole="summary">
@@ -22,7 +20,7 @@ export default function AiNoticeCard({ onAccept, isAccepting = false, errorText,
         <Ionicons name="sparkles" size={18} color="#8B5FBF" />
         <Text style={styles.title}>{onAccept ? t('ai.notice.title') : t('ai.settings.noticeTitle')}</Text>
       </View>
-      <Text style={styles.body}>{t(processing === 'openai' ? 'ai.notice.bodyOpenai' : 'ai.notice.body')}</Text>
+      <Text style={styles.body}>{t('ai.notice.body')}</Text>
       {errorText ? <Text style={styles.error}>{errorText}</Text> : null}
       {onAccept && (
         <TouchableOpacity

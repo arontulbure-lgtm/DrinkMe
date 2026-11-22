@@ -558,8 +558,6 @@ const translations = {
         title: 'Before you use AI',
         body:
           'DrinkMe\'s scanner and recipes use AI. Your photo goes to DrinkMe\'s own AI server, where an open-weights model that we run ourselves reads it – no outside AI company receives it. The photo is used only to answer you and is not stored, unless you turn on "Help improve the scanner" in AI settings. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
-        bodyOpenai:
-          'DrinkMe\'s scanner and recipes use AI provided by OpenAI. Your photo and the ingredients you choose are sent to OpenAI to be read and answered; OpenAI is asked not to store them, and DrinkMe does not keep the photo unless you turn on "Help improve the scanner" in AI settings. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
         accept: 'I understand',
         privacyLink: 'Read the privacy policy',
       },
@@ -1266,8 +1264,6 @@ const translations = {
         title: 'Înainte să folosești AI',
         body:
           'Scanerul și rețetele DrinkMe folosesc AI. Fotografia ta ajunge la propriul server AI al DrinkMe, unde un model cu ponderi deschise, rulat de noi, o citește – nicio companie AI externă nu o primește. Fotografia este folosită doar pentru a-ți răspunde și nu este stocată, cu excepția cazului în care activezi „Ajută la îmbunătățirea scannerului” din Setări AI. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
-        bodyOpenai:
-          'Scanerul și rețetele DrinkMe folosesc AI furnizat de OpenAI. Fotografia ta și ingredientele alese sunt trimise către OpenAI pentru a fi citite și pentru a primi un răspuns; OpenAI este rugat să nu le stocheze, iar DrinkMe nu păstrează fotografia decât dacă activezi „Ajută la îmbunătățirea scannerului” din Setări AI. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
         accept: 'Am înțeles',
         privacyLink: 'Citește politica de confidențialitate',
       },

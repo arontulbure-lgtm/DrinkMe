@@ -34,6 +34,8 @@ class Settings:
     ollama_timeout_s: float
     keep_alive: str
     max_image_side: int
+    second_pass_model: str | None = None
+    second_pass_keep_alive: str = "2m"
 
     @property
     def is_loopback(self) -> bool:
@@ -57,4 +59,7 @@ def load_settings() -> Settings:
         ollama_timeout_s=_float("OLLAMA_TIMEOUT_S", 90.0),
         keep_alive=os.environ.get("OLLAMA_KEEP_ALIVE", "30m"),
         max_image_side=int(os.environ.get("DRINKME_MAX_IMAGE_SIDE", "1024")),
+        # A larger model re-reads labels the first model was unsure about. Empty: no second pass.
+        second_pass_model=os.environ.get("DRINKME_SECOND_PASS_MODEL") or None,
+        second_pass_keep_alive=os.environ.get("DRINKME_SECOND_PASS_KEEP_ALIVE", "2m"),
     )

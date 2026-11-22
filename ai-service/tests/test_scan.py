@@ -128,3 +128,31 @@ def test_rejects_oversized_dimensions_before_decoding(client_factory, fake):
                                      "mimeType": "image/png"})
     assert r.status_code == 400 and r.json()["error"]["code"] == "image_invalid"
     assert fake.requests == []
+
+
+def test_second_pass_runs_only_when_unsure_and_keeps_the_better_answer(client_factory, fake):
+    unsure = {**GOOD, "confidence": 0.4}
+    better = {**GOOD, "brand": "Tanqueray", "confidence": 0.9}
+    fake.replies.extend([unsure, better])
+    with client_factory(second_pass_model="big:test") as c:
+        data = scan(c).json()
+    assert data["status"] == "recognized" and data["item"]["brand"] == "Tanqueray"
+    assert data["model"] == "vision:test+big:test" and data["timings"]["secondPassMs"] >= 0
+    assert [r["model"] for r in fake.requests] == ["vision:test", "big:test"]
+    assert fake.requests[1]["keep_alive"] == "2m"
+
+
+def test_second_pass_not_better_or_failing_keeps_the_first(client_factory, fake):
+    fake.replies.extend([{**GOOD, "confidence": 0.4}, {**GOOD, "readable": False, "isDrinkIngredient": False, "category": None}])
+    with client_factory(second_pass_model="big:test") as c:
+        assert scan(c).json()["status"] == "low_confidence"
+    fake.replies.extend([{**GOOD, "confidence": 0.4}, "not json"])
+    with client_factory(second_pass_model="big:test") as c:
+        assert scan(c).json()["status"] == "low_confidence"
+
+
+def test_no_second_pass_when_the_first_is_confident(client_factory, fake):
+    fake.replies.append(GOOD)
+    with client_factory(second_pass_model="big:test") as c:
+        assert scan(c).json()["timings"]["secondPassMs"] == 0
+    assert len(fake.requests) == 1

@@ -316,7 +316,6 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
       return (
         <AiNoticeCard
           onAccept={() => acceptNotice.mutate(aiStatus.data.noticeVersion)}
-          processing={aiStatus.data.processing}
           isAccepting={acceptNotice.isPending}
           errorText={acceptNotice.isError ? t(getAiErrorKey(acceptNotice.error)) : null}
         />

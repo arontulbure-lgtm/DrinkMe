@@ -126,7 +126,6 @@ export async function startServer(env = {}, { dbFixture } = {}) {
       HOST: '127.0.0.1',
       JWT_SECRET: 'test-only-jwt-secret',
       FIREBASE_SERVICE_ACCOUNT_KEY: '',
-      OPENAI_API_KEY: '',
       NODE_ENV: 'test',
       ALLOW_INSECURE_DEV_AUTH: 'true',
       DB_FILE: path.join(tempDir, 'db.json'),

@@ -52,6 +52,8 @@ class ScanItem(Strict):
 class ScanTimings(Strict):
     ocrMs: int = 0
     visionMs: int = 0
+    # Second pass with the larger model when the first was unsure (additive in v1; 0 when it did not run).
+    secondPassMs: int = 0
     totalMs: int = 0
 
 
@@ -79,6 +81,8 @@ class RecipeRequest(Strict):
     mocktailsOnly: bool = False
     excludeNames: list[str] = Field(default_factory=list, max_length=60)
     count: int = Field(default=4, ge=1, le=5)
+    # Optional (additive in v1): the kind of drink wanted for a single-recipe request, chosen by the server.
+    styleHint: str | None = Field(default=None, max_length=120)
 
 
 class RecipeIngredient(Strict):

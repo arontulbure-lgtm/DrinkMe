@@ -83,4 +83,4 @@ Server request logs (IP address, user agent) are kept by the host for security; 
 | Photo and video permissions declaration (if the console asks, because of `READ_MEDIA_IMAGES`) | The app uses the system photo picker / camera only when the user adds a photo. VERIFY after the first EAS build which media permissions `expo-image-picker` adds to the Android manifest; if only the Android Photo Picker is used, no declaration is needed |
 
 ## 8. Keep in sync
-These answers match `docs/legal/privacy-policy.md` §2, §5 and §8 and `apple-privacy-labels.md`. Turning on AI (OpenAI would receive photos and ingredient lists), analytics, crash reporting, push notifications or ads changes this form and the policy **before** release.
+These answers match `docs/legal/privacy-policy.md` §2, §5 and §8 and `apple-privacy-labels.md`. Turning on AI (local models on DrinkMe's own EU/EEA AI server; photos processed in memory only and never kept; OpenAI is never used – decisions of 2026-11-22; answers in `docs/legal/internal/store-disclosures.md` "AI features"), analytics, crash reporting, push notifications or ads changes this form and the policy **before** release.

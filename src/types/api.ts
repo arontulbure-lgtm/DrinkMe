@@ -329,8 +329,8 @@ export interface AiStatus {
   barcode: boolean;
   noticeVersion: number;
   noticeAccepted: boolean;
-  // Where photos and ingredients are processed; picks the notice text.
-  processing?: 'drinkme' | 'openai';
+  // Where photos and ingredients are processed: always DrinkMe's own AI server (D-24).
+  processing?: 'drinkme';
   settings: AiSettings;
 }
 

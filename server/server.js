@@ -5,17 +5,14 @@ import rateLimit from 'express-rate-limit';
 import morgan from 'morgan';
 import multer from 'multer';
 import dotenv from 'dotenv';
-import OpenAI from 'openai';
 import jwt from 'jsonwebtoken';
 import validator from 'validator';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { textMentionsAlcohol } from './ai/alcoholWords.js';
 import { createLocalProvider } from './ai/localProvider.js';
 import { createBarcodeLookup, isValidEan } from './ai/openFoodFacts.js';
-import { createOpenAiProvider } from './ai/openaiProvider.js';
 import { createPhotoStore } from './ai/photoStore.js';
 import { AiProviderError, resolveAiProviderName } from './ai/provider.js';
 import { generateRecipeBatch, recipeId as recipeIdFor } from './ai/recipeEngine.js';
@@ -266,16 +263,6 @@ const avatarUpload = multer({
     fields: 1,
   },
 });
-// Plus one for the same reason as above. A scan is one file and nothing else.
-const aiImageUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: POST_IMAGE_MAX_BYTES + 1,
-    files: 1,
-    fields: 0,
-  },
-});
-
 // Parser errors that are not MulterErrors (no boundary, truncated body) come from bad client input.
 const parseUpload = (middleware) => (req, res, next) => {
   middleware(req, res, (err) => {
@@ -514,22 +501,11 @@ const sanitizePhotoURL = (value) => {
   return value;
 };
 
-// AI provider (server/ai/provider.js): AI_PROVIDER = local | openai | off, default off. With AI_PROVIDER unset,
-// the legacy AI_ENABLED=true means openai. A key on its own does not turn anything on.
+// AI provider (server/ai/provider.js): AI starts only with AI_PROVIDER=local set explicitly (decision D-24,
+// 2026-11-22: never an outside AI company). Anything else, including the old AI_ENABLED switch, means off.
 const AI_PROVIDER_NAME = resolveAiProviderName(process.env);
-const AI_ENABLED = AI_PROVIDER_NAME === 'openai';
-const AI_REQUEST_TIMEOUT_MS = 30_000;
-const AI_MAX_RETRIES = 1; // timeouts are retried too, so one request can wait twice the timeout
 
-if (AI_ENABLED && !process.env.OPENAI_API_KEY) {
-  console.warn('AI_ENABLED=true but OPENAI_API_KEY is not set. AI endpoints will respond with 503.');
-}
-
-const openai = AI_ENABLED && process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: AI_REQUEST_TIMEOUT_MS, maxRetries: AI_MAX_RETRIES })
-  : null;
-
-// The provider behind the /api/ai/* routes. null when AI_PROVIDER=off (or openai without a key).
+// The provider behind the /api/ai/* routes. null when AI is off.
 const parsePositiveMs = (raw, fallback) => (/^\d{3,6}$/.test(raw ?? '') ? Number(raw) : fallback);
 const aiProvider = (() => {
   if (AI_PROVIDER_NAME === 'local') {
@@ -550,7 +526,6 @@ const aiProvider = (() => {
       timeoutMs: parsePositiveMs(process.env.AI_SERVICE_TIMEOUT_MS, 60_000),
     });
   }
-  if (AI_PROVIDER_NAME === 'openai' && openai) return createOpenAiProvider({ client: openai });
   return null;
 })();
 console.log(`[ai] Provider: ${aiProvider ? AI_PROVIDER_NAME : 'off'}`);
@@ -1520,7 +1495,7 @@ const AVATAR_IMAGE_RULES = {
   typeError: 'Invalid image format. Use JPEG, PNG or WebP.',
 };
 
-// No HEIC: the OpenAI image input accepts PNG, JPEG, WebP and non-animated GIF only.
+// No HEIC for AI scans: the ai-service decodes JPEG, PNG and WebP only.
 const AI_IMAGE_RULES = {
   allowedTypes: new Set(['jpeg', 'png', 'webp']),
   maxBytes: POST_IMAGE_MAX_BYTES,
@@ -4937,270 +4912,25 @@ app.get('/api/admin/audit', requireAuth, requireAdmin, (req, res) => {
   res.json(listAuditEntries({ action, ...page }));
 });
 
-// ── AI endpoints (off unless AI_ENABLED=true; the client flags are separate) ───
-const AI_MODEL = 'gpt-4o-mini';
-const AI_RECIPES_MAX_OUTPUT_TOKENS = 3000;
-const AI_DETECT_MAX_OUTPUT_TOKENS = 100;
-const AI_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const AI_RATE_LIMIT_MAX = 20;
-
-const AI_INGREDIENTS_MAX_COUNT = 50;
-const AI_INGREDIENT_MAX_LENGTH = 120;
-const AI_PRODUCT_NAME_MAX_LENGTH = 120;
-
-const AI_OUTPUT_MAX_RECIPES = 5;
-const AI_OUTPUT_MAX_RECIPE_INGREDIENTS = 20;
-const AI_OUTPUT_MAX_TITLE_LENGTH = 120;
-const AI_OUTPUT_MAX_INGREDIENT_NAME_LENGTH = 120;
-const AI_OUTPUT_MAX_GARNISH_LENGTH = 120;
-const AI_OUTPUT_MAX_INSTRUCTIONS_LENGTH = 2000;
-const AI_OUTPUT_MAX_PRODUCT_NAME_LENGTH = 120;
-const AI_OUTPUT_MAX_AMOUNT_OZ = 17;
-const AI_OUTPUT_MAX_AMOUNT_ML = 500;
-const ML_PER_OZ = 29.5735;
-const AI_ALLOWED_DIFFICULTIES = ['easy', 'medium', 'hard', 'mocktail'];
-
-// Fixed rules go in the instructions parameter, apart from the text that comes from the user.
-const AI_NON_ALCOHOLIC_RULE = 'Every recipe must have difficulty "mocktail" and contain zero alcohol: no spirits, no liqueurs, no wine or beer, and no alcoholic bitters.';
-const AI_RECIPE_OUTPUT_RULES = `- Each recipe is one standard serving; no challenges, intoxication goals, or claims about performance or social success.
-- List ingredient quantities in both ounces and milliliters.
-- Respond strictly as JSON matching this schema:
-{
-  "recipes": [
-    {
-      "title": "string",
-      "difficulty": "easy|medium|hard|mocktail",
-      "ingredients": [
-        { "name": "string", "amount_oz": number, "amount_ml": number }
-      ],
-      "garnish": "string | null",
-      "instructions": "string"
-    }
-  ]
-}`;
-const AI_SMART_BAR_INSTRUCTIONS = `You are a professional mixologist. Create 5 unique cocktail/drink recipes using ONLY the available ingredients in the user message (plus standard mixers like juice, soda, sugar, bitters, ice).
-
-Rules:
-- Create 5 recipes total: 1 easy, 2 medium, 1 hard, 1 mocktail (no alcohol).
-- Only use ingredients from the provided list plus common pantry items (lime juice, lemon juice, simple syrup, soda water, tonic water, ice, salt, sugar, bitters, mint, etc.).
-${AI_RECIPE_OUTPUT_RULES}`;
-const AI_SMART_BAR_NON_ALCOHOLIC_INSTRUCTIONS = `You are a professional mixologist. Create 5 unique mocktail recipes using ONLY the non-alcoholic ingredients in the user message (plus standard mixers like juice, soda, sugar, ice). Leave out any alcoholic ingredient on the list.
-
-Rules:
-- ${AI_NON_ALCOHOLIC_RULE}
-- Only use ingredients from the provided list plus common pantry items (lime juice, lemon juice, simple syrup, soda water, tonic water, ice, salt, sugar, mint, etc.).
-${AI_RECIPE_OUTPUT_RULES}`;
-const AI_PRODUCT_RECIPE_INSTRUCTIONS = `You are a professional mixologist. Using the product named in the user message, craft 5 unique recipes.
-- Create 5 recipes total: 1 easy, 2 medium and 1 hard alcoholic cocktail, and 1 mocktail (no alcohol).
-${AI_RECIPE_OUTPUT_RULES}`;
-const AI_PRODUCT_NON_ALCOHOLIC_INSTRUCTIONS = `You are a professional mixologist. Using the product named in the user message, craft 5 unique mocktail recipes.
-- ${AI_NON_ALCOHOLIC_RULE}
-- If the product contains alcohol, do not use it; suggest alcohol-free recipes in a similar style.
-${AI_RECIPE_OUTPUT_RULES}`;
-const AI_DETECT_INSTRUCTIONS = 'You are a product recognition expert. From the image provided, extract the product name as specifically as possible (brand + product if possible), and determine whether it is alcoholic or non-alcoholic. Return strictly JSON with keys: productName (string), isAlcoholic (boolean).';
-
-// Runs before multer and the limiter, so a disabled route neither reads an upload nor uses up the limit.
-const requireAiEnabled = (req, res, next) => {
-  if (!openai) return res.status(503).json({ error: 'AI features are unavailable', code: 'ai_disabled' });
-  next();
-};
-
-// One budget for all three routes, because each request costs money.
-const aiLimiter = rateLimit({
-  windowMs: AI_RATE_LIMIT_WINDOW_MS,
-  max: AI_RATE_LIMIT_MAX,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.userId, // always set: this runs after requireAuth
-  message: { error: 'Too many AI requests. Try again later.', code: 'ai_rate_limit' },
-});
-
-// Not sanitizeText: a prompt also needs format characters, quotes and repeated spaces removed.
-// This limits how far input can leave its place in the prompt, but it cannot stop prompt injection:
-// the text still reaches the model, so the output caps below are what bound the result.
-const cleanPromptInput = (value) => (
-  value
-    .toWellFormed()
-    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ')
-    .replace(/"/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
-);
-
-// Returns the cleaned list, or null if any item is invalid. Items are joined with commas in the prompt.
-const parseIngredients = (value) => {
-  if (!Array.isArray(value) || value.length === 0 || value.length > AI_INGREDIENTS_MAX_COUNT) return null;
-  const ingredients = [];
-  for (const item of value) {
-    if (typeof item !== 'string') return null;
-    // Unescaped first: a client holding text from before the schema migration can still send entities.
-    const cleaned = cleanPromptInput(validator.unescape(item).replace(/[,;]/g, ' '));
-    if (!cleaned || cleaned.length > AI_INGREDIENT_MAX_LENGTH) return null;
-    ingredients.push(cleaned);
-  }
-  return ingredients;
-};
-
-const parseProductName = (value) => {
-  if (typeof value !== 'string') return null;
-  const cleaned = cleanPromptInput(validator.unescape(value));
-  return cleaned && cleaned.length <= AI_PRODUCT_NAME_MAX_LENGTH ? cleaned : null;
-};
-
-// Upstream values can only reach the log if they look like a short identifier.
-const toLogToken = (value) => (typeof value === 'string' && /^[\w.-]{1,64}$/.test(value) ? value : undefined);
-
-// Upstream messages can quote a masked API key, so only the type, code and status are logged or kept.
-const createAiResponse = async (instructions, content, maxOutputTokens) => {
-  try {
-    return await openai.responses.create({
-      model: AI_MODEL,
-      instructions,
-      input: [{ role: 'user', content }],
-      text: { format: { type: 'json_object' } },
-      max_output_tokens: maxOutputTokens,
-      store: false,
-    });
-  } catch (err) {
-    const status = Number.isInteger(err?.status) ? err.status : undefined;
-    console.warn('[ai] Upstream request failed:', toLogToken(err?.type) ?? toLogToken(err?.constructor?.name), toLogToken(err?.code), status);
-    throw createAppError(502, 'AI request failed', 'ai_upstream_error');
-  }
-};
-
-// Returns the parsed value, or null. A parse error message can quote AI output, so only its type is logged.
-const parseAiJson = (rawText) => {
-  let parsed = (typeof rawText === 'string' ? rawText : '').trim();
-  if (parsed.startsWith('```')) parsed = parsed.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
-  if (!parsed.startsWith('{')) { const m = parsed.match(/\{[\s\S]*\}/); if (m) parsed = m[0]; }
-  try {
-    return JSON.parse(parsed);
-  } catch (e) {
-    console.warn('[ai] Could not parse AI output:', e.name);
-    return null;
-  }
-};
-
-// Not sanitizeText: this text is not stored, so it only needs a cap. Saving it later goes through
-// the sanitized routes.
-const capAiText = (value, maxLength) => (
-  typeof value === 'string'
-    ? validator.stripLow(value, true).trim().slice(0, maxLength).toWellFormed().trim()
-    : ''
-);
-
-const toAiAmount = (value, maxAmount) => {
-  // Leading number only, so "1/2 oz" gives 1 and cannot join its digits into 12.
-  const amount = typeof value === 'string' ? parseFloat(value) : value;
-  return typeof amount === 'number' && Number.isFinite(amount) && amount > 0 ? Math.min(amount, maxAmount) : 0;
-};
-
-const normalizeAiIngredient = (ingredient) => {
-  const name = capAiText(ingredient?.name, AI_OUTPUT_MAX_INGREDIENT_NAME_LENGTH);
-  if (!name) return null;
-  const amountOz = toAiAmount(ingredient.amount_oz, AI_OUTPUT_MAX_AMOUNT_OZ);
-  const amountMl = toAiAmount(ingredient.amount_ml, AI_OUTPUT_MAX_AMOUNT_ML)
-    || Math.min(Math.round(amountOz * ML_PER_OZ), AI_OUTPUT_MAX_AMOUNT_ML);
-  return { name, amount_oz: amountOz, amount_ml: amountMl };
-};
-
-const normalizeAiRecipe = (recipe) => {
-  const difficulty = typeof recipe?.difficulty === 'string' ? recipe.difficulty.toLowerCase() : '';
-  return {
-    title: capAiText(recipe?.title, AI_OUTPUT_MAX_TITLE_LENGTH),
-    difficulty: AI_ALLOWED_DIFFICULTIES.includes(difficulty) ? difficulty : 'medium',
-    ingredients: (Array.isArray(recipe?.ingredients) ? recipe.ingredients : [])
-      .map(normalizeAiIngredient)
-      .filter(Boolean)
-      .slice(0, AI_OUTPUT_MAX_RECIPE_INGREDIENTS),
-    garnish: capAiText(recipe?.garnish, AI_OUTPUT_MAX_GARNISH_LENGTH) || null,
-    instructions: capAiText(recipe?.instructions, AI_OUTPUT_MAX_INSTRUCTIONS_LENGTH),
-  };
-};
-
-// The model can call anything a mocktail, so the text of a mocktail-only answer is checked too (see ai/alcoholWords.js).
-const mentionsAlcohol = ({ title, ingredients, garnish, instructions }) => textMentionsAlcohol(
-  [title, ...ingredients.map((ingredient) => ingredient.name), garnish ?? '', instructions].join('\n')
-);
-
-// inputText also names JSON, because the json_object format may check the input messages for that word.
-const generateAiRecipes = async (instructions, inputText, { mocktailsOnly }) => {
-  const response = await createAiResponse(instructions, [{ type: 'input_text', text: inputText }], AI_RECIPES_MAX_OUTPUT_TOKENS);
-  const data = parseAiJson(response.output_text);
-  if (!Array.isArray(data?.recipes)) throw createAppError(502, 'Invalid AI output', 'ai_invalid_output');
-  const recipes = data.recipes
-    .map(normalizeAiRecipe)
-    .filter((r) => r.title && r.instructions && r.ingredients.length > 0)
-    .filter((r) => !mocktailsOnly || (r.difficulty === 'mocktail' && !mentionsAlcohol(r)))
-    .slice(0, AI_OUTPUT_MAX_RECIPES);
-  if (recipes.length === 0) throw createAppError(502, 'Invalid AI output', 'ai_invalid_output');
-  return recipes;
-};
-
-app.post('/api/smart-bar/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, async (req, res, next) => {
-  try {
-    const ingredients = parseIngredients(req.body?.ingredients);
-    if (!ingredients) return res.status(400).json({ error: 'Invalid ingredients' });
-    const nonAlcoholicOnly = req.body?.nonAlcoholicOnly;
-    if (nonAlcoholicOnly !== undefined && typeof nonAlcoholicOnly !== 'boolean') {
-      return res.status(400).json({ error: 'Invalid nonAlcoholicOnly' });
-    }
-    // An unconfirmed user gets mocktails whatever the client asked for, with no error.
-    // The unconfirmed case is defence in depth: requireSignedInAdult refuses it before this route.
-    const mocktailsOnly = nonAlcoholicOnly === true || !isAgeConfirmed(req.userId);
-    const instructions = mocktailsOnly ? AI_SMART_BAR_NON_ALCOHOLIC_INSTRUCTIONS : AI_SMART_BAR_INSTRUCTIONS;
-    const inputText = `Available ingredients: ${ingredients.join(', ')}. Respond in JSON.`;
-    res.json(await generateAiRecipes(instructions, inputText, { mocktailsOnly }));
-  } catch (err) { next(err); }
-});
-
-const handleDetectProduct = async (req, res, next) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'Missing image file' });
-    const image = validateImageBytes(req.file.buffer, AI_IMAGE_RULES);
-    if (image.error) return res.status(image.status).json({ error: image.error });
-    const response = await createAiResponse(
-      AI_DETECT_INSTRUCTIONS,
-      [{ type: 'input_text', text: 'Identify the product in this image. Respond in JSON.' }, { type: 'input_image', image_url: image.dataUrl, detail: 'low' }],
-      AI_DETECT_MAX_OUTPUT_TOKENS,
-    );
-    const data = parseAiJson(response.output_text);
-    const productName = capAiText(data?.productName, AI_OUTPUT_MAX_PRODUCT_NAME_LENGTH);
-    if (!productName) return res.json({ error: 'Product not recognized, please try again.' });
-    // An unknown value counts as alcoholic, the safer side for a drinks app.
-    res.json({ productName, isAlcoholic: data.isAlcoholic !== false });
-  } catch (error) { next(error); }
-};
-app.post('/api/detect-product', requireAuth, requireAiEnabled, aiLimiter, parseUpload(aiImageUpload.single('image')), handleDetectProduct);
-
-app.post('/api/generate-recipes', requireAuth, requireAiEnabled, aiLimiter, async (req, res, next) => {
-  try {
-    const { isAlcoholic } = req.body || {};
-    const productName = parseProductName(req.body?.productName);
-    if (!productName) return res.status(400).json({ error: 'Invalid productName' });
-    if (isAlcoholic !== undefined && typeof isAlcoholic !== 'boolean') {
-      return res.status(400).json({ error: 'Invalid isAlcoholic' });
-    }
-    // An unconfirmed user gets mocktails whatever the client asked for, with no error.
-    // The unconfirmed case is defence in depth: requireSignedInAdult refuses it before this route.
-    const mocktailsOnly = isAlcoholic === false || !isAgeConfirmed(req.userId);
-    const instructions = mocktailsOnly ? AI_PRODUCT_NON_ALCOHOLIC_INSTRUCTIONS : AI_PRODUCT_RECIPE_INSTRUCTIONS;
-    const inputText = `Product: "${productName}". Respond in JSON.`;
-    res.json({ recipes: await generateAiRecipes(instructions, inputText, { mocktailsOnly }) });
-  } catch (error) { next(error); }
-});
-
 // ── AI v1: scanner, barcode fallback, recipes, saved recipes ──────────────────
 // Contracts: .claude/skills/drinkme-ai-service, recipe-schema, ingredient-taxonomy. The provider's output is
 // never trusted: scans go through validateScanResult, recipes through normalizeRecipe + checkRecipe (S1-S13).
 // Photos stay in memory unless the user opted in (aiPhotoOptIn). Request bodies are never logged.
-// The notice says where photos go, so it depends on the provider: accepting the local-processing notice (1) does
-// not cover OpenAI processing (2). Switching provider asks users again.
-const AI_NOTICE_VERSION = AI_PROVIDER_NAME === 'openai' ? 2 : 1;
+// Raise when the AI notice text changes in substance (users then accept it again).
+const AI_NOTICE_VERSION = 1;
 const AI_SCHEMA_VERSION = '1';
 // Version of the photo opt-in consent text (ai.settings.photoBody, docs/legal/ai-transparency.md §9.2). Stored with
 // the time of consent (GDPR Art. 7(1)); raise it when the text changes in substance.
 const AI_PHOTO_CONSENT_VERSION = 1;
+// Per-user daily limits (rolling 24 hours). A failure that is not the user's doing gives the unit back.
+const parseDailyLimit = (raw, fallback) => (/^\d{1,4}$/.test(raw ?? '') && Number(raw) > 0 ? Number(raw) : fallback);
+const AI_DAILY_SCAN_LIMIT = parseDailyLimit(process.env.AI_DAILY_SCAN_LIMIT, 20);
+const AI_DAILY_RECIPE_LIMIT = parseDailyLimit(process.env.AI_DAILY_RECIPE_LIMIT, 10);
+const AI_DAILY_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Recipe slots run in parallel on the GPU (Ollama OLLAMA_NUM_PARALLEL must allow it). 1-4, default 2.
+const AI_RECIPE_CONCURRENCY = /^[1-4]$/.test(process.env.AI_RECIPE_CONCURRENCY ?? '') ? Number(process.env.AI_RECIPE_CONCURRENCY) : 2;
+// D-22 (2026-11-22): no photo opt-in at launch. The code stays, behind this flag, off unless exactly 'true'.
+const AI_PHOTO_OPT_IN_ENABLED = process.env.AI_PHOTO_OPT_IN_ENABLED === 'true';
 const AI_V1_RATE_LIMIT_PER_HOUR = /^\d{1,4}$/.test(process.env.AI_RATE_LIMIT_PER_HOUR ?? '') ? Number(process.env.AI_RATE_LIMIT_PER_HOUR) : 30;
 const BARCODE_RATE_LIMIT_PER_HOUR = 60;
 const SAVED_RECIPES_MAX = 200;
@@ -5289,8 +5019,26 @@ const isAiHealthy = async () => {
 const getAiSettings = (user, language) => ({
   basics: Array.isArray(user?.aiBasics) ? user.aiBasics : AI_DEFAULT_BASICS[language],
   basicsCustomized: Array.isArray(user?.aiBasics),
-  photoOptIn: user?.aiPhotoOptIn === true,
+  photoOptIn: AI_PHOTO_OPT_IN_ENABLED && user?.aiPhotoOptIn === true,
+  photoOptInAvailable: AI_PHOTO_OPT_IN_ENABLED,
 });
+
+const aiDailyUsed = (userId, kind) => limitEventsWithin(userId, kind, AI_DAILY_WINDOW_MS).length;
+const aiDailyLeft = (userId) => ({
+  scans: Math.max(0, AI_DAILY_SCAN_LIMIT - aiDailyUsed(userId, 'ai_scan')),
+  recipeBatches: Math.max(0, AI_DAILY_RECIPE_LIMIT - aiDailyUsed(userId, 'ai_recipes')),
+});
+/** Takes one unit of today's quota, or answers 429 ai_daily_limit. Returns the event (for a refund) or null. */
+const takeAiDailyUnit = (req, res, kind) => {
+  const limit = kind === 'ai_scan' ? AI_DAILY_SCAN_LIMIT : AI_DAILY_RECIPE_LIMIT;
+  if (aiDailyUsed(req.userId, kind) >= limit) {
+    res.status(429).json({ error: 'Daily AI limit reached. Try again tomorrow.', code: 'ai_daily_limit', kind: kind === 'ai_scan' ? 'scan' : 'recipes', limit });
+    return null;
+  }
+  return recordLimitEvent(req.userId, { kind, at: new Date().toISOString() });
+};
+// Outages, timeouts and unusable model answers are not the user's fault: the unit goes back.
+const AI_REFUNDED_CODES = new Set(['ai_unavailable', 'ai_timeout', 'ai_invalid_output']);
 
 // The app's feature flag: real AI screens only while available is true.
 app.get('/api/ai/status', requireAuth, async (req, res, next) => {
@@ -5309,8 +5057,10 @@ app.get('/api/ai/status', requireAuth, async (req, res, next) => {
       noticeVersion: AI_NOTICE_VERSION,
       noticeAccepted: hasAcceptedAiNotice(user),
       // Where photos and ingredient lists are processed; the app shows the matching notice text.
-      processing: AI_PROVIDER_NAME === 'openai' ? 'openai' : 'drinkme',
+      processing: 'drinkme',
       settings: getAiSettings(user, language),
+      dailyLeft: aiDailyLeft(req.userId),
+      dailyLimits: { scans: AI_DAILY_SCAN_LIMIT, recipeBatches: AI_DAILY_RECIPE_LIMIT },
     });
   } catch (err) { next(err); }
 });
@@ -5337,6 +5087,9 @@ app.put('/api/ai/settings', requireAuth, (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
   const { basics, photoOptIn, language } = req.body || {};
   if (photoOptIn !== undefined && typeof photoOptIn !== 'boolean') return res.status(400).json({ error: 'Invalid photoOptIn' });
+  if (photoOptIn === true && !AI_PHOTO_OPT_IN_ENABLED) {
+    return res.status(400).json({ error: 'Keeping scan photos is not offered', code: 'photo_opt_in_unavailable' });
+  }
   let cleanBasics;
   if (basics === null) {
     cleanBasics = null;
@@ -5377,18 +5130,22 @@ app.put('/api/ai/settings', requireAuth, (req, res) => {
 });
 
 const handleAiScan = async (req, res) => {
+  let dailyEvent = null;
   try {
     const image = validateImage(req.body?.imageBase64, AI_IMAGE_RULES);
     if (image.error) return res.status(image.status).json({ error: image.error });
     const [, mimeType, imageBase64] = image.dataUrl.match(/^data:(image\/[a-z]+);base64,(.*)$/s);
     const language = toAiLanguage(req.body?.language);
+    dailyEvent = takeAiDailyUnit(req, res, 'ai_scan');
+    if (!dailyEvent) return;
     const result = validateScanResult(await aiProvider.scan({ imageBase64, mimeType, language, signal: req.aiSignal }));
     if (!result) throw new AiProviderError('ai_invalid_output');
-    if (userIndex.get(req.userId)?.aiPhotoOptIn === true) {
+    if (AI_PHOTO_OPT_IN_ENABLED && userIndex.get(req.userId)?.aiPhotoOptIn === true) {
       aiPhotoStore.save(req.userId, Buffer.from(imageBase64, 'base64'), mimeType.split('/')[1], result);
     }
     res.json({ schemaVersion: AI_SCHEMA_VERSION, source: 'photo', ...result });
   } catch (err) {
+    if (dailyEvent && AI_REFUNDED_CODES.has(err?.code)) removeLimitEvent(req.userId, dailyEvent);
     sendAiError(res, err);
   } finally {
     req.aiDone?.();
@@ -5430,10 +5187,11 @@ const toScanInput = (item) => {
 
 // { mode: 'scan', item, language, newSession } or { mode: 'smart_bar', language, newSession }.
 app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, oneAiRequestPerUser, aiV1Limiter, async (req, res) => {
-  const { mode, item, newSession } = req.body || {};
+  const { mode, item, newSession, stream } = req.body || {};
   const language = toAiLanguage(req.body?.language);
   if (mode !== 'scan' && mode !== 'smart_bar') return res.status(400).json({ error: 'Invalid mode' });
   if (newSession !== undefined && typeof newSession !== 'boolean') return res.status(400).json({ error: 'Invalid newSession' });
+  if (stream !== undefined && typeof stream !== 'boolean') return res.status(400).json({ error: 'Invalid stream' });
   let inputs;
   let scannedAliases = [];
   let knownItems = [];
@@ -5454,6 +5212,17 @@ app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, one
       .map((name) => ({ name }));
     if (inputs.length === 0) return res.status(400).json({ error: 'Your Smart Bar is empty', code: 'smart_bar_empty' });
   }
+  const dailyEvent = takeAiDailyUnit(req, res, 'ai_recipes');
+  if (!dailyEvent) return;
+  // stream: true → NDJSON, one line per recipe as soon as it passes validation, then a "done" (or "error") line.
+  // The status is 200 once streaming starts, so errors after that arrive as an "error" line.
+  let delivered = 0;
+  const writeLine = (value) => { if (!res.writableEnded) res.write(`${JSON.stringify(value)}\n`); };
+  if (stream === true) {
+    res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+    writeLine({ type: 'start', schemaVersion: AI_SCHEMA_VERSION, expected: 4 });
+  }
   try {
     const batch = await generateRecipeBatch({
       provider: aiProvider,
@@ -5465,12 +5234,26 @@ app.post('/api/ai/recipes', requireAuth, requireAiProvider, requireAiNotice, one
       scannedAliases,
       knownItems,
       signal: req.aiSignal,
+      concurrency: AI_RECIPE_CONCURRENCY,
       basics: getAiSettings(userIndex.get(req.userId), language).basics,
       newSession: newSession === true,
-    });
-    res.json({ schemaVersion: AI_SCHEMA_VERSION, recipes: batch.recipes, exhausted: batch.exhausted });
+    }, { onRecipe: (recipe) => { delivered++; if (stream === true) writeLine({ type: 'recipe', recipe }); } });
+    if (batch.exhausted) removeLimitEvent(req.userId, dailyEvent);
+    if (stream === true) {
+      writeLine({ type: 'done', exhausted: batch.exhausted, count: batch.recipes.length });
+      res.end();
+    } else {
+      res.json({ schemaVersion: AI_SCHEMA_VERSION, recipes: batch.recipes, exhausted: batch.exhausted });
+    }
   } catch (err) {
-    sendAiError(res, err);
+    if (delivered === 0 && AI_REFUNDED_CODES.has(err?.code)) removeLimitEvent(req.userId, dailyEvent);
+    if (stream === true) {
+      const code = AI_ERRORS[err?.code] ? err.code : 'ai_unavailable';
+      writeLine({ type: 'error', code, error: AI_ERRORS[code][1] });
+      res.end();
+    } else {
+      sendAiError(res, err);
+    }
   } finally {
     req.aiDone?.();
   }

@@ -201,16 +201,16 @@ describe('QA checklist, Securitate (dev auth)', () => {
     assert.deepEqual(own.body.items.map((drink) => drink.id), [1]);
   });
 
-  test('Rute AI → 503 `ai_disabled` cât timp `AI_ENABLED` nu e `true`', async () => {
+  test('Rute AI → 503 `ai_disabled` cât timp `AI_PROVIDER` nu e `local`; vechile rute OpenAI nu mai există', async () => {
     const token = tokenFor(ALICE);
-    const smartBar = await call(server, '/api/smart-bar/generate-recipes', { method: 'POST', token, body: { ingredients: ['gin'] } });
-    const recipes = await call(server, '/api/generate-recipes', { method: 'POST', token, body: { productName: 'Gin' } });
-    const detect = await call(server, '/api/detect-product', {
-      method: 'POST', token, form: fileForm('image', JPEG, { type: 'image/jpeg', filename: 'scan.jpg' }),
-    });
-    for (const [label, res] of [['smart-bar/generate-recipes', smartBar], ['generate-recipes', recipes], ['detect-product', detect]]) {
+    const recipes = await call(server, '/api/ai/recipes', { method: 'POST', token, body: { mode: 'smart_bar' } });
+    const scan = await call(server, '/api/ai/scan', { method: 'POST', token, body: { imageBase64: JPEG.toString('base64') } });
+    for (const [label, res] of [['ai/recipes', recipes], ['ai/scan', scan]]) {
       assert.equal(res.status, 503, label);
       assert.equal(res.body.code, 'ai_disabled', label);
+    }
+    for (const legacy of ['/api/smart-bar/generate-recipes', '/api/generate-recipes', '/api/detect-product']) {
+      assert.equal((await call(server, legacy, { method: 'POST', token, body: {} })).status, 404, legacy);
     }
   });
 

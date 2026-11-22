@@ -103,3 +103,16 @@ def test_no_recipe_list_is_invalid_output(client_factory, fake):
     fake.replies.append({"something": []})
     with client_factory() as c:
         assert c.post("/v1/recipes", json=req()).json()["error"]["code"] == "model_invalid_output"
+
+
+def test_single_recipe_request_with_style_hint(client_factory, fake):
+    fake.replies.append({"recipes": [RECIPE]})
+    with client_factory() as c:
+        r = c.post("/v1/recipes", json=req(count=1, styleHint="a long refreshing highball"))
+    assert r.status_code == 200
+    system = fake.requests[0]["messages"][0]["content"]
+    user = fake.requests[0]["messages"][1]["content"]
+    assert "Make exactly 1 recipe" in system and "LAST recipe must be a mocktail" not in system
+    assert "Kind of drink wanted: a long refreshing highball." in user
+    with client_factory() as c:
+        assert c.post("/v1/recipes", json=req(styleHint="x" * 121)).status_code == 422

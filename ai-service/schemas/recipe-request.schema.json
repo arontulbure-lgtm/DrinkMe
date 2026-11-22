@@ -108,6 +108,19 @@
       "default": "1",
       "title": "Schemaversion",
       "type": "string"
+    },
+    "styleHint": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stylehint"
     }
   },
   "required": [

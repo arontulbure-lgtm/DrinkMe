@@ -130,6 +130,11 @@
           "title": "Ocrms",
           "type": "integer"
         },
+        "secondPassMs": {
+          "default": 0,
+          "title": "Secondpassms",
+          "type": "integer"
+        },
         "totalMs": {
           "default": 0,
           "title": "Totalms",

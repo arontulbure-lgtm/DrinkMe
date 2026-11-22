@@ -211,7 +211,6 @@ export default function AiScannerFlow({ status, navigation }: Props) {
         <ScrollView contentContainerStyle={styles.content}>
           <AiNoticeCard
             onAccept={() => acceptNotice.mutate(status.noticeVersion)}
-            processing={status.processing}
             isAccepting={acceptNotice.isPending}
             errorText={acceptNotice.isError ? t(getAiErrorKey(acceptNotice.error)) : null}
           />

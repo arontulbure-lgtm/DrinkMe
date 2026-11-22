@@ -120,7 +120,7 @@ export default function AiSettingsScreen({ navigation }: RootStackScreenProps<'A
             <Text style={styles.muted}>{t('ai.settings.photoBody')}</Text>
           </View>
 
-          <AiNoticeCard processing={status.data?.processing} />
+          <AiNoticeCard />
         </ScrollView>
       )}
     </SafeAreaView>

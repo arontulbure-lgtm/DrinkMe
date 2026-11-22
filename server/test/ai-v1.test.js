@@ -23,6 +23,7 @@ const LIMITED = 'ai1-limited';
 // Own users for later tests: the global mutation limiter allows 30 writes per minute per user.
 const RETRY = 'ai1-retry';
 const REPORTER = 'ai1-reporter';
+const SAVER = 'ai1-saver';
 const user = (id, extra = {}) => ({
   id, email: `${id}@example.test`, firstName: 'Test', lastName: '', city: '', bio: '', avatar: null,
   ageConfirmedAt: '2026-01-01T00:00:00.000Z', ...extra,
@@ -30,7 +31,7 @@ const user = (id, extra = {}) => ({
 const FIXTURE = {
   users: [
     user(ADULT, { aiNoticeVersion: 1 }), user(NO_NOTICE), user(EMPTY_BAR, { aiNoticeVersion: 1 }),
-    user(OPTIN, { aiNoticeVersion: 1 }), user(BUSY, { aiNoticeVersion: 1 }), user(LIMITED, { aiNoticeVersion: 1 }), user(RETRY, { aiNoticeVersion: 1 }), user(REPORTER, { aiNoticeVersion: 1 }),
+    user(OPTIN, { aiNoticeVersion: 1 }), user(BUSY, { aiNoticeVersion: 1 }), user(LIMITED, { aiNoticeVersion: 1 }), user(RETRY, { aiNoticeVersion: 1 }), user(REPORTER, { aiNoticeVersion: 1 }), user(SAVER, { aiNoticeVersion: 1 }),
   ],
   smartBarByUser: {
     [ADULT]: [
@@ -39,6 +40,7 @@ const FIXTURE = {
       { id: 3, name: 'cucumber', quantity: '1', unit: 'piece' },
     ],
     [BUSY]: [{ id: 1, name: 'orange juice', quantity: '1', unit: 'bottle' }],
+    [SAVER]: [{ id: 1, name: 'Bombay Sapphire Gin', quantity: '1', unit: 'bottle' }, { id: 2, name: 'Schweppes Tonic', quantity: '1', unit: 'bottle' }, { id: 3, name: 'cucumber', quantity: '1', unit: 'piece' }],
     [RETRY]: [
       { id: 1, name: 'Bombay Sapphire Gin', quantity: '1', unit: 'bottle' },
       { id: 2, name: 'Schweppes Tonic', quantity: '2', unit: 'bottle' },
@@ -75,7 +77,7 @@ const stub = {
   calls: [],
   health: 'ok',
   scanReply: null, // object | { status, body } | 'hang'
-  recipeReplies: [], // queue of arrays of recipes (or { status, body })
+  recipeHandler: null, // (requestBody) => recipes[] | { status, body }
   recipeDelayMs: 0,
 };
 const send = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -93,7 +95,7 @@ const aiStub = http.createServer((req, res) => {
     }
     if (req.url === '/v1/recipes') {
       if (stub.recipeDelayMs) await new Promise((r) => setTimeout(r, stub.recipeDelayMs));
-      const reply = stub.recipeReplies.shift() ?? [];
+      const reply = stub.recipeHandler ? stub.recipeHandler(body) : [];
       if (typeof reply.status === 'number') return send(res, reply.status, reply.body);
       return send(res, 200, { schemaVersion: '1', recipes: reply, dropped: 0, model: 'stub', timings: { totalMs: 1 } });
     }
@@ -128,6 +130,12 @@ const api = async (method, urlPath, { uid = ADULT, body } = {}) => {
   return { status: res.status, body: text ? JSON.parse(text) : null };
 };
 const recipeCalls = () => stub.calls.filter((c) => c.path === '/v1/recipes');
+// Answers each one-recipe request from a pool: regular slots and the mocktail slot draw separately.
+const pools = ({ regular = [], mocktail = [] }) => {
+  const r = [...regular];
+  const m = [...mocktail];
+  return (body) => { const next = (body.mocktailsOnly ? m : r).shift(); return next ? [next] : []; };
+};
 
 before(async () => {
   const aiPort = await listen(aiStub);
@@ -140,7 +148,11 @@ before(async () => {
     AI_SERVICE_TIMEOUT_MS: '3000',
     OFF_API_URL: `http://127.0.0.1:${offPort}/api/v2/product`,
     AI_PHOTO_DIR: photoDir,
-    AI_RATE_LIMIT_PER_HOUR: '40',
+    AI_RATE_LIMIT_PER_HOUR: '60',
+    AI_RECIPE_CONCURRENCY: '1',
+    AI_PHOTO_OPT_IN_ENABLED: 'true',
+    AI_DAILY_SCAN_LIMIT: '500',
+    AI_DAILY_RECIPE_LIMIT: '500',
   }, { dbFixture: FIXTURE });
 });
 after(async () => {
@@ -153,7 +165,7 @@ beforeEach(() => {
   stub.calls = [];
   stub.health = 'ok';
   stub.scanReply = null;
-  stub.recipeReplies = [];
+  stub.recipeHandler = null;
   stub.recipeDelayMs = 0;
 });
 
@@ -166,7 +178,7 @@ describe('GET /api/ai/status and the AI notice', () => {
     assert.equal(res.body.noticeAccepted, true);
     assert.equal(res.body.processing, 'drinkme');
     assert.equal(res.body.noticeVersion, 1);
-    assert.deepEqual(res.body.settings, { basics: ['gheață', 'apă', 'zahăr', 'sare'], basicsCustomized: false, photoOptIn: false });
+    assert.deepEqual(res.body.settings, { basics: ['gheață', 'apă', 'zahăr', 'sare'], basicsCustomized: false, photoOptIn: false, photoOptInAvailable: true });
     assert.equal(stub.calls[0].path, '/v1/health');
   });
 
@@ -199,7 +211,7 @@ describe('PUT /api/ai/settings', () => {
     assert.equal((await api('PUT', '/api/ai/settings', { uid: EMPTY_BAR, body: { basics: [''] } })).status, 400);
     assert.equal((await api('PUT', '/api/ai/settings', { uid: EMPTY_BAR, body: { photoOptIn: 'yes' } })).status, 400);
     const reset = await api('PUT', '/api/ai/settings', { uid: EMPTY_BAR, body: { basics: null } });
-    assert.deepEqual(reset.body, { basics: ['ice', 'water', 'sugar', 'salt'], basicsCustomized: false, photoOptIn: false });
+    assert.deepEqual(reset.body, { basics: ['ice', 'water', 'sugar', 'salt'], basicsCustomized: false, photoOptIn: false, photoOptInAvailable: true });
   });
 });
 
@@ -278,32 +290,60 @@ describe('POST /api/ai/barcode', () => {
 });
 
 describe('POST /api/ai/recipes', () => {
-  test('Smart Bar mode: safety and ingredient rules drop bad recipes; a mocktail is added when missing', async () => {
-    stub.recipeReplies = [[GIN_TONIC, TOO_STRONG, FLAMING, OFF_BAR, SECOND, THIRD], [CUKE]];
+  const recipeCallsOf = (kind) => recipeCalls().filter((c) => c.body.mocktailsOnly === (kind === 'mocktail'));
+
+  test('Smart Bar mode: one recipe per slot, bad ones retried once, a mocktail slot with only non-alcoholic items', async () => {
+    stub.recipeHandler = pools({ regular: [GIN_TONIC, TOO_STRONG, FLAMING, OFF_BAR, SECOND], mocktail: [CUKE] });
     const res = await api('POST', '/api/ai/recipes', { body: { mode: 'smart_bar', language: 'en', newSession: true } });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.recipes.map((r) => r.name), ['Garden G&T', 'Cucumber Gin Cooler', 'Sapphire Long Drink', 'Cucumber Tonic']);
+    assert.deepEqual(res.body.recipes.map((r) => r.name).sort(), ['Cucumber Gin Cooler', 'Cucumber Tonic', 'Garden G&T']);
     const [first] = res.body.recipes;
     assert.match(first.id, /^r_[0-9a-f]{16}$/);
     assert.equal(first.aiGenerated, true);
-    assert.match(first.responsibleNote, /Enjoy responsibly/);
-    assert.equal(res.body.recipes[3].isAlcoholic, false);
+    assert.match(res.body.recipes.find((r) => r.name === 'Garden G&T').responsibleNote, /Enjoy responsibly/);
+    assert.equal(res.body.recipes.find((r) => r.name === 'Cucumber Tonic').isAlcoholic, false);
     const calls = recipeCalls();
-    assert.equal(calls.length, 2, 'no regeneration: 3 survived');
+    assert.ok(calls.every((c) => c.body.count === 1 && typeof c.body.styleHint === 'string'));
     assert.equal(calls[0].headers['x-ai-service-token'], 'stub-token');
-    assert.equal(calls[0].body.mode, 'smart_bar');
     assert.deepEqual(calls[0].body.ingredients.map((i) => i.name), ['Bombay Sapphire Gin', 'Schweppes Tonic', 'cucumber']);
     assert.deepEqual(calls[0].body.basics, ['ice', 'water', 'sugar', 'salt']);
-    assert.equal(calls.at(-1).body.mocktailsOnly, true, 'the top-up asks for a mocktail');
+    const [mocktailCall] = recipeCallsOf('mocktail');
+    assert.deepEqual(mocktailCall.body.ingredients.map((i) => i.name), ['Schweppes Tonic', 'cucumber'], 'the gin never reaches the mocktail slot');
+  });
+
+  test('stream: true sends each recipe as an NDJSON line, then done', async () => {
+    stub.recipeHandler = pools({ regular: [GIN_TONIC, SECOND, THIRD], mocktail: [CUKE] });
+    const res = await fetch(`${server.baseUrl}/api/ai/recipes`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token(ADULT)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'smart_bar', newSession: true, stream: true }),
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /application\/x-ndjson/);
+    const lines = (await res.text()).trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(lines[0].type, 'start');
+    assert.deepEqual(lines.filter((l) => l.type === 'recipe').map((l) => l.recipe.name).sort(), ['Cucumber Gin Cooler', 'Cucumber Tonic', 'Garden G&T', 'Sapphire Long Drink']);
+    assert.deepEqual(lines.at(-1), { type: 'done', exhausted: false, count: 4 });
+  });
+
+  test('stream: an error after the start arrives as an error line', async () => {
+    stub.recipeHandler = () => ({ status: 503, body: { error: { code: 'model_unavailable', message: 'down' } } });
+    const res = await fetch(`${server.baseUrl}/api/ai/recipes`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token(ADULT)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'smart_bar', newSession: true, stream: true }),
+    });
+    const lines = (await res.text()).trim().split('\n').map((l) => JSON.parse(l));
+    assert.deepEqual([lines.at(-1).type, lines.at(-1).code], ['error', 'ai_unavailable']);
   });
 
   test('another batch excludes what was shown; repeats are dropped; only repeats means exhausted', async () => {
-    stub.recipeReplies = [[GIN_TONIC, SECOND, CUKE]];
+    stub.recipeHandler = pools({ regular: [GIN_TONIC, SECOND, THIRD], mocktail: [CUKE] });
     await api('POST', '/api/ai/recipes', { body: { mode: 'smart_bar', newSession: true } });
     stub.calls = [];
-    stub.recipeReplies = [[GIN_TONIC, SECOND], [CUKE]];
+    stub.recipeHandler = pools({ regular: [GIN_TONIC, SECOND, THIRD, GIN_TONIC, SECOND, THIRD], mocktail: [CUKE, CUKE] });
     const again = await api('POST', '/api/ai/recipes', { body: { mode: 'smart_bar' } });
-    assert.deepEqual(recipeCalls()[0].body.excludeNames, ['Garden G&T', 'Cucumber Gin Cooler', 'Cucumber Tonic']);
+    assert.ok(['Garden G&T', 'Cucumber Gin Cooler', 'Sapphire Long Drink', 'Cucumber Tonic'].every((n) => recipeCalls()[0].body.excludeNames.includes(n)));
     assert.equal(again.status, 200);
     assert.deepEqual(again.body.recipes, []);
     assert.equal(again.body.exhausted, true);
@@ -312,7 +352,7 @@ describe('POST /api/ai/recipes', () => {
   test('scan mode: the real ABV of the scanned bottle is used even when the model says 0 (brand-name spirit)', async () => {
     const SNEAKY = R('Smirnoff Cooler', [{ name: 'Smirnoff Red', amount: 180, unit: 'ml', abv: 0, optional: false }, ml('soda water', 60)], { isAlcoholic: false });
     const SMALL = R('Smirnoff Highball', [{ name: 'Smirnoff Red', amount: 30, unit: 'ml', abv: 0, optional: false }, ml('soda water', 120)], { isAlcoholic: false });
-    stub.recipeReplies = [[SNEAKY, SMALL], [], []];
+    stub.recipeHandler = pools({ regular: [SNEAKY, SMALL] });
     const item = { category: 'spirit', brand: 'Smirnoff', product: 'Red', abv: 37.5 };
     const res = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item, newSession: true } });
     assert.equal(res.status, 200);
@@ -324,54 +364,63 @@ describe('POST /api/ai/recipes', () => {
   });
 
   test('scan mode: a scanned energy drink mixed with alcohol gets the warning', async () => {
-    stub.recipeReplies = [[R('Night Fuel', [ml('Monster Ultra White', 150), ml('vodka', 30, 40)])], [], []];
+    stub.recipeHandler = pools({ regular: [R('Night Fuel', [ml('Monster Ultra White', 150), ml('vodka', 30, 40)])] });
     const item = { category: 'energy_drink', brand: 'Monster', product: 'Ultra White', abv: null };
     const res = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item, newSession: true } });
     assert.deepEqual(res.body.recipes[0].warnings, ['energy_alcohol']);
   });
 
-  test('scan mode: built around the item, "you will also need" listed, water refused', async () => {
+  test('scan mode: built around the item, the mocktail slot gets flavour notes only, water refused', async () => {
     const LEMON = R('Gin Sour Light', [ml('Bombay Sapphire gin', 40, 40), ml('lemon juice', 20), ml('simple syrup', 10)]);
     const VODKA = R('Vodka Tonic', [ml('vodka', 40, 40), ml('tonic water', 120)]);
-    stub.recipeReplies = [[LEMON, GIN_TONIC, SECOND, CUKE, VODKA]];
+    stub.recipeHandler = pools({ regular: [LEMON, VODKA, GIN_TONIC, SECOND], mocktail: [CUKE] });
     const item = { category: 'spirit', brand: 'Bombay Sapphire', product: 'London Dry Gin', abv: 40 };
     const res = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item, language: 'ro', newSession: true } });
     assert.equal(res.status, 200);
     const sour = res.body.recipes.find((r) => r.name === 'Gin Sour Light');
     assert.deepEqual(sour.youWillAlsoNeed, ['lemon juice']);
     assert.equal(res.body.recipes.some((r) => r.name === 'Vodka Tonic'), false, 'an alcoholic recipe without the scanned item is dropped');
-    assert.equal(res.body.recipes.some((r) => r.name === 'Cucumber Tonic'), true, 'a mocktail inspired by the alcoholic bottle may leave it out');
-    const call = recipeCalls()[0].body;
+    assert.equal(res.body.recipes.some((r) => r.name === 'Cucumber Tonic'), true, 'the mocktail echoes the bottle without containing it');
+    const call = recipeCallsOf('regular')[0].body;
     assert.deepEqual([call.mode, call.language, call.ingredients[0].name], ['scan', 'ro', 'Bombay Sapphire London Dry Gin']);
+    const mocktailCall = recipeCallsOf('mocktail')[0].body;
+    assert.match(mocktailCall.ingredients[0].name, /^alcohol-free drink with juniper/);
+    assert.ok(!/bombay|sapphire/i.test(JSON.stringify(mocktailCall.ingredients)), 'the bottle is never named in the mocktail request');
     const water = await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item: { category: 'water', brand: 'Borsec' } } });
     assert.deepEqual([water.status, water.body.code], [400, 'water_no_recipes']);
   });
 
-  test('regenerates once when too few survive, then fails clearly when nothing is valid', async () => {
-    stub.recipeReplies = [[TOO_STRONG, FLAMING], [TOO_STRONG]];
+  test('a failed slot is retried once; nothing valid at all ends with ai_invalid_output', async () => {
+    stub.recipeHandler = () => [TOO_STRONG];
     const res = await api('POST', '/api/ai/recipes', { body: { mode: 'smart_bar', newSession: true } });
     assert.deepEqual([res.status, res.body.code], [502, 'ai_invalid_output']);
-    assert.equal(recipeCalls().length, 2);
+    assert.equal(recipeCalls().length, 8, '4 slots × 2 attempts');
   });
 
-  test('one unusable model answer is retried once; the second answer is used', async () => {
-    stub.recipeReplies = [{ status: 502, body: { error: { code: 'model_invalid_output', message: 'x' } } }, [GIN_TONIC, SECOND, CUKE]];
+  test('one unusable model answer is retried; the second answer is used', async () => {
+    let first = true;
+    const pool = pools({ regular: [GIN_TONIC, SECOND, THIRD], mocktail: [CUKE] });
+    stub.recipeHandler = (body) => {
+      if (first) { first = false; return { status: 502, body: { error: { code: 'model_invalid_output', message: 'x' } } }; }
+      return pool(body);
+    };
     const res = await api('POST', '/api/ai/recipes', { uid: RETRY, body: { mode: 'smart_bar', newSession: true } });
     assert.equal(res.status, 200);
-    assert.equal(res.body.recipes.length, 3);
-    assert.equal(recipeCalls().length, 2);
+    assert.equal(res.body.recipes.length, 4);
+    assert.equal(recipeCalls().length, 5);
   });
 
-  test('input errors: bad mode, bad item, empty Smart Bar', async () => {
+  test('input errors: bad mode, bad item, bad stream flag, empty Smart Bar', async () => {
     assert.equal((await api('POST', '/api/ai/recipes', { body: { mode: 'party' } })).status, 400);
     assert.equal((await api('POST', '/api/ai/recipes', { body: { mode: 'scan', item: { category: 'potion' } } })).status, 400);
+    assert.equal((await api('POST', '/api/ai/recipes', { body: { mode: 'smart_bar', stream: 'yes' } })).status, 400);
     const empty = await api('POST', '/api/ai/recipes', { uid: EMPTY_BAR, body: { mode: 'smart_bar' } });
     assert.deepEqual([empty.status, empty.body.code], [400, 'smart_bar_empty']);
   });
 
   test('one AI request per user at a time', async () => {
-    stub.recipeDelayMs = 700;
-    stub.recipeReplies = [[R('Orange Fizz', [ml('orange juice', 150)], { isAlcoholic: false }), R('OJ Cooler', [ml('orange juice', 120), ml('water', 30)], { isAlcoholic: false }), R('Sunrise Light', [ml('orange juice', 160)], { isAlcoholic: false })]];
+    stub.recipeDelayMs = 400;
+    stub.recipeHandler = pools({ regular: [R('Orange Fizz', [ml('orange juice', 150)], { isAlcoholic: false }), R('OJ Cooler', [ml('orange juice', 120), ml('water', 30)], { isAlcoholic: false }), R('Sunrise Light', [ml('orange juice', 160)], { isAlcoholic: false })], mocktail: [R('OJ Spritz', [ml('orange juice', 100), ml('water', 50)], { isAlcoholic: false })] });
     const [a, b] = await Promise.all([
       api('POST', '/api/ai/recipes', { uid: BUSY, body: { mode: 'smart_bar', newSession: true } }),
       new Promise((r) => setTimeout(r, 150)).then(() => api('POST', '/api/ai/recipes', { uid: BUSY, body: { mode: 'smart_bar' } })),
@@ -383,34 +432,34 @@ describe('POST /api/ai/recipes', () => {
 
 describe('saved recipes', () => {
   test('save, list, save again (same id), delete', async () => {
-    stub.recipeReplies = [[GIN_TONIC, SECOND, CUKE]];
-    const { body } = await api('POST', '/api/ai/recipes', { body: { mode: 'smart_bar', newSession: true } });
+    stub.recipeHandler = pools({ regular: [GIN_TONIC, SECOND, THIRD], mocktail: [CUKE] });
+    const { body } = await api('POST', '/api/ai/recipes', { uid: SAVER, body: { mode: 'smart_bar', newSession: true } });
     const recipe = body.recipes[0];
-    const saved = await api('POST', '/api/recipes/saved', { body: { recipe } });
+    const saved = await api('POST', '/api/recipes/saved', { uid: SAVER, body: { recipe } });
     assert.equal(saved.status, 201);
     assert.equal(saved.body.id, recipe.id);
     assert.ok(saved.body.savedAt);
-    assert.equal((await api('POST', '/api/recipes/saved', { body: { recipe } })).status, 200);
-    const list = await api('GET', '/api/recipes/saved');
+    assert.equal((await api('POST', '/api/recipes/saved', { uid: SAVER, body: { recipe } })).status, 200);
+    const list = await api('GET', '/api/recipes/saved', { uid: SAVER });
     assert.deepEqual(list.body.items.map((r) => r.id), [recipe.id]);
     assert.deepEqual((await api('GET', '/api/recipes/saved', { uid: OPTIN })).body.items, [], 'only the owner sees them');
     assert.equal((await api('DELETE', `/api/recipes/saved/${recipe.id}`, { uid: OPTIN })).status, 404);
-    assert.equal((await api('DELETE', `/api/recipes/saved/${recipe.id}`)).status, 204);
-    assert.deepEqual((await api('GET', '/api/recipes/saved')).body.items, []);
+    assert.equal((await api('DELETE', `/api/recipes/saved/${recipe.id}`, { uid: SAVER })).status, 204);
+    assert.deepEqual((await api('GET', '/api/recipes/saved', { uid: SAVER })).body.items, []);
   });
 
   test('a modified client cannot save an unsafe or invalid recipe', async () => {
-    const res = await api('POST', '/api/recipes/saved', { body: { recipe: FLAMING } });
+    const res = await api('POST', '/api/recipes/saved', { uid: SAVER, body: { recipe: FLAMING } });
     assert.deepEqual([res.status, res.body.code], [400, 'recipe_invalid']);
-    assert.equal((await api('POST', '/api/recipes/saved', { body: { recipe: TOO_STRONG } })).status, 400);
-    assert.equal((await api('POST', '/api/recipes/saved', { body: {} })).status, 400);
+    assert.equal((await api('POST', '/api/recipes/saved', { uid: SAVER, body: { recipe: TOO_STRONG } })).status, 400);
+    assert.equal((await api('POST', '/api/recipes/saved', { uid: SAVER, body: {} })).status, 400);
   });
 
   test('saved recipes survive a restart', async () => {
-    const saved = await api('POST', '/api/recipes/saved', { body: { recipe: CUKE } });
+    const saved = await api('POST', '/api/recipes/saved', { uid: SAVER, body: { recipe: CUKE } });
     assert.equal(saved.status, 201);
     await server.restart();
-    const list = await api('GET', '/api/recipes/saved');
+    const list = await api('GET', '/api/recipes/saved', { uid: SAVER });
     assert.ok(list.body.items.some((r) => r.id === saved.body.id));
   });
 });

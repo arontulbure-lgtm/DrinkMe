@@ -78,12 +78,17 @@ def recipe_system(language: str, mode: str, basics: list[str], mocktails_only: b
         mode_rules = RECIPE_MODE_SCAN
     else:
         mode_rules = RECIPE_MODE_SMART_BAR  # the basics themselves are user text: they go in the user message
-    mix = RECIPE_MOCKTAIL_RULE if mocktails_only else RECIPE_MIX_RULE.format(count=count)
+    if mocktails_only:
+        mix = RECIPE_MOCKTAIL_RULE
+    elif count == 1:
+        mix = "Make exactly 1 recipe. Never call a drink with alcohol a mocktail."
+    else:
+        mix = RECIPE_MIX_RULE.format(count=count)
     return RECIPE_SYSTEM.format(language=_LANGUAGE_NAMES.get(language, "English"), mode_rules=f"{mode_rules}\n- {mix}")
 
 
 def recipe_user_message(mode: str, ingredients: list[str], exclude: list[str], count: int,
-                        basics: list[str] | None = None) -> str:
+                        basics: list[str] | None = None, style_hint: str | None = None) -> str:
     # User text is quoted and delimited; it is data, not instructions.
     items = "; ".join(f'"{name}"' for name in ingredients)
     if mode == "scan":
@@ -93,4 +98,6 @@ def recipe_user_message(mode: str, ingredients: list[str], exclude: list[str], c
         text = f"My ingredients: {items}.\nAlways-allowed basics: {allowed}.\nCreate {count} recipes."
     if exclude:
         text += "\nDo not repeat these recipes (already shown): " + "; ".join(f'"{n}"' for n in exclude[:40]) + "."
+    if style_hint:
+        text += f"\nKind of drink wanted: {style_hint}."
     return text
