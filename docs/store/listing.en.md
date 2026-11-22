@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Store listing – English (App Store + Google Play)
 
@@ -91,3 +91,6 @@ Replace `[BASE_URL]`, `[PRIVACY_URL]` and `[TERMS_URL]` before pasting. Until th
 - Never show: anyone who looks under 25 with alcohol, several drinks lined up for one person, shots or "drinking game" content, drinking near cars or at work, prices, shop links or "buy" buttons, brand logos used as advertising.
 - Do not show the "AI Scanner – Coming soon" or "AI Recipe Generator – Coming soon" screens (Apple 2.1 / 2.3: unfinished features). VERIFY with the planner whether the Scanner tab should be hidden in the store build (see `README.md` §4).
 - Captions follow the same rules as the description ("Taste, not quantity").
+
+## 7. When AI is enabled (separate release – not v1.0.0)
+Do not mention the scanner or AI recipes in v1.0.0 (they are off). When a release turns them on, add at most one honest line, for example: "Scan a bottle or a barcode to add it to your Smart Bar, and get AI drink ideas – AI suggestions can be wrong; always check ingredients." Rules: call it AI; no "instant", "personalised" or "perfect" promises (LC-44); keep non-alcoholic options visible; screenshots only from a build where the feature works.

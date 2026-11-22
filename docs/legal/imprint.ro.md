@@ -1,16 +1,16 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-12 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `imprint.md`.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2 – 2026-11-22 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `imprint.md`.
 
 # Informații legale (impressum)
 
-Versiunea 0.1 · Data intrării în vigoare: [se stabilește la publicare]
+Versiunea 0.2 · Data intrării în vigoare: [se stabilește la publicare]
 
 **Furnizorul serviciului:** Tulbure Aron PFA (persoană fizică autorizată)
 **Adresă:** B-dul Bucureștii Noi 136, Parter, Ap. 5, Sector 1, București, România
 **Număr de ordine în Registrul Comerțului:** `[DE COMPLETAT DE JOHN]`
 **Cod de identificare fiscală (CUI):** `[DE COMPLETAT DE JOHN]`
 **Cod TVA:** `[DE COMPLETAT DE JOHN sau „neînregistrat în scopuri de TVA”]`
-**Email:** drinkmesocialapp@gmail.com
+**Email:** drinkmesocialapp@gmail.com (în aplicație: Editează profilul → Informații legale și ajutor → Contactează-ne)
 **Telefon:** `[DE COMPLETAT DE JOHN – opțional; Directiva privind comerțul electronic cere un mijloc de contact rapid și direct; emailul poate fi suficient – DE VERIFICAT]`
 **Persoană responsabilă:** Aron Tulbure
 

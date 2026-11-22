@@ -1,5 +1,5 @@
-DRAFT v0.1 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-16 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `listing.en.md`.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2 – 2026-11-22 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `listing.en.md`.
 
 # Prezentarea în magazine – română (App Store + Google Play)
 
@@ -77,3 +77,6 @@ Consumă cu responsabilitate.
 
 ## 6. Capturi de ecran
 Aceleași reguli ca în `listing.en.md` §6. Folosește capturi cu aplicația în limba română pentru localizarea ro.
+
+## 7. Când AI este activat (versiune separată – nu v1.0.0)
+Nu menționa scanerul sau rețetele AI în v1.0.0 (sunt dezactivate). Când o versiune le activează, adaugă cel mult un rând corect, de exemplu: „Scanează o sticlă sau un cod de bare ca să o adaugi în Smart Bar și primește idei de băuturi de la AI – sugestiile AI pot fi greșite; verifică mereu ingredientele.” Reguli: spune că este AI; fără promisiuni „instant”, „personalizat” sau „perfect” (LC-44); opțiunile fără alcool rămân vizibile; capturi doar dintr-o versiune în care funcția merge.

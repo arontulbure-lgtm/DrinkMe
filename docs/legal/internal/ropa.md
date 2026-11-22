@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-12 (P5, P12 updated 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.1 – 2026-11-12 (P7 updated 2026-11-22; P5, P12 updated 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Record of processing activities – GDPR Art. 30(1) (internal)
 
@@ -14,7 +14,7 @@ Art. 30(5) exempts organisations under 250 employees only for occasional process
 | P4 | Smart Bar | Private home-bar list | Users | Drink names, quantities | (b) contract | Hosting | as P3 | Until deleted | Owner-only |
 | P5 | Moderation (reports, auto-hide, admin review, suspensions, reported-version snapshot; automated reserved-name check against impersonation of the official account, with a temporary `nameReservedAtSignIn` yes/no marker) | Safety, enforce Terms, DSA notice and action | Users, reporters, reported users | Report data, reason codes, suspension history; profile names (checked, not stored differently) | (f) legitimate interest (safe platform, preventing impersonation); (c) DSA Arts. 16–17 | Admins (internal) | none | See retention schedule | Admin allowlist, data minimised |
 | P6 | Audit log | Accountability for security and moderation actions | Users, admins | ids, action, time | (f) legitimate interest; Art. 5(2) accountability | Admins | none | 90 d | Whitelisted fields only |
-| P7 | Abuse prevention (rate limits, daily limits, request logs) | Security | Users, any client | IP, user agent, path, uid counters | (f) legitimate interest (security, Recital 49) | Hosting | as P3 | Limits 24 h; logs gap LC-15 | — |
+| P7 | Abuse prevention (rate limits, daily limits, request logs) | Security | Users, any client | IP (memory only, ≤ 15 min), path, uid counters, App Check result counts | (f) legitimate interest (security, Recital 49) | Hosting; Google/Apple for App Check once on | as P3 | Limits 24 h; request logs without IP/UA, host retention ≤ 30 days (operational, LC-15) | — |
 | P8 | Backups | Recovery | All | Full database | (f) legitimate interest; Art. 32 | Hosting/backup storage | as P3 | ≤ 30 d | 0600 files, separate storage |
 | P9 | Account deletion | Erasure | Users | uid, anonymous id | (c) Art. 17 GDPR | Firebase | US | Tombstone ~1 h | Fresh sign-in required |
 | P10 | Place search | Add a venue to a post | Users | Search text, IP | (b) contract | Google Maps Platform | US | Google's | — |

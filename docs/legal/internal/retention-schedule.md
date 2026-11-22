@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-12 (session-security, audit and `nameReservedAtSignIn` rows 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.1 – 2026-11-12 (request-log, Postgres history rows 2026-11-22; session-security, audit and `nameReservedAtSignIn` rows 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Retention schedule (internal)
 
@@ -24,7 +24,10 @@ Every period below is enforced by code unless marked **operational** (someone mu
 | Scheduled backups (`npm run backup`) | Daily 7 days, weekly 28 days | Pruned by the script after a successful run | Code + **operational** (must run daily) |
 | In-server backups (`.corrupt-*`, `.pre-migration-*`) | 21 days; 7-day recovery hold after data loss; hard ceiling 30 days | Purge timer | Code |
 | Host / volume snapshots, hand-made copies | ≤ 30 days | — | **Operational** (`server/README.md` Backups) |
-| Server request logs (IP, user agent, path) | **Not set** (depends on host) | — | **Gap LC-15**: set ≤ 30 days at the host, or drop IP/UA from the production log format |
+| Server request logs (time, method, path, status, size, duration; no IP/UA/referrer since T-05) | **≤ 30 days at the host** – operational, not set yet (host not chosen) | Host log retention | Code ✅ (no IP/UA); **operational** LC-15: set the host's log retention ≤ 30 days |
+| Rate-limit IP keys | 15 minutes (global limiter) / 1 minute (mutations), memory only | Window ends | Code |
+| Postgres history snapshots (`DB_DRIVER=postgres`) | ≤ 28 days (and ≤ 30 rows) | Pruned on write, at start and every 24 h | Code (`server/storage/postgres-store.js:16-20`) + **operational**: provider backups / PITR ≤ 30 days |
+| Terms acceptance (`termsVersion`, `termsAcceptedAt`) | Life of the account | Account deletion cascade | Code |
 | Firebase Authentication account | Until account deletion (server deletes it) | `deleteUser` | Code; Google's own backup retention: VERIFY in Firebase terms |
 | Emails sent by Firebase (verification, reset) | Google's retention | — | VERIFY |
 | Device: API token | 30-day expiry; deleted on logout or a 401/403 | — | Code |

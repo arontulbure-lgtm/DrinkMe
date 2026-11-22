@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.1 – 2026-11-12 (database and App Check rows 2026-11-22) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Processors, sub-processors and other recipients (internal)
 
@@ -10,7 +10,8 @@ DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before public
 | Apple – Sign in with Apple (iOS) | Independent controller for the Apple ID; may relay email (private relay) | Name, email or relay address | US/global | Apple Developer agreement | Code present; Firebase Apple provider status VERIFY |
 | Hosting provider (Railway or Render planned, INFRA-1) | Processor | Whole database, backups, request logs | Choose an EU region; if US company: DPF/SCCs | Provider DPA | **Not chosen (decision D-07)** |
 | Backup storage (separate from the database volume) | Processor | Database copies | Same as hosting, EU region | DPA | Not chosen |
-| Database provider (DATA-1: Supabase Postgres or MongoDB Atlas candidates) | Processor | Whole database | Choose EU region | DPA | Not chosen |
+| Managed Postgres provider (only if `DB_DRIVER=postgres`, DATA-1) | Processor | Whole database (one JSON document), its history table (≤ 28 days) and the provider's own backups/PITR (must be ≤ 30 days) | Choose EU region; TLS with certificate check | DPA | Not chosen (decision D-07) |
+| Google (Firebase App Check, Play Integrity) and Apple (App Attest / DeviceCheck) – only once App Check is switched on | Google: processor for token verification under the Firebase terms; Play Integrity / App Attest: device-side attestation by the platform – VERIFY roles | Attestation token (app id, no account data); device integrity signals processed by Google/Apple | US/global; Firebase data processing terms | Firebase terms (already accepted for Authentication – VERIFY App Check is covered) | Code ready, not active (`APP_CHECK_MODE=off`, no native provider) |
 | Email provider for the contact address (`drinkmesocialapp@gmail.com`, Gmail) | Processor/controller for mailbox content – VERIFY consumer Gmail terms | User emails, DSR, notices | US/global | Consumer Gmail has no DPA – **recommend Google Workspace or another business mailbox with a DPA** (decision D-15) | Active |
 | OpenAI (only if `AI_ENABLED=true`) | Processor | Scanner photos, ingredient lists | US; SCCs / DPF – VERIFY | OpenAI DPA | **Off. Do not enable before the privacy documents are updated and the DPA is signed** |
 | Apple App Store, Google Play | Independent controllers | Store account, downloads, crash data they collect | Global | Store agreements | Disclose in privacy policy |

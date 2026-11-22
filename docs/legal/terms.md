@@ -1,8 +1,8 @@
-DRAFT v0.3 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.4 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
-# DrinkMe Terms and Conditions
+# DrinkMe Terms of Use
 
-Version 0.3 · Effective date: [to be set at publication] · Terms version for in-app acceptance: `TERMS_VERSION = 1` (planned, LC-03)
+Version 0.4 · Effective date: [to be set at publication] · Terms version for in-app acceptance: `TERMS_VERSION = 1`. The app asks you to accept these Terms ("I agree to the Terms of Use") and records the version and the date you accepted. These Terms are also called our Terms and Conditions.
 
 ## 1. Who we are
 DrinkMe is operated by **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, Ap. 5, Sector 1, Bucharest, Romania, tax id (CUI) `[TO FILL BY JOHN]`, Trade Register no. `[TO FILL BY JOHN]` ("we", "us"). Contact: **drinkmesocialapp@gmail.com**. See also our Imprint.
@@ -10,7 +10,7 @@ DrinkMe is operated by **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, 
 These Terms, together with the **Community Guidelines**, the **Age and Alcohol Policy**, the **Content Moderation Policy** and the **Copyright Policy**, form the agreement between you and us. Our **Privacy Policy** explains how we use personal data; it is not part of the contract.
 
 ## 2. The service
-DrinkMe is a free social app for discovering drinks, alcoholic and non-alcoholic. You can create a profile, post drinks with a photo, rating, description and place, comment, give "cheers", save posts, connect with drink partners (both must agree), receive in-app notifications, keep a private Smart Bar list, and explore and search. DrinkMe does not sell or deliver alcohol. The service is in **beta**: features may change, and some (for example AI features and Stories) are switched off.
+DrinkMe is a free social app for discovering drinks, alcoholic and non-alcoholic. You can create a profile, post drinks with a photo, rating, description and place, comment, give "cheers", save posts, connect with drink partners (both must agree), receive in-app notifications, keep a private Smart Bar list, and explore and search. DrinkMe does not sell or deliver alcohol. The service is in **beta**: features may change, and some (for example the AI features and Stories) are switched off in this version. Section 7a applies only once the AI features are switched on.
 
 ## 3. Who can use DrinkMe
 - You must be at least **18** and at least the **legal age to buy alcohol where you live** (for example 21 in the United States, 20 in Japan, 19 in South Korea – see the Age and Alcohol Policy). The app asks you to confirm your age before showing any content. Confirming an age you have not reached breaks these Terms.
@@ -32,6 +32,17 @@ You must follow the Community Guidelines. In short: no content involving minors 
 
 ## 7. Alcohol disclaimer
 Content on DrinkMe is posted by users, and by the official DrinkMe account, for information and enjoyment. It is not advice. We are responsible for what the official account publishes; users are responsible for what they publish. Always drink responsibly and legally, never drink and drive, and never pressure anyone to drink. Recipes and ratings are opinions; check ingredients for allergies. You are responsible for your own consumption.
+
+## 7a. AI features (applies once the AI features are switched on)
+*This section applies only once the drink scanner and AI recipes are switched on in the app.*
+- **What they are.** The drink scanner suggests what a bottle, can, carton or ingredient is from a photo (or looks up a barcode in the Open Food Facts database), and AI recipes suggests drink recipes built from what you scanned or from your Smart Bar. Both are optional and are marked "AI-generated" in the app.
+- **18+ only.** The AI features are only for users who confirmed they are 18 or older (or older where the law of your country requires it, §3). You must accept the in-app AI notice before the first use.
+- **Information only, can be wrong.** AI results are automatically generated suggestions for information and enjoyment. They can be wrong or incomplete: the scanner can misread a product, its alcohol content or its volume, and a recipe can contain mistakes in ingredients, amounts or steps. Check the result before you rely on it.
+- **Not advice.** AI results are not medical, health, nutrition, allergy or safety advice. The AI does not know your allergies, intolerances, health, medication or pregnancy; check every ingredient and product label yourself.
+- **Alcohol content of recipes.** The alcohol strength and the number of standard drinks shown for a recipe are estimates calculated from typical values. The real alcohol content depends on the products and amounts you actually use. Do not rely on these figures to decide whether you can drive, work, take medication or drink safely. We do not accept responsibility for the alcohol content of a drink you prepare, or for how much you drink; you remain responsible for your own consumption (§7). Never drink and drive.
+- **Your use.** Do not use the AI features to create or obtain content that breaks these Terms or the Community Guidelines, do not try to get around their safety rules, and do not photograph other people, documents or anything other than drink products. Report a wrong, unsafe or offensive AI answer with the Report action in the app.
+- **Your photos.** Scan photos are processed to answer you and are not kept, unless you turn on "Help improve the scanner" – see the Privacy Policy §5a. AI results are not your posts; nothing generated by the AI is published on DrinkMe unless you post it yourself, and then §5 and §6 apply.
+- **Availability.** The AI features may be unavailable at times, limited (for example a number of requests per hour) or changed. Nothing in this section limits liability that cannot be limited by law (§12) or your rights as a consumer.
 
 ## 8. Moderation, suspension and termination
 - Anyone signed in can report a post, comment or profile (reasons: spam, harassment, underage, dangerous drinking, mislabelled alcohol, other) and block other users.
@@ -55,7 +66,7 @@ We work to keep DrinkMe available but cannot promise it will always be uninterru
 - We are a hosting service for user content: we act on illegal content when we know about it (Regulation (EU) 2022/2065, Art. 6).
 
 ## 13. Changes to these Terms
-We may update these Terms, for example for new features or legal changes. For important changes we will tell you in the app at least 15 days before they apply (except for urgent legal or safety changes) and ask you to accept them. If you do not agree, you can delete your account before the change applies.
+We may update these Terms, for example for new features or legal changes. For important changes we will tell you in the app at least 15 days before they apply (except for urgent legal or safety changes) and ask you to accept them: the app then shows the Terms step again with the new version number. If you do not agree, you can delete your account before the change applies.
 
 ## 14. Governing law and disputes
 - These Terms are governed by **Romanian law**. If you are a consumer living in another country, you keep the protection of the mandatory laws of your country of residence, and you may bring claims in the courts of your country.
@@ -68,3 +79,4 @@ Tulbure Aron PFA · drinkmesocialapp@gmail.com · B-dul Bucureștii Noi 136, Par
 
 ---
 Legal sources checked 2026-11-12: Regulation (EU) 2022/2065 (DSA) Arts. 6, 14, 16, 17, 19; Regulation (EU) 2024/3228 (ODR repeal, EUR-Lex); Regulation (EC) 593/2008 (Rome I) Art. 6; Regulation (EU) 1215/2012 Arts. 17–18; Directive 93/13/EEC (unfair terms) – VERIFY all with counsel. Region-specific notes (US, UK, others): see the privacy addenda and OPEN_DECISIONS.
+Checked 2026-11-22 against the code (launch branch `auto/launch-2026-11-17`): Terms acceptance with a version (`TERMS_VERSION = 1` on the server; the in-app Terms step exists behind `EXPO_PUBLIC_TERMS_STEP_ENABLED` and must be on in the store build). §7a is drafted from branch `auto/ai-2026-11-16` (PR #4, not merged); it is part of version 1 so that switching AI on later does not require a new acceptance, but it applies only once AI is switched on.

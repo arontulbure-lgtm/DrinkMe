@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-12 (§5 rewritten, §5a final and §1–2 updated 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.1 – 2026-11-12 (launch rows 2026-11-22; §5 rewritten, §5a final and §1–2 updated 2026-11-13) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Data inventory (internal)
 
@@ -13,10 +13,13 @@ Controller: Tulbure Aron PFA (see `../imprint.md`). Contact: drinkmesocialapp@gm
 |---|---|---|
 | Server database: one JSON file (`DB_FILE`, default `server/data/db.json`) | Everything in section 2 | `server/README.md` "Data operations"; persistence in `server/server.js` |
 | Server backups | Full copies of the database | `server/scripts/backup.js:29-30` (daily 7 days, weekly 28 days); in-server `.corrupt-*` / `.pre-migration-*` copies `server/server.js:4587-4612` (21 days), recovery hold `:4619` (7 days), hard ceiling `:4690` (30 days) |
-| Server request log (stdout of the host) | IP address, time, method, path (query string and the account-deletion uid removed), status, size, referrer, user agent (morgan `combined` in production) | `server/server.js:239-244` |
+| Server request log (stdout of the host) | Production: time, method, path (query string and the account-deletion uid removed; other paths can contain a uid or post id), status, size, duration – **no IP address, user agent or referrer** (T-05). `LOG_FORMAT=json` gives the same fields as JSON. Development uses morgan `dev`. IP addresses are used only in memory by the rate limiters (`apiLimiter` 15-minute window, `mutationLimiter` 1 minute) | `server/server.js:315-335`, `:411-437` (working tree 2026-11-22) |
+| Terms of Use acceptance | `termsVersion` (int, `TERMS_VERSION = 1`), `termsAcceptedAt` (ISO) on the user record; audit `ack.terms_accepted` (meta: version) – self action, deleted with the account | `server/server.js:2171`, `:2187`, `:2574`, `:3456-3470`; client step behind `EXPO_PUBLIC_TERMS_STEP_ENABLED` (`src/screens/OnboardingScreen.tsx:23-29`, `:91`) |
+| App Check (`APP_CHECK_MODE` off / monitor / enforce, default off) | `X-Firebase-AppCheck` header (app attestation token, no account data) verified with Firebase Admin; the server keeps only counts (valid / missing / invalid). The app sends it only with `EXPO_PUBLIC_APP_CHECK_ENABLED=true` and a native provider (not added yet) | `server/app-check.js:1-40`, `server/server.js:440-452`; `src/lib/appCheck.ts` |
+| Database location (`DB_DRIVER` json / postgres) | Same data either way. Postgres: table `drinkme_state_history` keeps ≤ 30 snapshots, ≤ 1 per hour, none older than 28 days; TLS verified (`DATABASE_SSL=require`); provider backups must be ≤ 30 days (operational) | `server/storage/postgres-store.js:15-20`; `server/README.md` "Database: JSON or Postgres" |
 | Firebase Authentication (Google) | Email, password hash (password users), provider ids (Google, Apple), display name and photo URL from the provider, sign-in metadata; the server reads `disabled` and `tokensValidAfterTime` with one `getUser` per sign-in (section 5) | `src/config/firebase.ts:20-22`; `server/server.js:135` (fields read from the verified token); `server/server.js:2630-2648` (lookup) |
 | Phone (device) | API token, Firebase session, language choice, an email-verification cooldown record, cached images | section 4 |
-| Google Maps Platform (Places API, called from the phone) | The place search text and the phone's IP address | `src/components/LocationPickerModal.tsx:66`, `:110` |
+| Google Maps Platform (Places API, called from the phone) | The place search text and the phone's IP address; place details are requested without coordinates (the post keeps the place name only) | `src/components/LocationPickerModal.tsx:111-131` |
 | Google user-content servers | Google profile photos are linked, not copied; other users' phones load them from `lh3`–`lh6.googleusercontent.com` | `server/server.js:2588-2631`, `server/README.md` (auth flow) |
 | OpenAI (only if `AI_ENABLED=true`, currently **off**) | Photos for the scanner, Smart Bar ingredient lists | `server/server.js:4408` (`store: false`), `:4512-4548` |
 

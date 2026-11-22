@@ -1,15 +1,15 @@
-DRAFT v0.1 – 2026-11-12 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Imprint (legal information)
 
-Version 0.1 · Effective date: [to be set at publication]
+Version 0.2 · Effective date: [to be set at publication]
 
 **Service provider:** Tulbure Aron PFA (persoană fizică autorizată – authorised natural person)
 **Address:** B-dul Bucureștii Noi 136, Parter, Ap. 5, Sector 1, Bucharest, Romania
 **Trade Register number:** `[TO FILL BY JOHN]`
 **Tax identification number (CUI):** `[TO FILL BY JOHN]`
 **VAT number:** `[TO FILL BY JOHN, or "not registered for VAT"]`
-**Email:** drinkmesocialapp@gmail.com
+**Email:** drinkmesocialapp@gmail.com (in the app: Edit Profile → Legal & help → Contact us)
 **Telephone:** `[TO FILL BY JOHN – optional; the e-Commerce Directive requires a means of rapid, direct contact; email may suffice – VERIFY]`
 **Person responsible:** Aron Tulbure
 
