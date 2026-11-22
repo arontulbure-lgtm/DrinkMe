@@ -1,6 +1,7 @@
 """DrinkMe ai-service: FastAPI app. Run: python -m app.main (from ai-service/)."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 from contextlib import asynccontextmanager
@@ -31,7 +32,11 @@ def create_app(settings: Settings | None = None, client: OllamaClient | None = N
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.client = client or OllamaClient(settings)
+        # Warm the vision model in the background (the first scan after a start would otherwise wait 10-60 s).
+        warm_task = None if client else asyncio.create_task(app.state.client.warm(settings.vision_model))
         yield
+        if warm_task:
+            warm_task.cancel()
         await app.state.client.close()
 
     app = FastAPI(title="DrinkMe ai-service", version="1.0.0", lifespan=lifespan,

@@ -557,7 +557,7 @@ const translations = {
       notice: {
         title: 'Before you use AI',
         body:
-          'DrinkMe\'s scanner and recipes use AI. Your photo goes to DrinkMe\'s own AI server, where an open-weights model that we run ourselves reads it – no outside AI company receives it. The photo is used only to answer you and is deleted right after; it is never stored. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated".',
+          'DrinkMe\'s scanner and recipes use AI. Your photo goes to DrinkMe\'s own AI server, where an open-weights model that we run ourselves reads it – no outside AI company receives it. The photo is used only to answer you and is deleted right after; it is never stored. If you scan a barcode, only the number is looked up in Open Food Facts. AI can be wrong: check what the scanner found, and check every recipe ingredient for allergies and intolerances. Recipes are suggestions, not medical or nutrition advice. Alcoholic recipes are for adults 18+: drink responsibly and never drink and drive. Everything the AI creates is marked "AI-generated", and you can report any answer.',
         accept: 'I understand',
         privacyLink: 'Read the privacy policy',
       },
@@ -652,7 +652,7 @@ const translations = {
         unsaveLabel: 'Remove {{name}} from saved',
         saveFailed: 'Could not update your saved recipes. Please try again.',
         open: 'Open recipe {{name}}',
-        disclaimer: 'AI-generated recipe. It can contain mistakes: check every ingredient for allergies and intolerances. Amounts are for one serving. Not medical or nutrition advice.',
+        disclaimer: 'AI-generated recipe. It can contain mistakes: check every ingredient for allergies and intolerances. Amounts are for one serving. Not medical or nutrition advice. The text can contain language mistakes.',
         warnings: {
           raw_egg: 'Contains raw egg: not recommended during pregnancy, for young children, older people or anyone with a weak immune system.',
           energy_alcohol: 'Energy drink with alcohol: caffeine can hide how drunk you are. We do not recommend this mix.',
@@ -1265,7 +1265,7 @@ const translations = {
       notice: {
         title: 'Înainte să folosești AI',
         body:
-          'Scanerul și rețetele DrinkMe folosesc AI. Fotografia ta ajunge la propriul server AI al DrinkMe, unde un model cu ponderi deschise, rulat de noi, o citește – nicio companie AI externă nu o primește. Fotografia este folosită doar pentru a-ți răspunde și este ștearsă imediat după; nu este stocată niciodată. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”.',
+          'Scanerul și rețetele DrinkMe folosesc AI. Fotografia ta ajunge la propriul server AI al DrinkMe, unde un model cu ponderi deschise, rulat de noi, o citește – nicio companie AI externă nu o primește. Fotografia este folosită doar pentru a-ți răspunde și este ștearsă imediat după; nu este stocată niciodată. Dacă scanezi un cod de bare, doar numărul este căutat în Open Food Facts. AI poate greși: verifică ce a găsit scanerul și verifică fiecare ingredient din rețete pentru alergii și intoleranțe. Rețetele sunt sugestii, nu sfaturi medicale sau de nutriție. Rețetele cu alcool sunt pentru adulți 18+: consumă responsabil și nu conduce niciodată după ce ai băut. Tot ce creează AI este marcat „Generat de AI”, iar orice răspuns poate fi raportat.',
         accept: 'Am înțeles',
         privacyLink: 'Citește politica de confidențialitate',
       },
@@ -1360,7 +1360,7 @@ const translations = {
         unsaveLabel: 'Scoate {{name}} din salvate',
         saveFailed: 'Nu am putut actualiza rețetele salvate. Încearcă din nou.',
         open: 'Deschide rețeta {{name}}',
-        disclaimer: 'Rețetă generată de AI. Poate conține greșeli: verifică fiecare ingredient pentru alergii și intoleranțe. Cantitățile sunt pentru o porție. Nu este un sfat medical sau de nutriție.',
+        disclaimer: 'Rețetă generată de AI. Poate conține greșeli: verifică fiecare ingredient pentru alergii și intoleranțe. Cantitățile sunt pentru o porție. Nu este un sfat medical sau de nutriție. Textul poate conține greșeli de limbă.',
         warnings: {
           raw_egg: 'Conține ou crud: nerecomandat în sarcină, copiilor mici, vârstnicilor sau persoanelor cu imunitate scăzută.',
           energy_alcohol: 'Băutură energizantă cu alcool: cofeina poate ascunde cât de băut ești. Nu recomandăm această combinație.',

@@ -5346,6 +5346,21 @@ app.post('/api/ai/report', requireAuth, aiReportLimiter, (req, res) => {
   res.status(201).json({ reported: true });
 });
 
+// D-21/D-22 (LC-49): while the opt-in is not offered, no scan photo may exist and no opt-in may stay on. Photos
+// kept by testers before the flag are deleted at start, and the old opt-in fields cleared. Counts only are logged.
+if (!AI_PHOTO_OPT_IN_ENABLED) {
+  const { removed, failed } = aiPhotoStore.deleteAll();
+  let cleared = 0;
+  for (const user of userIndex.values()) {
+    if (user.aiPhotoOptIn === undefined && user.aiPhotoOptInAt === undefined && user.aiPhotoConsentVersion === undefined) continue;
+    delete user.aiPhotoOptIn;
+    delete user.aiPhotoOptInAt;
+    delete user.aiPhotoConsentVersion;
+    cleared++;
+  }
+  if (cleared > 0) saveDb();
+  if (removed + failed + cleared > 0) console.log(`[ai] No photo retention: deleted ${removed} kept file(s)${failed ? `, ${failed} could not be deleted` : ''}, cleared the opt-in on ${cleared} account(s).`);
+}
 aiPhotoStore.purgeExpired();
 setInterval(() => aiPhotoStore.purgeExpired(), 6 * 60 * 60 * 1000).unref();
 

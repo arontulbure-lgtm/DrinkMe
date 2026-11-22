@@ -19,7 +19,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.aroncarola.drinkmefinal",
       infoPlist: {
-        NSCameraUsageDescription: "DrinkMe needs the camera to photograph your drinks.",
+        NSCameraUsageDescription: "DrinkMe uses the camera to photograph your drinks and to scan bottle labels and barcodes.",
         // No NSPhotoLibraryAddUsageDescription: the app never saves photos to the library (Apple 5.1.1).
         NSPhotoLibraryUsageDescription: "DrinkMe needs access to your photos to add drink images."
       }

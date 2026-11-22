@@ -92,6 +92,17 @@ export const createPhotoStore = ({ dir, retentionDays = 90 }) => {
       return { removed, failed };
     },
     /** Deletes files older than the retention period. */
+    /** Deletes every kept photo (no photo retention at launch, D-21/LC-49). Returns { removed, failed }. */
+    deleteAll() {
+      let names = [];
+      try { names = fs.readdirSync(dir); } catch { return { removed: 0, failed: 0 }; }
+      let removed = 0;
+      let failed = 0;
+      for (const name of names) {
+        try { fs.rmSync(path.join(dir, name), { force: true }); removed++; } catch { failed++; }
+      }
+      return { removed, failed };
+    },
     purgeExpired(now = Date.now()) {
       let names = [];
       try { names = fs.readdirSync(dir); } catch { return 0; }

@@ -50,7 +50,8 @@ export const aiEnv = () => ({
   ...process.env,
   OLLAMA_MODELS: P.models,
   OLLAMA_HOST,
-  OLLAMA_KEEP_ALIVE: process.env.OLLAMA_KEEP_ALIVE || '30m',
+  // Keep the model loaded (a reload costs 10-60 s; device test 2026-11-22). Lower it to free VRAM on a shared GPU.
+  OLLAMA_KEEP_ALIVE: process.env.OLLAMA_KEEP_ALIVE || '24h',
   PIP_CACHE_DIR: P.pip,
   HF_HOME: P.hf,
   TORCH_HOME: P.torch,

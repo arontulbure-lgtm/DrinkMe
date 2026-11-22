@@ -36,6 +36,14 @@ class OllamaClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def warm(self, model: str) -> None:
+        """Loads the model into VRAM so the first scan does not pay the load. Never raises."""
+        try:
+            await self._client.post("/api/generate", json={"model": model, "prompt": "", "keep_alive": self._settings.keep_alive},
+                                    timeout=180)
+        except httpx.HTTPError:
+            log.warning("warm-up of the model failed")
+
     async def list_models(self) -> list[str]:
         try:
             r = await self._client.get("/api/tags", timeout=3.0)

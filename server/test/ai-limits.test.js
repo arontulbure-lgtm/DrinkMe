@@ -105,3 +105,24 @@ describe('AI_PROVIDER=openai is no longer a provider (D-24)', () => {
     assert.match(s.getOutput(), /OpenAI provider was removed/);
   });
 });
+
+describe('no photo retention at launch (D-21, LC-49)', () => {
+  test('photos kept before the flag are deleted at start and old opt-ins are cleared', async (t) => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drinkme-old-scans-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(dir, 'abc_1700000000000_ffff.jpg'), 'old photo');
+    fs.writeFileSync(path.join(dir, 'abc_1700000000000_ffff.json'), '{}');
+    const s = await startServer({ AI_PHOTO_DIR: dir }, {
+      dbFixture: { users: [{ ...user('old-optin'), aiPhotoOptIn: true, aiPhotoOptInAt: '2026-11-01T00:00:00.000Z', aiPhotoConsentVersion: 1 }] },
+    });
+    t.after(() => s.stop());
+    assert.deepEqual(fs.readdirSync(dir), []);
+    assert.match(s.getOutput(), /deleted 2 kept file\(s\), cleared the opt-in on 1 account\(s\)/);
+    const saved = JSON.parse(fs.readFileSync(s.dbFile, 'utf8')).users.find((u) => u.id === 'old-optin');
+    assert.equal('aiPhotoOptIn' in saved, false);
+    assert.equal('aiPhotoOptInAt' in saved, false);
+  });
+});

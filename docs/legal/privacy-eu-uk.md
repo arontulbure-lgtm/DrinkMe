@@ -44,5 +44,5 @@ We store only what is strictly necessary for the service on your device (Directi
 We do not process national identification numbers. We do not use video surveillance or process employees' data in the app.
 
 ---
-2026-11-22: consent row for keeping scan photos removed (D-21/D-22: no photo is kept, opt-in not offered); AI reports and daily limits added; EU/EEA-only AI server (D-23). Publish only after LC-49 to LC-53 ship.
+2026-11-22: consent row for keeping scan photos removed (D-21/D-22: no photo is kept, opt-in not offered); AI reports and daily limits added; EU/EEA-only AI server (D-23). Matches the code re-read on 2026-11-22.
 Sources (checked 2026-11-12 from knowledge unless noted; VERIFY): Regulation (EU) 2016/679 Arts. 6, 12–22, 27, 37, 44–49; UK GDPR and Data Protection Act 2018; Commission Implementing Decision (EU) 2023/1795 (EU-US DPF); Romanian Law 190/2018; Law 506/2004.

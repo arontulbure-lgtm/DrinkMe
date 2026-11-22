@@ -45,5 +45,5 @@ Stocăm pe dispozitivul tău doar ce este strict necesar pentru serviciu (Direct
 Nu prelucrăm coduri numerice personale. Nu folosim supraveghere video și nu prelucrăm în aplicație date ale angajaților.
 
 ---
-2026-11-22: eliminat rândul privind consimțământul pentru păstrarea fotografiilor (D-21/D-22: nicio fotografie nu este păstrată, opțiunea nu este oferită); adăugate raportările AI și limitele zilnice; server AI doar în UE/SEE (D-23). Se publică doar după livrarea LC-49–LC-53.
+2026-11-22: eliminat rândul privind consimțământul pentru păstrarea fotografiilor (D-21/D-22: nicio fotografie nu este păstrată, opțiunea nu este oferită); adăugate raportările AI și limitele zilnice; server AI doar în UE/SEE (D-23). Corespunde codului reverificat la 2026-11-22.
 Surse (verificate la 2026-11-12 din cunoștințe, dacă nu se precizează altfel; DE VERIFICAT): Regulamentul (UE) 2016/679 art. 6, 12–22, 27, 37, 44–49; UK GDPR și Data Protection Act 2018; Decizia de punere în aplicare (UE) 2023/1795; Legea 190/2018; Legea 506/2004.

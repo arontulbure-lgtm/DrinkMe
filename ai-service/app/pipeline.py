@@ -24,6 +24,7 @@ log = logging.getLogger("ai-service.pipeline")
 _SCAN_SCHEMA = ModelScan.model_json_schema()
 _RECIPES_SCHEMA = ModelRecipes.model_json_schema()
 ETHANOL_G_PER_ML = 0.789
+SCAN_TOTAL_BUDGET_S = 17.0
 GRAMS_PER_STANDARD_DRINK = 10.0
 
 
@@ -113,7 +114,11 @@ async def run_scan(req: ScanRequest, client: OllamaClient, settings: Settings) -
     vision_ms = int((time.perf_counter() - t1) * 1000)
     timings = ScanTimings(ocrMs=ocr_ms, visionMs=vision_ms, totalMs=int((time.perf_counter() - started) * 1000))
     result = build_scan_result(raw, ocr_lines, settings, settings.vision_model, timings)
-    if settings.second_pass_model and result.status in ("low_confidence", "unclear"):
+    # The server gives the whole scan 20 s; the second pass gets what is left of SCAN_TOTAL_BUDGET_S (17 s), at most
+    # its own budget, and is skipped when under 2 s remain.
+    remaining = SCAN_TOTAL_BUDGET_S - (time.perf_counter() - started)
+    if (settings.second_pass_model and result.status in ("low_confidence", "unclear")
+            and min(settings.second_pass_budget_s, remaining) >= 2.0):
         result = await _second_pass(result, model_b64, ocr_lines, client, settings, started, req.language)
     return result
 
@@ -134,7 +139,7 @@ async def _second_pass(first: ScanResult, model_b64: str, ocr_lines: list[str], 
         raw = await asyncio.wait_for(client.chat_json(
             settings.second_pass_model, prompts.SCAN_SYSTEM, prompts.scan_user_message(ocr_lines, language), _SCAN_SCHEMA,
             images=[model_b64], temperature=0.1, num_predict=256, keep_alive=settings.second_pass_keep_alive,
-        ), timeout=settings.second_pass_budget_s)
+        ), timeout=min(settings.second_pass_budget_s, SCAN_TOTAL_BUDGET_S - (time.perf_counter() - started)))
         second_ms = int((time.perf_counter() - t0) * 1000)
         timings = first.timings.model_copy(update={"secondPassMs": second_ms, "totalMs": int((time.perf_counter() - started) * 1000)})
         second = build_scan_result(raw, ocr_lines, settings, f"{settings.vision_model}+{settings.second_pass_model}", timings)

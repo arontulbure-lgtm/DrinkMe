@@ -1,8 +1,25 @@
-DRAFT v0.1 – 2026-11-12 (entries to 2026-11-16) – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.1 – 2026-11-12 (entries to 2026-11-22) – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Legal documents changelog
 
 Lawyer sign-off: **none yet.** When a lawyer approves a document, add a line: date, document, version, lawyer's name, scope of review. Only then remove the DRAFT line from that document.
+
+## 2026-11-22 – John's decisions on the local-AI track (D-21 to D-27) (legal-compliance agent)
+Decisions (`OPEN_DECISIONS.md`): **D-21** no scan photo is kept at all; **D-22** no photo opt-in at launch (server flag `AI_PHOTO_OPT_IN_ENABLED`, default off; switch hidden); **D-23** GPU host for the ai-service only in the EU/EEA with a DPA; **D-26** (John's "D-24") never OpenAI or any outside AI company – OpenAI code and `openai` dependency removed; **D-24** (photo uses) moot; **D-25** report targets 24 h unsafe/offensive, 72 h wrong/other; **D-27** AI section in the Terms. New **D-28** (leftover beta photos). Code re-read 2026-11-22 (`internal/data-inventory.md` §8.0): daily limits 20 scans / 10 recipe batches per rolling 24 h; recipes streamed one by one after validation; optional second local model `qwen3-vl:8b-instruct`, **off by default**; in-app AI report (`POST /api/ai/report` → audit, 90 days, deleted with the account); OpenAI removed; opt-in behind the flag.
+- `terms.md` / `.ro.md` v0.3 → **v0.4**: §2 (AI optional, may be unavailable); **new §7a "AI features"** (purpose, local processing, no accuracy guarantee incl. language errors, allergies and warnings, 18+ and responsible drinking, not advice, AI output not the user's content and not DrinkMe's advice without reducing §12/consumer rights, acceptable use, daily limits, reporting with 24 h/72 h targets, availability); sources.
+- `ai-transparency.md` / `.ro.md` v0.1 → **v0.2**: streamed recipes; optional second model (off); EU/EEA server; no training; language-error warning (Romanian); daily limits; in-app reporting and targets; photos never kept; §9.1 = the text already in the app (optional ending); §9.2 "not offered at launch" (the 2026-11-16 consent draft is withdrawn).
+- `privacy-policy.md` / `.ro.md` v0.3 → **v0.4**: §2/§3 opt-in rows removed, AI reports and usage counters added; §5 AI server provider (EU/EEA, processor), no outside AI company; §5a rewritten (no photo kept, limits, reports, legal bases without consent, no OpenAI); §7, §8, §9 updated.
+- `privacy-eu-uk.md` / `.ro.md` v0.2 → **v0.3**: consent row removed; limits/reports row; no AI transfers outside the EEA.
+- `account-deletion.md` / `.ro.md` v0.2 → **v0.3**: AI reports deleted; scan photos never kept.
+- Internal: `data-inventory.md` v0.3 (§1, §2, §8 rewritten with file:line), `ropa.md` v0.3 (P13–P16; P15 not carried out), `retention-schedule.md` v0.3, `subprocessors.md` v0.3 (OpenAI removed, EU/EEA GPU host), `store-disclosures.md` v0.3 (scanner photos ephemeral / not collected), `dpia-screening.md` v0.3, **new `dpia-ai.md` v0.1** (Art. 35 DPIA draft: residual risk at most medium, no prior consultation needed).
+- `compliance-matrix.md` v0.3: LC-30, LC-35–LC-48 updated (LC-39 ✅, LC-41 ✅, LC-37/LC-38 ➖ at launch, LC-47 🟡); **new LC-49–LC-54**. `docs/store/play-data-safety.md` §8 sentence about OpenAI corrected.
+- History: OpenAI was described as a possible processor (`AI_PROVIDER=openai`) in the 2026-11-16 versions; it is removed from all current texts.
+
+**Re-acceptance / version numbers:**
+- `TERMS_VERSION` stays **1** (`server/server.js:2581`, `src/screens/OnboardingScreen.tsx:26`): the terms step is still off (`EXPO_PUBLIC_TERMS_STEP_ENABLED`) and nobody has accepted any Terms. **If any released build has already shown the terms step, raise it to 2 on server and client together** before shipping v0.4.
+- `PRIVACY_NOTICE_VERSION` stays **2** (unreleased; the change narrows processing – no photo kept, one recipient fewer).
+- `AI_NOTICE_VERSION` stays **1** (`server/server.js:4920`): the app text (`ai.notice.body`) already says the photo is deleted right after and never stored; beta testers who accepted the older v1 text were told about an optional photo keeping that is no longer offered – the current processing is strictly narrower, so no new acceptance is needed. Raise it only if a new recipient, a kept photo or training is ever introduced.
+- Before publication: LC-49 (delete leftover beta photos), LC-45 (EU/EEA GPU DPA), lawyer review (D-01).
 
 ## 2026-11-16 – AI scanner and AI recipes (local model) – Phase 6 of the local-AI track (legal-compliance agent)
 Reason: branch `auto/ai-2026-11-16` adds the AI scanner (photo → ingredient, local open-weights model `qwen3-vl:4b-instruct` + OCR in our own ai-service), barcode lookup (Open Food Facts, EAN only), AI recipes, saved recipes (max 200), AI settings (basics, photo opt-in "Help improve the scanner", off by default, 90 days, deleted on opt-out and account deletion) and a versioned AI notice (`AI_NOTICE_VERSION = 1`). `AI_PROVIDER` default `off`. Facts with file:line: `internal/data-inventory.md` §8.

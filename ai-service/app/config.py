@@ -58,7 +58,7 @@ def load_settings() -> Settings:
         ocr_enabled=_bool("DRINKME_OCR", True),
         scan_min_confidence=_float("SCAN_MIN_CONFIDENCE", 0.6),
         ollama_timeout_s=_float("OLLAMA_TIMEOUT_S", 90.0),
-        keep_alive=os.environ.get("OLLAMA_KEEP_ALIVE", "30m"),
+        keep_alive=os.environ.get("OLLAMA_KEEP_ALIVE", "24h"),
         max_image_side=int(os.environ.get("DRINKME_MAX_IMAGE_SIDE", "1024")),
         # A larger model re-reads labels the first model was unsure about. Empty: no second pass.
         second_pass_model=os.environ.get("DRINKME_SECOND_PASS_MODEL") or None,

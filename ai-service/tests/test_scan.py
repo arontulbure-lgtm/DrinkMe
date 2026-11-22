@@ -166,18 +166,28 @@ def test_second_pass_over_budget_returns_the_first_answer(client_factory, fake):
 
     async def slow(request):
         if b'"big:test"' in request.content:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(3)
         return original(request)
 
     fake.handler = slow
     fake.replies.append(GOOD)
-    with client_factory(second_pass_model="big:test", second_pass_budget_s=0.1) as c:
+    with client_factory(second_pass_model="big:test", second_pass_budget_s=2.1) as c:
         data = scan(c).json()
     assert data["status"] == "unclear" and data["suggestBarcode"] is True
-    assert data["timings"]["secondPassMs"] >= 100
+    assert 2000 <= data["timings"]["secondPassMs"] < 3000
 
 
 def test_category_code_is_not_a_style(client_factory, fake):
     fake.replies.append({**GOOD, "category": "soda_mixer", "style": "soda_mixer"})
     with client_factory() as c:
         assert scan(c).json()["item"]["style"] is None
+
+
+def test_second_pass_skipped_when_the_scan_budget_is_used_up(client_factory, fake, monkeypatch):
+    from app import pipeline
+    monkeypatch.setattr(pipeline, "SCAN_TOTAL_BUDGET_S", 0.5)  # as if decode + OCR + first pass took ~17 s
+    fake.replies.append({**GOOD, "confidence": 0.3})
+    with client_factory(second_pass_model="big:test") as c:
+        data = scan(c).json()
+    assert data["status"] == "low_confidence" and data["timings"]["secondPassMs"] == 0
+    assert [r["model"] for r in fake.requests] == ["vision:test"]
