@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import jwt from 'jsonwebtoken';
 
+import { readAiProviderConfig } from '../operations.js';
 import { REAL_DB_FILE, assertRefusesToStart, startServer } from './helpers/harness.js';
 
 const SERVER_FILE = fileURLToPath(new URL('../server.js', import.meta.url));
@@ -38,6 +39,7 @@ const PRIVATE_KEY_LINE = privateKey.split('\n')[1];
 
 const productionEnv = (overrides = {}) => ({
   NODE_ENV: 'production',
+  AI_PROVIDER: 'off', // production requires an explicit choice
   JWT_SECRET: VALID_SECRET,
   FIREBASE_SERVICE_ACCOUNT_KEY: TEST_SERVICE_ACCOUNT,
   ALLOW_EMPTY_DB: 'true',
@@ -515,4 +517,91 @@ test('production warns once, with no ids, when ADMIN_USER_IDS is empty', { timeo
   assert.ok(!set.getOutput().includes('is empty'));
   assert.match(set.getOutput(), /1 of 1 match no known user/);
   assert.ok(!set.getOutput().includes('secret-uid'));
+});
+
+// ── AI_PROVIDER (local | openai | off; production needs an explicit choice) ───
+test('readAiProviderConfig: names, legacy AI_ENABLED and the production rules', () => {
+  const read = (env, production = false) => readAiProviderConfig(env, { production });
+  // Outside production, unset keeps the legacy behaviour: AI_ENABLED=true means openai.
+  assert.deepEqual(read({}), { provider: 'off', explicit: false, aiEnabled: false, problems: [], warnings: [] });
+  assert.equal(read({ AI_ENABLED: 'true' }).provider, 'openai');
+  assert.equal(read({ AI_ENABLED: 'true' }).aiEnabled, true);
+  assert.equal(read({ AI_ENABLED: 'TRUE' }).aiEnabled, false, 'only the exact value true counts, as before');
+  // AI_PROVIDER wins over AI_ENABLED, ignoring case and spaces.
+  assert.equal(read({ AI_PROVIDER: ' OpenAI ' }).provider, 'openai');
+  const off = read({ AI_PROVIDER: 'off', AI_ENABLED: 'true' });
+  assert.equal(off.aiEnabled, false);
+  assert.match(off.warnings.join(), /AI_ENABLED=true is ignored/);
+  // local is a known name but not in this build: AI stays off.
+  const local = read({ AI_PROVIDER: 'local' });
+  assert.equal(local.aiEnabled, false);
+  assert.deepEqual(local.problems, []);
+  assert.match(local.warnings.join(), /local needs the AI service integration/);
+  assert.equal(read({ AI_PROVIDER: 'gpt' }).provider, 'off');
+  // Production: unset, unknown and (until the AI merge) local are refused; off and openai are accepted.
+  assert.match(read({}, true).problems.join(), /^AI_PROVIDER \(set it explicitly/);
+  assert.match(read({ AI_ENABLED: 'true' }, true).problems.join(), /^AI_PROVIDER/);
+  assert.match(read({ AI_PROVIDER: 'gpt-canary' }, true).problems.join(), /^AI_PROVIDER \(off, local or openai\)$/);
+  assert.match(read({ AI_PROVIDER: 'local' }, true).problems.join(), /local needs the AI service integration/);
+  assert.deepEqual(read({ AI_PROVIDER: 'off' }, true).problems, []);
+  assert.deepEqual(read({ AI_PROVIDER: 'openai' }, true).problems, []);
+});
+
+test('production with AI_PROVIDER unset refuses to start, names it and creates nothing', async (t) => {
+  const dbFile = makeUnusedDbPath(t);
+  const { stderr } = await assertRefusesToStart(productionEnv({ AI_PROVIDER: undefined, DB_FILE: dbFile }));
+
+  assert.match(fatalLine(stderr), /AI_PROVIDER \(set it explicitly/);
+  assert.doesNotMatch(fatalLine(stderr), /JWT_SECRET|FIREBASE_SERVICE_ACCOUNT_KEY/);
+  assertNothingCreated(dbFile);
+});
+
+test('production with AI_PROVIDER unset refuses even with the legacy AI_ENABLED=true', async (t) => {
+  const dbFile = makeUnusedDbPath(t);
+  const { stderr } = await assertRefusesToStart(productionEnv({ AI_PROVIDER: '', AI_ENABLED: 'true', DB_FILE: dbFile }));
+
+  assert.match(fatalLine(stderr), /AI_PROVIDER/);
+  assertNothingCreated(dbFile);
+});
+
+test('production with an unknown AI_PROVIDER refuses and does not print the value', async (t) => {
+  const dbFile = makeUnusedDbPath(t);
+  const { output, stderr } = await assertRefusesToStart(productionEnv({ AI_PROVIDER: 'provider-canary', DB_FILE: dbFile }));
+
+  assert.match(fatalLine(stderr), /AI_PROVIDER \(off, local or openai\)/);
+  assert.ok(!output.includes('provider-canary'), 'the value must not be printed');
+  assertNothingCreated(dbFile);
+});
+
+test('production with AI_PROVIDER=local refuses until the AI service merge', async (t) => {
+  const dbFile = makeUnusedDbPath(t);
+  const { stderr } = await assertRefusesToStart(productionEnv({ AI_PROVIDER: 'local', DB_FILE: dbFile }));
+
+  assert.match(fatalLine(stderr), /AI_PROVIDER \(local needs the AI service integration/);
+  assertNothingCreated(dbFile);
+});
+
+test('production starts with AI_PROVIDER=off (any case) or openai; off overrides AI_ENABLED=true', { timeout: SERVER_TEST_TIMEOUT_MS }, async (t) => {
+  const noKeyWarning = /AI_ENABLED=true but OPENAI_API_KEY is not set/;
+  const off = await startOn(t, productionEnv({ AI_PROVIDER: ' OFF ', AI_ENABLED: 'true' }));
+  await off.stop();
+  assert.doesNotMatch(off.getOutput(), noKeyWarning, 'AI stays off');
+  assert.match(off.getOutput(), /\[ai\] AI_ENABLED=true is ignored because AI_PROVIDER is set/);
+
+  const openai = await startOn(t, productionEnv({ AI_PROVIDER: 'openai' }));
+  await openai.stop();
+  assert.match(openai.getOutput(), noKeyWarning, 'openai is on (and still needs its key)');
+  assert.doesNotMatch(openai.getOutput(), /FATAL/);
+});
+
+test('outside production an unset AI_PROVIDER keeps the legacy AI_ENABLED behaviour', { timeout: SERVER_TEST_TIMEOUT_MS }, async (t) => {
+  const noKeyWarning = /AI_ENABLED=true but OPENAI_API_KEY is not set/;
+  const legacy = await startOn(t, { AI_ENABLED: 'true' });
+  await legacy.stop();
+  assert.match(legacy.getOutput(), noKeyWarning);
+
+  const unset = await startOn(t, {});
+  await unset.stop();
+  assert.doesNotMatch(unset.getOutput(), noKeyWarning);
+  assert.doesNotMatch(unset.getOutput(), /\[ai\]/);
 });

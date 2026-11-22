@@ -68,6 +68,7 @@ import { initializeApp as adminInitializeApp, getApps as adminGetApps, cert } fr
 import { getAuth as adminGetAuth } from 'firebase-admin/auth';
 import { getAppCheck as adminGetAppCheck } from 'firebase-admin/app-check';
 import { createAppCheckMiddleware, createAppCheckStats, parseAppCheckMode } from './app-check.js';
+import { formatJsonRequestLog, parseLogFormat, readAiProviderConfig, readinessReason } from './operations.js';
 import {
   DEFAULT_HISTORY_MAX_AGE_MS, createWriteBehindQueue, describePgError, openPostgresStore, readDbDriverConfig, toJsonbSafeText,
 } from './storage/postgres-store.js';
@@ -109,6 +110,10 @@ let firebaseAuth = null;
 
 const trimmedJwtSecret = process.env.JWT_SECRET?.trim() ?? '';
 
+// AI_PROVIDER (local | openai | off, names shared with the AI track). Production needs it set explicitly;
+// elsewhere an unset value keeps the legacy AI_ENABLED behaviour. See operations.js and server/README.md.
+const aiProviderConfig = readAiProviderConfig(process.env, { production: isProduction });
+
 // The old default is public, so it is refused in every environment. Prints the setting name only.
 if (crypto.createHash('sha256').update(trimmedJwtSecret).digest('hex') === OLD_DEFAULT_JWT_SECRET_SHA256) {
   console.error('[startup] FATAL: refusing to start. Fix: JWT_SECRET is the old default; generate a new value.');
@@ -131,6 +136,7 @@ if (isProduction) {
   if (!parseAppCheckMode(process.env.APP_CHECK_MODE).valid) {
     missingConfig.push('APP_CHECK_MODE (off, monitor or enforce)');
   }
+  missingConfig.push(...aiProviderConfig.problems);
   if (missingConfig.length) exitOnInvalidProductionConfig(missingConfig);
   if (!REQUIRE_VERIFIED_EMAIL) {
     console.warn('[auth] REQUIRE_VERIFIED_EMAIL is off: accounts with an unconfirmed email can use the API.');
@@ -313,7 +319,20 @@ morgan.token('url', (req) => (
 // Production (legal T-05, GDPR minimisation): time, method, path, status, size and duration only; no IP
 // address, user agent or referrer, which morgan's 'combined' format would keep for every request.
 const PRODUCTION_LOG_FORMAT = ':date[iso] :method :url :status :res[content-length] - :response-time ms';
-app.use(morgan(isProduction ? PRODUCTION_LOG_FORMAT : 'dev', { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
+// LOG_FORMAT=json (any environment): the same fields as one JSON object per line, {ts, method, path,
+// status, ms, size}, for hosts that index JSON logs. Unset or 'text' keeps the formats above.
+const logFormat = parseLogFormat(process.env.LOG_FORMAT);
+if (!logFormat.valid) console.warn('[config] LOG_FORMAT must be text or json - using text.');
+const JSON_REQUEST_LOG_FORMAT = (tokens, req, res) => formatJsonRequestLog({
+  ts: new Date().toISOString(),
+  method: tokens.method(req, res),
+  path: tokens.url(req, res),
+  status: tokens.status(req, res),
+  ms: tokens['response-time'](req, res),
+  size: tokens.res(req, res, 'content-length'),
+});
+const requestLogFormat = logFormat.format === 'json' ? JSON_REQUEST_LOG_FORMAT : (isProduction ? PRODUCTION_LOG_FORMAT : 'dev');
+app.use(morgan(requestLogFormat, { skip: (req) => Boolean(devLogBridge) && req.path === '/__dev/client-log' }));
 
 // ── Media ─────────────────────────────────────────────────────────────────────
 // Images leave the JSON responses and come from here. Mounted before the body parsers, which a GET
@@ -504,8 +523,10 @@ const sanitizePhotoURL = (value) => {
   return value;
 };
 
-// AI stays off unless AI_ENABLED is exactly 'true'. A key on its own does not turn it on.
-const AI_ENABLED = process.env.AI_ENABLED === 'true';
+// AI stays off unless AI_PROVIDER=openai, or (AI_PROVIDER unset, outside production) AI_ENABLED is exactly
+// 'true'. A key on its own does not turn it on. AI_PROVIDER=local stays off until the AI service merge.
+for (const warning of aiProviderConfig.warnings) console.warn(`[ai] ${warning}`);
+const AI_ENABLED = aiProviderConfig.aiEnabled;
 const AI_REQUEST_TIMEOUT_MS = 30_000;
 const AI_MAX_RETRIES = 1; // timeouts are retried too, so one request can wait twice the timeout
 
@@ -2319,7 +2340,13 @@ if (isPostgresDb && preloadedDbText) {
     }
   }
 }
+// Read by /readyz. True once the load (or a permitted empty start) is done; the server listens only after
+// that today, so this guards against a future async load or a listen that moves earlier.
+let isDbLoadComplete = false;
 loadDb();
+isDbLoadComplete = true;
+// Set while a Postgres shutdown flush runs, so /readyz takes the instance out of rotation first.
+let isShuttingDown = false;
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 // False once a deletion was accepted, even if a failed cascade left the record in place.
@@ -3011,6 +3038,23 @@ const respondAuthUnavailable = (res) => res.status(503).json({
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.get('/healthz', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Readiness for host health checks (Docker, Railway, Render): 200 only when the database is loaded and,
+// under production rules, firebase-admin is initialised; 503 with a fixed reason code otherwise, never a
+// detail or a value. /healthz stays the plain liveness answer. Deliberately not part of it: a failing
+// Postgres write-behind (a restart would lose the queued changes; see "Database: JSON or Postgres") and
+// the AI service (optional; its outage must not take the API out of rotation).
+app.get('/readyz', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const reason = readinessReason({
+    dbLoaded: isDbLoadComplete,
+    firebaseRequired: isProduction,
+    firebaseReady: Boolean(firebaseAuth),
+    shuttingDown: isShuttingDown,
+  });
+  if (reason) return res.status(503).json({ status: 'not_ready', reason });
+  res.json({ status: 'ready' });
 });
 
 const DEV_AUTH_UID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -5375,7 +5419,6 @@ setInterval(retryAccountDeletions, ACCOUNT_DELETION_RETRY_INTERVAL_MS).unref();
 // there is already on disk when the route answers.
 const POSTGRES_SHUTDOWN_FLUSH_MS = 8000;
 if (isPostgresDb) {
-  let isShuttingDown = false;
   const flushPostgresAndExit = async (signal) => {
     if (isShuttingDown) return;
     isShuttingDown = true;

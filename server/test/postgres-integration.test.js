@@ -390,6 +390,7 @@ test('production refuses an empty Postgres without ALLOW_EMPTY_DB, naming settin
   });
   const { output } = await assertRefusesToStart(postgresEnv({
     NODE_ENV: 'production',
+    AI_PROVIDER: 'off', // production requires an explicit choice
     JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz012345',
     FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({
       type: 'service_account', project_id: 'drinkme-pg-test', private_key: privateKey, client_email: 'pg@drinkme-pg-test.example.test',

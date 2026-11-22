@@ -96,6 +96,7 @@ describe('APP_CHECK_MODE on the server', () => {
     });
     const { output } = await assertRefusesToStart({
       NODE_ENV: 'production',
+      AI_PROVIDER: 'off', // production requires an explicit choice
       JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz012345',
       FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({
         type: 'service_account', project_id: 'drinkme-appcheck-test', private_key: privateKey,

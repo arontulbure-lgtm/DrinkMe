@@ -38,3 +38,6 @@ firebase-web-config*.json
 .env*
 !.env.example
 _old_secrets/
+
+# docker-compose env file for the server (secrets)
+server/.env.production

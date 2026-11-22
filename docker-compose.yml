@@ -1,0 +1,85 @@
+# DrinkMe server stack. Secrets live in ./server/.env.production (git-ignored, never committed); see
+# docs/PRODUCTION_ENV.md for every variable. Nothing here holds a real value.
+#
+#   docker compose up -d                       # server only (JSON database on the named volume)
+#   docker compose --profile postgres up -d    # + a local Postgres for tests (not for production data)
+#   docker compose --profile ai up -d          # + the local AI service: works only after the AI track
+#                                              #   (auto/ai-2026-11-16) is merged, which adds ./ai-service
+#                                              #   and its Dockerfile, and needs the NVIDIA Container Toolkit.
+services:
+  server:
+    build: .
+    image: drinkme-api
+    restart: unless-stopped
+    env_file:
+      - ./server/.env.production
+    environment:
+      # Pinned here (environment wins over env_file): an env file copied from a dev server/.env must not
+      # switch the production guards off.
+      NODE_ENV: production
+      # The JSON database lives on the volume below (absolute path, its own folder; backups go next to it).
+      DB_FILE: /app/server/data/db.json
+    ports:
+      # Loopback only: put a TLS reverse proxy (e.g. Caddy) in front on a VPS and set TRUST_PROXY_HOPS to the
+      # number of proxies. A port published on all interfaces bypasses ufw and allows forged X-Forwarded-For.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - drinkme-data:/app/server/data
+    healthcheck:
+      # 200 only when the database is loaded and firebase-admin is initialised (GET /readyz).
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  ai-service:
+    profiles: ["ai"]
+    # Present only after the AI merge (the AI track's docs/ai/PRODUCTION_PLAN.md describes its Dockerfile).
+    build: ./ai-service
+    restart: unless-stopped
+    environment:
+      AI_SERVICE_HOST: "0.0.0.0"
+      AI_SERVICE_PORT: "8088"
+      # Same secret as the server's AI_SERVICE_TOKEN (32+ characters), from the shell or an untracked .env.
+      # Empty: the ai-service refuses to start on a non-loopback host, so it fails closed.
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-host.docker.internal:11434}
+    # No published port: the server reaches it on the compose network as http://ai-service:8088
+    # (AI_PROVIDER=local, AI_SERVICE_URL=http://ai-service:8088 in server/.env.production). Note: the AI track's
+    # production guard accepts only a loopback or https AI_SERVICE_URL, so a production server on this network
+    # needs that rule widened for a private compose network at the merge (see docs/deploy/EU_GPU.md).
+    expose:
+      - "8088"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: drinkme
+      POSTGRES_USER: drinkme
+      # No password is committed: set POSTGRES_PASSWORD in the shell or an untracked .env (empty: the image refuses to start).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    # Local tests only; bound to loopback. Server settings: DB_DRIVER=postgres,
+    # DATABASE_URL=postgres://drinkme:<password>@postgres:5432/drinkme, DATABASE_SSL=disable (private network).
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - drinkme-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drinkme -d drinkme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  drinkme-data:
+  drinkme-postgres:

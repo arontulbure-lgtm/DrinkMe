@@ -781,6 +781,7 @@ describe('app errors keep their message', () => {
     });
     const server = await startServer({
       NODE_ENV: 'production',
+      AI_PROVIDER: 'off', // production requires an explicit choice
       JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz012345',
       FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({
         type: 'service_account',

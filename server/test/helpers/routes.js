@@ -98,6 +98,7 @@ export function parseRoutes(sourceText) {
  */
 export const ROUTE_MANIFEST = {
   'GET /healthz': { gate: 'public', files: ['harness.test.js', 'sign-in-gate.test.js', 'production-guard.test.js'] },
+  'GET /readyz': { gate: 'public', files: ['readiness.test.js'] },
   'GET /media/drinks/:id': { gate: 'adult', files: ['media-pages.test.js', 'age-gate.test.js', 'sign-in-gate.test.js', 'route-gates.test.js'] },
   'GET /media/avatars/:userId': { gate: 'adult', files: ['media-pages.test.js', 'moderation-decisions.test.js', 'sign-in-gate.test.js', 'route-gates.test.js'] },
 

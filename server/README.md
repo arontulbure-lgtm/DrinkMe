@@ -31,7 +31,7 @@ Every route must be listed in `ROUTE_MANIFEST` (`test/helpers/routes.js`) with i
 
 ## Access rules in short
 - Nothing is readable without signing in. Every `/api` and `/media` route needs a valid API token (401 otherwise) and a user who has confirmed they are 18+ (403 `age_required` otherwise).
-- Exempt for everyone: `POST /api/auth/mobile`, `POST /api/account/delete-unverified` (only with `REQUIRE_VERIFIED_EMAIL` on) and `GET /healthz`.
+- Exempt for everyone: `POST /api/auth/mobile`, `POST /api/account/delete-unverified` (only with `REQUIRE_VERIFIED_EMAIL` on), `GET /healthz` and `GET /readyz`.
 - Exempt before the 18+ confirmation, for the caller's own account only: `GET /api/users/:id`, `PUT /api/users/:id`, `POST /api/users/:id/acknowledgements`, `POST /api/users/:id/delete-account`. This is everything the app's age gate, privacy notice and name prompt need, plus deleting the account.
 - A suspended user gets 403 `account_suspended` on the routes marked "not suspended" below.
 - A block, or content hidden after reports, answers exactly like missing content (404).
@@ -41,7 +41,8 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/healthz` | none | `{ status: 'ok' }` |
+| GET | `/healthz` | none | `{ status: 'ok' }`. Liveness: the process answers |
+| GET | `/readyz` | none | Readiness for host health checks. 200 `{ status: 'ready' }` once the database is loaded and, under production rules, firebase-admin is initialised; otherwise 503 `{ status: 'not_ready', reason }` with `reason` one of `db_not_loaded`, `auth_not_initialized`, `shutting_down` (Postgres mode, while the shutdown flush runs). No details or values. `Cache-Control: no-store`. Outside `/api`, so not rate-limited. It does not check the Postgres write-behind (a restart would lose the queued changes) or the AI service (optional) |
 | GET | `/media/drinks/:id` | signed in | Post image. Admins bypass blocks and the hide after reports here |
 | GET | `/media/avatars/:userId` | signed in | 404 while the notice is pending or the profile is hidden after reports |
 | POST | `/api/auth/mobile` | none | `{ idToken, uid }`, returns `{ token }` |
@@ -111,7 +112,9 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `OFFICIAL_USER_IDS` | empty | server | Comma-separated Firebase uids of the official DrinkMe account, parsed like `ADMIN_USER_IDS`. Gives `official: true` (the app's "Official" badge), the right to use the brand name in the profile name, and no auto-hide by reports. Not an admin, and must never also be in `ADMIN_USER_IDS` (it could not be suspended; startup warns). Ids are logged as counts only; startup also warns while `ALLOW_INSECURE_DEV_AUTH=true`. See Official account below |
 | `PARTNER_CONSENT_REQUIRED` | on | server | Off only for exactly `false`, an emergency rollback that makes partner lists effectively public (see below) |
 | `REQUIRE_VERIFIED_EMAIL` | off | server | On only for exactly `true`; needs Firebase. See the rollout note |
-| `AI_ENABLED` | off | server | AI routes run only when exactly `true` |
+| `AI_PROVIDER` | unset | server | `off`, `local` or `openai` (case and spaces ignored; names shared with the AI track). **Required in production**: unset or unknown stops the start. `openai` runs the AI routes with OpenAI (needs `OPENAI_API_KEY`). `local` needs the ai-service integration from the AI track, not in this build: production refuses it, elsewhere AI stays off with a warning. Use `off` until the AI merge. When set, it wins over `AI_ENABLED` (a warning if `AI_ENABLED=true` is then ignored) |
+| `AI_ENABLED` | off | server | Legacy. Read only when `AI_PROVIDER` is unset (outside production): exactly `true` means `openai` |
+| `LOG_FORMAT` | `text` | server | `text`: the request log as before (production `<iso time> <method> <path> <status> <size> - <ms> ms`, `dev` format outside production). `json`: one JSON object per request, `{"ts","method","path","status","ms","size"}`, in any environment. Same privacy rules either way: no IP address, user agent, referrer or query string, and the account deletion uid masked. Anything else warns and uses `text`. Production keeps `text` as the default so existing log alerts keep matching; use `json` where the host indexes JSON (Railway, Render, Grafana/Loki) |
 | `OPENAI_API_KEY` | none | server | Required for AI, not enough on its own |
 | `ALLOW_INSECURE_DEV_AUTH` | off | server | `true` makes sign-in trust the client uid when no Firebase key is set. Ignored in production |
 | `BACKUP_DIR` | `server/backups` | backup script | Where `npm run backup` writes. Use separate storage in production |
@@ -138,11 +141,28 @@ Every sign-in (Firebase mode) makes one `getUser(uid)` call and reads `tokensVal
 With production rules, the server exits at startup and names the setting to fix, never its value, when any of these fail:
 - `JWT_SECRET` meets the rules above. The old hardcoded default is refused in every environment.
 - `FIREBASE_SERVICE_ACCOUNT_KEY` gives a working service account.
+- `AI_PROVIDER` is set explicitly to `off` or `openai` (`local` is refused until the AI service merge).
 - `DB_FILE`, if set, is absolute.
 - `DB_DRIVER` is `json` or `postgres`, and with `postgres`, `DATABASE_URL` is a `postgres://` URL and `DATABASE_SSL` is empty, `require` or `disable` and agrees with the URL's `sslmode` (outside production these stop the server too).
 - With `postgres`, the connection is TLS with a verified certificate (`DATABASE_SSL=require`, or `sslmode=verify-full`, `verify-ca` or `require` in the URL), unless `DATABASE_SSL=disable` is set on purpose (a warning; private networks only).
 - The database file exists (Postgres mode: the `drinkme_state` row exists), unless `ALLOW_EMPTY_DB=true`.
 - The database file holds valid data, unless `ALLOW_EMPTY_DB=true`. An invalid file is copied to `<DB_FILE>.corrupt-<timestamp>` first.
+
+## Rate limits
+Reviewed 2026-11-22 (launch run). All in memory (`express-rate-limit`), per process: a restart resets them, and several instances would each count separately (one instance is the rule anyway). IP keys depend on `TRUST_PROXY_HOPS`. A limiter answers 429 with no `code`, except the AI limiter (`ai_rate_limit`).
+
+| Route group | Window | Max | Key |
+|---|---|---|---|
+| `/media/*` (images) | 15 min | 600 | IP |
+| `/api/*`, every method | 15 min | 100 | IP |
+| `/api/*` writes (POST, PUT, PATCH, DELETE) | 1 min | 30 | user (valid API token), else IP |
+| `GET /api/users/search` | 15 min | 60 | user |
+| `POST /api/users/:id/delete-account`, `POST /api/account/delete-unverified` | 15 min | 5 | user |
+| AI: `POST /api/smart-bar/generate-recipes`, `/api/detect-product`, `/api/generate-recipes` (one budget) | 1 hour | 20 | user |
+| `POST /__dev/client-log` (development device sessions only) | 1 min | 60 | IP |
+| `GET /healthz`, `GET /readyz` | none | none | Read-only, constant answer, no data |
+
+Per-user daily caps stored in the database (they survive restarts): 20 posts and 50 MB of images per 24 h (`daily_post_limit`), 200 comments (`daily_comment_limit`), 100 partner requests (`partner_request_limit`), 20 reports (`daily_report_limit`); size caps of 500 Smart Bar items (`smart_bar_limit`) and 200 blocks (`block_limit`). Every write route sits under `/api`, so each one has the per-IP and per-user limits above; no unlimited write route was found.
 
 ## Data operations
 - Saves are atomic. A failed save answers 503 and keeps the previous file; creates, edits, cheers and saves, moderation actions, audit entries and most other changes are undone in memory. Marking notifications read and deleting a Smart Bar item are not.
@@ -331,12 +351,15 @@ The `Dockerfile` and `.dockerignore` are in the repo root, so build from there. 
 
 ```bash
 docker build -t drinkme-api .
-docker run -p 8080:8080 -e JWT_SECRET -e FIREBASE_SERVICE_ACCOUNT_KEY -e CORS_ALLOWED_ORIGINS -e TRUST_PROXY_HOPS -e ADMIN_USER_IDS -e OFFICIAL_USER_IDS -v drinkme-data:/app/server/data drinkme-api
+docker run -p 8080:8080 -e AI_PROVIDER=off -e JWT_SECRET -e FIREBASE_SERVICE_ACCOUNT_KEY -e CORS_ALLOWED_ORIGINS -e TRUST_PROXY_HOPS -e ADMIN_USER_IDS -e OFFICIAL_USER_IDS -v drinkme-data:/app/server/data drinkme-api
 ```
 
-The image uses Node 22, production dependencies only, a non-root user, `NODE_ENV=production` and `PORT=8080`. `.dockerignore` is an allowlist: only `server/package.json`, `server/package-lock.json`, `server/server.js`, `server/app-check.js`, `server/storage/` and the production scripts (`backup.js`, `postgres-cli.mjs`, `migrate-to-postgres.mjs`, `export-from-postgres.mjs`) enter the build; owner and developer tools (`testapi`, `testusers`, `firebase-configure`, `official`, `env-remove`, `test-postgres`, `docker-smoke`) stay out, so a new server source file must be added there and in the `Dockerfile`.
+The image uses Node 22, production dependencies only, a non-root user, `NODE_ENV=production` and `PORT=8080`. `.dockerignore` is an allowlist: only `server/package.json`, `server/package-lock.json`, `server/server.js`, `server/app-check.js`, `server/operations.js`, `server/storage/` and the production scripts (`backup.js`, `postgres-cli.mjs`, `migrate-to-postgres.mjs`, `export-from-postgres.mjs`) enter the build; owner and developer tools (`testapi`, `testusers`, `firebase-configure`, `official`, `env-remove`, `test-postgres`, `docker-smoke`) stay out, so a new server source file must be added there and in the `Dockerfile`.
+
+`docker-compose.yml` in the repo root runs the same image with `server/.env.production` (git-ignored; create it from docs/PRODUCTION_ENV.md), a volume for `/app/server/data` and a health check on `/readyz`. Profiles: `postgres` (a local Postgres for tests) and `ai` (the GPU ai-service, usable after the AI merge). Host guides: docs/deploy/RAILWAY.md, docs/deploy/RENDER.md, docs/deploy/EU_GPU.md.
 
 Deploy variables:
+- `AI_PROVIDER=off` (required; see the table above).
 - `JWT_SECRET`, as described above.
 - `FIREBASE_SERVICE_ACCOUNT_KEY`: Pass the JSON itself, because the image holds no key file.
 - `CORS_ALLOWED_ORIGINS`, if browser origins need access.
