@@ -127,16 +127,6 @@ const translations = {
       title: 'Something went wrong',
       message: 'The app ran into a problem. Try again, and if it keeps happening, restart the app.',
     },
-    // Development builds only (device test sessions); never shown in a release build.
-    devNote: {
-      button: '📝 Note',
-      a11y: 'Add a test note',
-      title: 'Test note',
-      hint: 'Saved with the current screen and time. Do not type passwords or personal data.',
-      placeholder: 'What did you see?',
-      save: 'Save note',
-      saved: 'Note saved',
-    },
     comment: {
       delete: 'Delete comment',
       deleteFailed: 'Could not delete the comment. Please try again.',
@@ -666,15 +656,6 @@ const translations = {
     errorBoundary: {
       title: 'Ceva nu a mers bine',
       message: 'Aplicația a întâmpinat o problemă. Încearcă din nou, iar dacă se repetă, repornește aplicația.',
-    },
-    devNote: {
-      button: '📝 Notă',
-      a11y: 'Adaugă o notă de test',
-      title: 'Notă de test',
-      hint: 'Se salvează cu ecranul curent și ora. Nu scrie parole sau date personale.',
-      placeholder: 'Ce ai observat?',
-      save: 'Salvează nota',
-      saved: 'Notă salvată',
     },
     comment: {
       delete: 'Șterge comentariul',

@@ -5,7 +5,11 @@ export default {
     // Home-screen and store name. The slug below is the Expo project id and stays.
     name: "DrinkMe",
     slug: "DrinkMeFinal",
+    // Store version (docs/RELEASE_BUILD.md). Build numbers below are only the starting values: eas.json uses
+    // appVersionSource "remote", so EAS keeps and increments them for production builds.
     version: "1.0.0",
+    // OTA-compatible runtime = the app version (only used if expo-updates is ever added).
+    runtimeVersion: { policy: "appVersion" },
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
@@ -13,12 +17,23 @@ export default {
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
-      backgroundColor: "#ffffff"
+      backgroundColor: "#000000"
+    },
+    // Localized iOS permission prompts (InfoPlist.strings per language). The infoPlist strings below are
+    // the English base used when the device language has no file here.
+    locales: {
+      en: "./locales/en.json",
+      ro: "./locales/ro.json"
     },
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.aroncarola.drinkmefinal",
+      buildNumber: "1",
       infoPlist: {
+        CFBundleDevelopmentRegion: "en",
+        CFBundleLocalizations: ["en", "ro"],
+        // Lets system strings follow the device language even where the app has no translation.
+        CFBundleAllowMixedLocalizations: true,
         NSCameraUsageDescription: "DrinkMe needs the camera to photograph your drinks.",
         // No NSPhotoLibraryAddUsageDescription: the app never saves photos to the library (Apple 5.1.1).
         NSPhotoLibraryUsageDescription: "DrinkMe needs access to your photos to add drink images."
@@ -26,22 +41,33 @@ export default {
     },
     android: {
       package: "com.aroncarola.drinkmefinal",
+      versionCode: 1,
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
-        backgroundColor: "#ffffff"
+        backgroundColor: "#000000"
       },
-      edgeToEdgeEnabled: true
+      edgeToEdgeEnabled: true,
+      // Permissions the app never uses. RECORD_AUDIO: photos only, no video. SYSTEM_ALERT_WINDOW: comes from
+      // the Expo template for the dev menu overlay. READ/WRITE_EXTERNAL_STORAGE stay: expo-image-picker asks
+      // for them on Android 12 and older (Android 13+ uses the system photo picker, no permission).
+      blockedPermissions: [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     web: {
       favicon: "./assets/favicon.png"
     },
     scheme: "drinkme",
     plugins: [
-      "expo-secure-store",
+      // No Face ID prompt: the token is stored without requireAuthentication.
+      ["expo-secure-store", { "faceIDPermission": false }],
       "expo-apple-authentication",
       ["expo-image-picker", {
         "photosPermission": "DrinkMe needs access to your photos to add drink images.",
-        "cameraPermission": "DrinkMe needs the camera to photograph your drinks."
+        "cameraPermission": "DrinkMe needs the camera to photograph your drinks.",
+        // Photos only: no NSMicrophoneUsageDescription and no Android RECORD_AUDIO.
+        "microphonePermission": false
       }]
     ],
     extra: {

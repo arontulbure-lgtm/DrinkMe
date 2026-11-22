@@ -1,0 +1,6 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "DrinkMe are nevoie de cameră pentru a fotografia băuturile tale.",
+    "NSPhotoLibraryUsageDescription": "DrinkMe are nevoie de acces la fotografiile tale pentru a adăuga imagini cu băuturi."
+  }
+}

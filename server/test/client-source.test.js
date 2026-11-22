@@ -246,3 +246,62 @@ describe('terms step', () => {
     assert.equal(read('src/context/LocalizationContext.tsx').match(/termsAccept: '/g)?.length, 2);
   });
 });
+
+// 7. Release config for v1.0.0 (docs/RELEASE_BUILD.md): version and build numbers, the EAS production
+//    profile builds an AAB with no secrets in eas.json, iOS permission prompts exist in en and ro, the app
+//    never asks to add photos to the library, and the dev-only note strings stay out of the release bundle.
+describe('release config', () => {
+  const appConfig = read('app.config.ts');
+  const eas = JSON.parse(read('eas.json'));
+
+  test('version 1.0.0 with an iOS buildNumber and an Android versionCode', () => {
+    assert.match(appConfig, /^\s*version: "1\.0\.0",/m);
+    assert.match(appConfig, /buildNumber: "\d+"/);
+    assert.match(appConfig, /versionCode: \d+,/);
+    assert.match(appConfig, /runtimeVersion: \{ policy: "appVersion" \}/);
+    assert.match(appConfig, /bundleIdentifier: "com\.aroncarola\.drinkmefinal"/);
+    assert.match(appConfig, /package: "com\.aroncarola\.drinkmefinal"/);
+  });
+
+  test('eas.json: production builds an AAB for the store, preview an APK, no secret-looking env values', () => {
+    const { production, preview, development } = eas.build;
+    assert.equal(production.android.buildType, 'app-bundle');
+    assert.equal(production.distribution, 'store');
+    assert.equal(production.autoIncrement, true);
+    assert.equal(eas.cli.appVersionSource, 'remote');
+    assert.equal(preview.android.buildType, 'apk');
+    assert.equal(development.developmentClient, true);
+    for (const [name, profile] of Object.entries(eas.build)) {
+      for (const [key, value] of Object.entries(profile.env ?? {})) {
+        assert.match(key, /^EXPO_PUBLIC_/, `${name}.env.${key}: only public build values belong in eas.json`);
+        assert.doesNotMatch(key, /SECRET|PRIVATE|PASSWORD|TOKEN|SERVICE_ACCOUNT|OPENAI|JWT/i, `${name}.env.${key}`);
+        assert.doesNotMatch(String(value), /^(sk-|AIza)|-----BEGIN|"private_key"/, `${name}.env.${key}`);
+      }
+    }
+    assert.ok(production.env.EXPO_PUBLIC_API_URL.startsWith('https://'));
+  });
+
+  test('camera and photo prompts exist in en and ro; no NSPhotoLibraryAddUsageDescription; no microphone', () => {
+    assert.match(appConfig, /en: "\.\/locales\/en\.json"/);
+    assert.match(appConfig, /ro: "\.\/locales\/ro\.json"/);
+    for (const lang of ['en', 'ro']) {
+      const locale = JSON.parse(read(`locales/${lang}.json`)).ios;
+      for (const key of ['NSCameraUsageDescription', 'NSPhotoLibraryUsageDescription']) {
+        assert.ok(typeof locale[key] === 'string' && locale[key].length > 20, `${lang}: ${key}`);
+        // Expo writes these into InfoPlist.strings between double quotes.
+        assert.doesNotMatch(locale[key], /"/, `${lang}: ${key}`);
+      }
+      assert.equal(locale.NSPhotoLibraryAddUsageDescription, undefined);
+    }
+    // As a key (a comment in app.config.ts explains why it is absent).
+    assert.doesNotMatch(appConfig, /^\s*"?NSPhotoLibraryAddUsageDescription"?\s*:/m);
+    assert.match(appConfig, /"microphonePermission": false/);
+    assert.match(appConfig, /"android\.permission\.RECORD_AUDIO"/);
+  });
+
+  test('dev note strings live only in DevNoteButton (dropped from release builds)', () => {
+    assert.doesNotMatch(read('src/context/LocalizationContext.tsx'), /devNote/);
+    assert.match(read('App.tsx'), /const DevNoteButton: [^=]+= __DEV__\s*\?\s*require\('\.\/src\/components\/DevNoteButton'\)/);
+    assert.match(read('App.tsx'), /const devLogBridge: [^=]+= __DEV__ \? require\('\.\/src\/lib\/devLogBridge'\) : null;/);
+  });
+});
