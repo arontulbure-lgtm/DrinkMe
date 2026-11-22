@@ -47,6 +47,8 @@ export default {
         backgroundColor: "#000000"
       },
       edgeToEdgeEnabled: true,
+      // No Google Drive backup of app data: the Firebase session must not be restored on another device.
+      allowBackup: false,
       // Permissions the app never uses. RECORD_AUDIO: photos only, no video. SYSTEM_ALERT_WINDOW: comes from
       // the Expo template for the dev menu overlay. READ/WRITE_EXTERNAL_STORAGE stay: expo-image-picker asks
       // for them on Android 12 and older (Android 13+ uses the system photo picker, no permission).

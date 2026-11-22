@@ -7,6 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import { GoogleAuthProvider, OAuthProvider, AuthCredential } from 'firebase/auth';
@@ -243,16 +244,20 @@ export default function AuthScreen() {
   const handleAppleSignIn = async () => {
     setIsSocialLoading(true);
     try {
+      // Replay protection: Apple gets the SHA-256 of a one-time nonce, Firebase checks it against the raw value.
+      const rawNonce = `${Crypto.randomUUID()}${Crypto.randomUUID()}`;
+      const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, rawNonce);
       const result = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
       const { identityToken } = result;
       if (!identityToken) throw new Error('No identity token from Apple');
       const provider = new OAuthProvider('apple.com');
-      const credential = provider.credential({ idToken: identityToken });
+      const credential = provider.credential({ idToken: identityToken, rawNonce });
       await signInWithSocial(credential);
     } catch (e: unknown) {
       if (!isAuthCancellation(e)) {

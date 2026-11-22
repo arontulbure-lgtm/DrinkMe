@@ -7,7 +7,7 @@ Paste into App Store Connect → App Review Information → Notes, and into Play
 ## Test account
 - Email: `[REVIEW ACCOUNT EMAIL – TO FILL BY JOHN]`
 - Password: `[TO FILL BY JOHN – enter only in the console, never in this repo]`
-- The account must exist on the **production** server, have confirmed 18+, accepted the current Terms (if the Terms step is on) and have at least one post and one partner so the feed is not empty. Create it with `npm run testusers:create` against production or by signing up in the release build; never use a personal account.
+- The account must exist on the **production** server, have confirmed 18+, accepted the current Terms (if the Terms step is on) and have at least one post and one partner so the feed is not empty. Create it by signing up in the release build; never use a personal account, and never the dev test users (test1–4@drinkme.test): delete those with `npm run testusers:delete` before launch and never put a test uid in `ADMIN_USER_IDS`.
 
 ## Notes (English – both stores)
 > DrinkMe is a social app about drinks, alcoholic and non-alcoholic, for adults 18+. It does not sell, deliver or advertise alcohol and has no prices, promotions or drinking games.
