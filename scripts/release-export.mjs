@@ -10,7 +10,7 @@
 // (.env, service-account keys, server/data, logs) cannot be in it.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -148,14 +148,13 @@ export function exportTree({ ref = 'main', out = DEFAULT_OUT, regenerateLock = t
   const sha = run('git', ['rev-parse', '--verify', `${ref}^{commit}`], { cwd: ROOT }).trim();
   safeEmptyOut(out);
 
-  // git archive → a tar in the temp folder → extracted into out.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drinkme-export-'));
-  const tar = path.join(tmp, 'tree.tar');
+  // git archive → a tar inside out → extracted there. A relative name: GNU tar reads "C:..." as a remote host.
+  const tarName = '.export-tree.tar';
   try {
-    run('git', ['archive', '--format=tar', '-o', tar, sha], { cwd: ROOT });
-    run('tar', ['-xf', tar, '-C', out]);
+    run('git', ['archive', '--format=tar', '-o', path.join(out, tarName), sha], { cwd: ROOT });
+    run('tar', ['-xf', tarName], { cwd: out });
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(path.join(out, tarName), { force: true });
   }
 
   // Contract documents first (their sources are under .claude/, which is removed next).
