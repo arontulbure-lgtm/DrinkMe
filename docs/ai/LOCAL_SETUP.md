@@ -66,11 +66,17 @@ so models still go to D:.
 | `DRINKME_MAX_IMAGE_SIDE` | `1024` (`768` recommended, see below) | Downscale before the model |
 | `SCAN_MIN_CONFIDENCE` | `0.6` | Below → `low_confidence` → the app offers the barcode |
 | `OLLAMA_TIMEOUT_S` | `90` | Per model call |
-| `OLLAMA_KEEP_ALIVE` | `30m` | How long the model stays in VRAM after the last request |
+| `OLLAMA_KEEP_ALIVE` | `24h` | How long the model stays in VRAM after the last request (the service also warms it at start) |
+| `OLLAMA_NUM_PARALLEL` | `2` (set by `ai:start`) | Parallel requests per model: two recipes are generated at once |
+| `DRINKME_SECOND_PASS_MODEL` | unset (off) | Optional second scan model for `unclear`/low-confidence answers (e.g. `qwen3-vl:8b-instruct`). Off: on the held-out set it changed no result and pushed p95 to 17 s on 8 GB |
+| `DRINKME_SECOND_PASS_BUDGET_S` | `12` | Upper limit for the second pass; it only gets what is left of the 17 s scan budget, and is skipped under 2 s |
+| `DRINKME_SECOND_PASS_KEEP_ALIVE` | `2m` | Keep-alive of the second model, so it leaves VRAM to the 4B quickly |
 
 ## Server settings (`server/.env`)
-`AI_PROVIDER`, `AI_SERVICE_URL`, `AI_SERVICE_TOKEN`, `AI_SERVICE_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_HOUR`, `AI_PHOTO_DIR`,
-`AI_PHOTO_RETENTION_DAYS` – see `server/README.md`.
+`AI_PROVIDER` (exactly `local` turns AI on), `AI_SERVICE_URL`, `AI_SERVICE_TOKEN`, `AI_SERVICE_TIMEOUT_MS`,
+`AI_RATE_LIMIT_PER_HOUR`, `AI_DAILY_SCAN_LIMIT` (20), `AI_DAILY_RECIPE_LIMIT` (10), `AI_RECIPE_CONCURRENCY` (2),
+`AI_PHOTO_OPT_IN_ENABLED` (off), `AI_PHOTO_DIR`, `AI_PHOTO_RETENTION_DAYS` – see `server/README.md`. Server tests can
+run next to a running server with `DRINKME_TEST_PORT=5056`.
 
 ## Model choice
 Web check (Nov 2026): Qwen3-VL is the usual recommendation for label OCR on 8 GB cards; 8B Q4 = 6.2 GB, 4B Q4 = 3.3 GB.

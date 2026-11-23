@@ -7,21 +7,21 @@ Rollout: [ROLLOUT.md](ROLLOUT.md) · Production: [PRODUCTION_PLAN.md](PRODUCTION
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Team: agents integration-manager, ml-engineer, data-curator, ai-evaluator; skills drinkme-ai-service, recipe-schema, ingredient-taxonomy; planner / legal-compliance / test-engineer / alcohol-content-policy updated; CLAUDE.md team table | ✅ |
-| 1 | ai-service (FastAPI + Ollama + RapidOCR, schemas v1), Express provider layer `AI_PROVIDER=local\|openai\|off` (default off), `/api/ai/*` routes, npm `ai:setup/start/stop/health/test`, `test:android` starts the ai-service | ✅ |
-| 2 | Scanner: label photo → structured result; low confidence → barcode (expo-camera, Expo Go) → Open Food Facts; confirm/edit before saving; water / not-an-ingredient messages; photos in memory, opt-in only | ✅ |
-| 3 | Recipes from a scanned item and from the Smart Bar (+ editable basics), batches of 3–5, no repeats, safety rules S1–S13 server-side, saved recipes (API + persistence + tests) | ✅ (mocktail in 16/20 batches – see EVAL_REPORT) |
-| 4 | App integration (Scanner, AiRecipes, AiRecipeDetail, AiSettings, Smart Bar Recipes + Saved › Recipes, report sheet, ro/en, a11y) | ✅ code · ⛔ emulator test blocked (see below) |
-| 5 | Dataset (153 images, D:\AI\datasets) + evaluation | ✅ report · ❌ 82.7 % vs 85 % target |
-| 6 | Legal / privacy (legal-compliance agent) | ✅ drafts (lawyer review + DPIA still open) |
-| 7 | Production plan (docs) | ✅ |
+| 1 | ai-service (FastAPI + Ollama + RapidOCR, schemas v1), Express provider layer `AI_PROVIDER=local\|off` (default off; OpenAI removed, D-24), `/api/ai/*` routes, npm `ai:setup/start/stop/health/test`, `test:android` starts the ai-service | ✅ |
+| 2 | Scanner: label photo → structured result; low confidence → barcode (expo-camera, Expo Go) → Open Food Facts; confirm/edit before saving; water / not-an-ingredient messages; photos never kept (D-21, opt-in flag off, D-22); optional 8B second pass (off – no gain on the held-out set) | ✅ |
+| 3 | Recipes from a scanned item and from the Smart Bar (+ editable basics), batches of 3–5, no repeats, safety rules S1–S13 server-side, saved recipes; streamed one by one (first recipe p50 5.3 s); mocktail slot with flavour-only input | ✅ (mocktail 19/20 batches) |
+| 4 | App integration (Scanner, AiRecipes with streaming progress, AiRecipeDetail, AiSettings, Smart Bar Recipes + Saved › Recipes, report sheet, ro/en, a11y); per-user daily limits | ✅ · Android emulator test run 2026-11-22 |
+| 5 | Datasets: scan-v1 (153, tuning) + held-out heldout-ro-v1 (132, Romanian, never tuned on) in D:\AI\datasets; evaluation | ✅ report · held-out 76.3 % (tuned set 82.7 %) vs 85 % target – accepted for beta (decision 2026-11-22) |
+| 6 | Legal / privacy (legal-compliance agent): D-21..D-28, Terms v0.4 AI section, transparency, privacy, DPIA draft | ✅ drafts (lawyer review open) |
+| 7 | Production plan incl. EU scale-to-zero GPU hosting and cost per user | ✅ |
 
-## Checks at the end
-- Server suite 1343 tests: 1342 pass, 0 fail, 1 skipped · ai-service pytest 24/24 · `npm run check` clean ·
-  end-to-end API run with the real model 17/17.
+## Checks at the end (2026-11-22)
+See the last RUN_LOG entry for the exact numbers (server suite, ai-service pytest, `npm run check`).
 
-## Blocked: Android emulator test (Phase 4)
-The worktree has no `.env`, `server/.env`, service account or dev database (all git-ignored). Copying them from the
-main checkout was refused by the permission classifier, so the app could not sign in from this worktree and the
-emulator/adb flow was not run. Replaced by `ai-service/eval/e2e_api.mjs` (real server + real model over HTTP).
-To run it: allow the copy (or copy the four files yourself), then `npm run test:android` in this worktree with
-`AI_PROVIDER=local` and follow the checklist in the PR.
+## Android emulator test (2026-11-22)
+Run with `npm run test:android` (Pixel AVD, Expo Go, photos pushed with adb): scan, edit, add to Smart Bar, Make
+something, blurry photo → barcode offer, water message, non-drink, Generate recipes (streamed), another batch, save,
+Saved › Recipes, report, ro/en, 18+ path. Log-triage report: `reports/test-sessions/2026-11-22_22-32-37.md` – no
+crashes; the medium findings (first-scan 504 after a cold model load, second pass eating the scan budget, Ursus Cooler
+0 % shown as alcoholic, recipe style in English/category codes) are fixed. Barcode scanning was exercised through the
+API only (the emulator camera cannot read a real barcode).

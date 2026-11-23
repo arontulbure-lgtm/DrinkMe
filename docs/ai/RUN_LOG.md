@@ -39,3 +39,22 @@
 - Final checks: server suite 1343 tests / 1342 pass / 0 fail / 1 skipped (the last engine change was verified with
   ai-v1 24/24 and ai-safety 41/41 on a separate port); ai-service pytest 24/24; `npm run check` clean;
   end-to-end API run with the real model 17/17.
+
+## 2026-11-22 / 23
+- Housekeeping: service-account file renamed to `server/serviceAccount-drinkmeapp-a8fea.json` in both checkouts,
+  `FIREBASE_SERVICE_ACCOUNT_KEY` updated with the env script (values never printed), `official:check` = MATCH in both;
+  the old-project key moved to `D:\DrinkMeApp\_old_secrets`.
+- Decisions of 2026-11-22 built: OpenAI removed (provider, legacy routes, `openai` package; only `AI_PROVIDER=local`
+  turns AI on), no photo retention (opt-in flag off; kept photos and old opt-ins removed at start), per-user daily
+  limits (20 scans / 10 recipe batches), recipe slot engine with streaming (NDJSON) and a flavour-only mocktail slot,
+  optional 8B second scan pass inside a 17 s budget (off by default).
+- Held-out Romanian set `D:\AI\datasets\heldout-ro-v1` (132 images, OFF + Wikimedia Commons, never used for tuning).
+  Scan 76.3 % (71/93) vs 82.7 % on the tuned set; 8B second pass: no change in accuracy, p95 3.3 → 17.0 s → stays off.
+  Recipes: first recipe p50 5.3 s, batch p50 13.7 s (was 21.4 s), mocktail 19/20, 0 failed batches, 0 safety
+  violations (red team incl.). Details: EVAL_REPORT.md.
+- Android emulator session (`npm run test:android`) + log-triage (`reports/test-sessions/2026-11-22_22-32-37.md`):
+  no crashes; medium findings fixed (cold-model 504, second-pass budget, Ursus Cooler 0 %, style language).
+- Legal (legal-compliance agent): D-21..D-28, Terms v0.4 AI section, ai-transparency v0.2, privacy v0.4, DPIA draft,
+  compliance matrix LC-49..LC-54.
+- Final checks: server suite 1235 tests / 1227 pass / 0 fail / 8 skipped (Postgres tests, no `TEST_DATABASE_URL`);
+  ai-service pytest 31/31; `npm run check` (typecheck + lint) clean.

@@ -1,6 +1,6 @@
 ---
 name: drinkme-ai-service
-description: Architecture and contracts of DrinkMe's AI features - the local ai-service (Python FastAPI + Ollama + OCR), the Express AI provider layer (AI_PROVIDER=local|openai|off), the /api/ai/* routes, schema versioning, feature flags, env vars and rollout order. Use for any task that touches bottle scanning, barcode lookup, recipe generation, saved recipes, the AI notice or the ai-service itself.
+description: Architecture and contracts of DrinkMe's AI features - the local ai-service (Python FastAPI + Ollama + OCR), the Express AI provider layer (AI_PROVIDER=local|off; no OpenAI), the /api/ai/* routes, schema versioning, feature flags, env vars and rollout order. Use for any task that touches bottle scanning, barcode lookup, recipe generation, saved recipes, the AI notice or the ai-service itself.
 ---
 
 # DrinkMe AI service
@@ -9,9 +9,9 @@ description: Architecture and contracts of DrinkMe's AI features - the local ai-
 ```
 App (Expo)  --HTTPS+JWT-->  Express server (server/)  --HTTP+token-->  ai-service (ai-service/)  -->  Ollama (GPU)
                                    |                                        └── RapidOCR (CPU, ONNX)
-                                   ├── Open Food Facts (barcode lookup, server-side only)
-                                   └── OpenAI (only when AI_PROVIDER=openai)
+                                   └── Open Food Facts (barcode lookup, server-side only)
 ```
+- No third-party AI (decision D-24): the OpenAI provider and its legacy routes were removed on 2026-11-22.
 - The app never talks to the ai-service or Ollama. Only the Express server does.
 - The Express server is the authority: auth, 18+, AI notice, rate limits, schema validation, **safety validation**,
   ingredient compliance, de-duplication, persistence. The ai-service is stateless and trusted only for producing
@@ -59,26 +59,33 @@ mocktailsOnly: bool, excludeNames: string[], count: 1..5}` (the server asks 4, a
 See the recipe-schema skill.
 
 ## Express side (server/)
-- `server/ai/provider.js`: `AI_PROVIDER` = `local` | `openai` | `off` (default `off`). Legacy: when `AI_PROVIDER` is
-  unset and `AI_ENABLED=true`, the provider is `openai` (old behaviour of `/api/detect-product`,
-  `/api/generate-recipes`, `/api/smart-bar/generate-recipes`, which only ever use OpenAI).
+- `server/ai/provider.js`: `AI_PROVIDER` = `local` | `off` (default `off`; only exactly `local` is on; `openai` and the
+  legacy `AI_ENABLED=true` just log a warning).
 - `server/ai/localProvider.js`: calls the ai-service with timeout `AI_SERVICE_TIMEOUT_MS` (scan 20 s, recipes 60 s
-  default), 1 retry on connection errors and 503 only (never on 4xx or timeouts of generation).
-- `server/ai/openaiProvider.js`: same interface on OpenAI (`gpt-4o-mini`, `store: false`).
-- `server/ai/schemas.js`, `server/ai/recipeSafety.js`, `server/ai/taxonomy.js`, `server/ai/openFoodFacts.js`.
+  default; counted from the start of the call, incl. the upload), 1 retry on connection errors and 503 only.
+- `server/ai/recipeEngine.js`: slot engine – one model call per recipe (style hints, one mocktail slot that gets only a
+  flavour description of an alcoholic scanned bottle, one retry per slot, refill, `AI_RECIPE_CONCURRENCY` 2), and an
+  `onRecipe` callback used for streaming.
+- `server/ai/schemas.js`, `server/ai/recipeSafety.js`, `server/ai/taxonomy.js`, `server/ai/openFoodFacts.js`,
+  `server/ai/photoStore.js` (only used while `AI_PHOTO_OPT_IN_ENABLED` is on; otherwise `deleteAll()` at start).
+- ai-service scan: 4B first; an optional second model (`DRINKME_SECOND_PASS_MODEL`, off by default) only for
+  `unclear`/low-confidence answers, inside a 17 s total budget (held-out eval: no gain, so off).
+- Per-user daily limits `AI_DAILY_SCAN_LIMIT` (20) / `AI_DAILY_RECIPE_LIMIT` (10), rolling 24 h; 429
+  `ai_daily_limit` with `kind` and `limit`; outages/timeouts give the unit back. `GET /api/ai/status` returns
+  `dailyLeft` and `dailyLimits`.
 - Routes (all behind `requireSignedInAdult`, `requireAuth`, the AI limiter):
   | Route | Notes |
   |---|---|
   | `GET /api/ai/status` | `{available, provider, scan, recipes, barcode, noticeVersion, noticeAccepted, processing, settings}`; the app's feature flag |
-  | `POST /api/ai/notice` | `{version}` accepts the AI notice. The version depends on the provider (local 1, openai 2: the text names the recipient), so switching provider asks again |
-  | `PUT /api/ai/settings` | `{basics?: string[] \| null, photoOptIn?: bool}`; opt-in stores `aiPhotoOptInAt` + `aiPhotoConsentVersion` |
+  | `POST /api/ai/notice` | `{version}` accepts the AI notice (`AI_NOTICE_VERSION` 1) |
+  | `PUT /api/ai/settings` | `{basics?: string[] \| null, photoOptIn?: bool}`; `photoOptIn: true` → 400 `photo_opt_in_unavailable` unless `AI_PHOTO_OPT_IN_ENABLED`; turning it off always works |
   | `POST /api/ai/scan` | JSON `{imageBase64, language}`; needs notice; 18+; one request per user, then AI limiter |
   | `POST /api/ai/barcode` | `{ean, language}`; EAN-8/12/13 checksum; Open Food Facts; no notice needed, works with AI off |
   | `POST /api/ai/report` | `{kind: 'recipe'\|'scan', reason: 'offensive'\|'unsafe'\|'wrong'\|'other', ...}` → audit entry `ai.output_reported` (Google Play AI content policy) |
-  | `POST /api/ai/recipes` | `{mode, item?, language, newSession?}`; returns `{recipes, exhausted}` |
+  | `POST /api/ai/recipes` | `{mode, item?, language, newSession?, stream?}`; returns `{recipes, exhausted}`; with `stream: true` NDJSON lines `start` / `recipe` (one per recipe) / `done` / `error` (client: `streamRecipes` in `src/lib/ai.ts`, XHR) |
   | `GET /api/recipes/saved` · `POST /api/recipes/saved` · `DELETE /api/recipes/saved/:recipeId` | saved recipes (max 200) |
 - Error codes to the app (each has an `ai.errors.*` string in ro/en): `ai_disabled` 503, `ai_notice_required` 403,
-  `ai_rate_limit` 429, `ai_busy` 409 (one AI request per user at a time), `ai_unavailable` 503 (provider down),
+  `ai_rate_limit` 429, `ai_daily_limit` 429, `ai_busy` 409 (one AI request per user at a time), `ai_unavailable` 503 (provider down),
   `ai_timeout` 504, `ai_invalid_output` 502 (nothing valid after one regeneration), `ai_bad_request` 400,
   `barcode_not_found` 404, `barcode_invalid` 400, `barcode_unavailable` 503, `smart_bar_empty` 400,
   `water_no_recipes` 400, `recipe_limit` 429, `recipe_invalid` 400; exhausted batches are 200 with `exhausted: true`.
@@ -92,7 +99,11 @@ See the recipe-schema skill.
 ## Env vars
 | Var | Where | Default | Meaning |
 |---|---|---|---|
-| `AI_PROVIDER` | server | `off` | `local`, `openai` or `off` |
+| `AI_PROVIDER` | server | `off` | exactly `local` = on; anything else = off |
+| `AI_DAILY_SCAN_LIMIT` / `AI_DAILY_RECIPE_LIMIT` | server | `20` / `10` | per user per rolling 24 h |
+| `AI_RECIPE_CONCURRENCY` | server | `2` | recipe calls in parallel per batch (match `OLLAMA_NUM_PARALLEL`) |
+| `AI_PHOTO_OPT_IN_ENABLED` | server | off | offer the photo opt-in (off at launch, D-22) |
+| `DRINKME_SECOND_PASS_MODEL` / `_BUDGET_S` / `_KEEP_ALIVE` | ai-service | off / 12 / `2m` | optional second scan pass |
 | `AI_SERVICE_URL` | server | `http://127.0.0.1:8088` | ai-service base URL |
 | `AI_SERVICE_TOKEN` | server + ai-service | none | shared secret, header `X-AI-Service-Token` |
 | `AI_SERVICE_TIMEOUT_MS` | server | `60000` | recipes; scan uses min(20000, this) |
@@ -114,8 +125,9 @@ See the recipe-schema skill.
 
 ## Privacy
 - Photos: base64 in memory → ai-service → discarded. Not logged (no request bodies in logs, no OCR text in logs).
-- Opt-in (`photoOptIn`, off by default): only then the server keeps the photo + result in `AI_PHOTO_DIR`
-  (default `server/data/ai-scans/`, gitignored) for `AI_PHOTO_RETENTION_DAYS`, deleted with the account.
+- No photo retention at launch (D-21/D-22): `AI_PHOTO_OPT_IN_ENABLED` is off, the switch is hidden in the app and the
+  server deletes any kept photo and clears old opt-ins at start (LC-49). Only if the flag is turned on later does an
+  opted-in user's photo + result stay in `AI_PHOTO_DIR` for `AI_PHOTO_RETENTION_DAYS`, deleted with the account.
 - Every AI answer is labelled "AI-generated" in the app.
 
 ## Rollout order (never change it)

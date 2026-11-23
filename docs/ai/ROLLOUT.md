@@ -6,8 +6,9 @@ integration-manager agent on 2026-11-16. Contracts: `.claude/skills/drinkme-ai-s
 ## Flags
 | Flag | Where | Default | Role |
 |---|---|---|---|
-| `AI_PROVIDER` | server env | `off` | Master switch (`local` / `openai` / `off`) |
-| `AI_ENABLED` | server env (legacy) | off | Means `openai` **only while `AI_PROVIDER` is unset** – set `AI_PROVIDER=off` explicitly in production so a leftover `AI_ENABLED=true` cannot turn the new screens on through OpenAI |
+| `AI_PROVIDER` | server env | `off` | Master switch: only exactly `local` turns AI on. The OpenAI provider and the legacy `AI_ENABLED` server switch were removed (D-24); `openai` or `AI_ENABLED=true` now only log a warning |
+| `AI_PHOTO_OPT_IN_ENABLED` | server env | off | Offers the photo opt-in. Off at launch (D-21/D-22); while off, kept photos and old opt-ins are removed at start |
+| `AI_DAILY_SCAN_LIMIT` / `AI_DAILY_RECIPE_LIMIT` | server env | 20 / 10 | Per-user daily limits (cost control) |
 | `AI_ENABLED` | `src/screens/ScannerScreen.tsx` | `true` | Client kill switch for the scanner |
 | `AI_RECIPES_ENABLED` | `src/screens/SmartBarScreen.tsx` | `true` | Client kill switch for recipes |
 The app shows the real flows only while its kill switch is on **and** `GET /api/ai/status` says `available`. No flag
@@ -38,5 +39,5 @@ is ever deleted; the "coming soon" previews stay.
 ## Changing the contract later
 - Adding an enum value (category, status, warning) is additive: the app tolerates unknown values. Removing or renaming
   one, or a new required field, needs `schemaVersion` "2" served next to "1" (`/v2/*` on the ai-service).
-- Changing the AI notice text in substance: raise the notice version on the server (it is per provider: local 1,
-  openai 2) so users accept it again.
+- Changing the AI notice text in substance: raise `AI_NOTICE_VERSION` on the server (now 1) so
+  users accept it again.

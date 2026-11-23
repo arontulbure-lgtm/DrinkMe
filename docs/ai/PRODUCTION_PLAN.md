@@ -107,9 +107,8 @@ Express server env: `AI_PROVIDER=local`, `AI_SERVICE_URL=http://10.0.0.2:8088`, 
   recipes keep working (they need no model).
 - In-flight requests fail fast with clear codes (`ai_unavailable` 503 after one retry, `ai_timeout` 504); the app
   shows a retry button.
-- Optional fallback (not built yet, decision for John): a second provider, e.g. `AI_FALLBACK_PROVIDER=openai`, used
-  only when the local one is unhealthy. Every recipe would still pass the same server-side safety validation, but
-  photos would then go to OpenAI, which needs its own privacy notice update and DPA. Default: no fallback.
+- No third-party fallback: decision D-24 (2026-11-22) rules out OpenAI; when the ai-service is down the AI features
+  pause and the rest of the app keeps working.
 - Monitoring: uptime check on the ai-service health from the Express host, alert on 3 consecutive failures; log
   the rate of `ai_unavailable` / `ai_timeout` answers.
 

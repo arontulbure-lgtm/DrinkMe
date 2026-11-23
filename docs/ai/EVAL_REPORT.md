@@ -6,7 +6,53 @@ Tools: `ai-service/eval/` (`bench.py`, `run_eval.py`, `review_labels.py`, `valid
 `e2e_api.mjs`). Every percentage has its denominator. **Caveat:** the same test set was used to tune the prompt once
 (round 2: taxonomy clarifications, no product-specific rules); there is no held-out set yet.
 
-## Summary against the targets
+## Update 2026-11-22 – held-out Romanian set (old vs new)
+The 82.7 % below was measured on the set the prompt was tuned on. The new set `D:\AI\datasets\heldout-ro-v1`
+(data-curator, 132 images, never used for tuning: 114 Open Food Facts photos of products sold in Romania – Ursus,
+Timișoreana, Bergenbier, Jidvei, Murfatlar, Cotnari, Zarea, Alexandrion, Borsec, Dorna, Prigat, Cappy, Pilos… –,
+12 Wikimedia Commons photos, 6 derived blurry photos; licences and attribution in its manifest; 4 OFF labels fixed
+blind, before any run, in `review_heldout.py`). Raw results: `D:\AI\reports\eval-heldout-4b`, `eval-heldout-2pass`.
+
+| Metric | Old: scan-v1 (tuned on) | **New: held-out RO, 4B** | New: held-out, 4B + 8B second pass |
+|---|---|---|---|
+| Correct (category **and** brand), recognisable labels | 82.7 % (86/104) | **76.3 % (71/93)** | 76.3 % (71/93) |
+| Category accuracy | 93.3 % (97/104) | **90.3 % (84/93)** | 90.3 % |
+| Brand accuracy | 86.5 % (90/104) | 80.6 % (75/93) | 80.6 % |
+| Product accuracy | 75.0 % (78/104) | 66.7 % (62/93) | 66.7 % |
+| Negatives refused | 97.1 % (34/35) | **100 % (28/28)** | 100 % |
+| Blurry → barcode offered | 100 % (8/8) | 100 % (6/6) | 100 % |
+| Water recognised | 83.3 % (5/6) | 80 % (4/5) | 80 % |
+| Latency p50 / p95 / max | 2.4 / 3.0 / 3.9 s | **2.5 / 3.3 / 4.1 s** | 2.6 / **17.0** / 17.1 s |
+| VRAM peak (with desktop) | 6.0 GB | 6.7 GB | 7.5 GB |
+
+**Two-stage scan: no gain, so it stays off.** The 8B pass ran on 30 photos (every `unclear` answer of the 4B: the
+blurry ones, unreadable labels, some negatives), took 5–15 s each (model swap on 8 GB) and changed **no** result.
+The 22 misses of the 4B are confident wrong answers, not `unclear` ones, so a pass triggered by low confidence never
+sees them. `DRINKME_SECOND_PASS_MODEL` stays unset in `ai:start`; the code path is kept (budget-bounded) for a GPU
+with room for both models.
+
+**Misses on the held-out set (22/93):** 4 refused or `unclear` (3 Romanian dairy cartons, a syrup, a Schweppes read as
+water), 5 wrong category (Timișoreana read as "Timisoreono" energy drink, Cappy juices as syrup/soda, Nestea as
+juice), 13 right category with a wrong or differently-named brand (store and sub-brands such as Pilos/Lidl, Fuze Tea
+vs Coca-Cola, Santal vs Parmalat; misspelt Romanian names – "Pergenbier", "PELARULE HUSI"; generic "SUC NATURAL").
+About half of the brand misses are scoring/label questions, not wrong readings; they are counted as misses.
+**Next for accuracy (ml-engineer):** a Romanian brand list in the prompt or a fuzzy brand match after the model
+(Timișoreana, Bergenbier, Husi…), `qwen3-vl:4b-instruct` at Q8, and real shop-shelf phone photos.
+
+**Recipes on the new code (real pipeline, `engine_eval.mjs`, 20 inputs × 2 batches, streaming, concurrency 2):**
+| Metric | Old (2026-11-16) | **New (2026-11-22)** |
+|---|---|---|
+| Batches failed | 1/40 | **0/40** |
+| First batch with ≥ 3 recipes | 20/20 | 19/20 |
+| Mocktail in the first batch when possible | 16/20 | **19/20** (flavour-only mocktail slot + one retry) |
+| Repeats across batches | 0 | 0 |
+| Highest standard drinks | 1.89 | 1.8 (limit 2.0) |
+| **Time to the first recipe** (streamed) | – (whole batch only) | **p50 5.3 s, p90 6.6 s, max 12.0 s** |
+| Whole batch p50 / p95 / max | 21.4 / 39.8 / 46.7 s | **13.7 / 25.9 / 34.2 s** |
+Red team re-run (17 prompts, en + ro): 24 of 56 recipes accepted, drops S6 9 · S3 8 · S2 4 · S9 4 · S1 3 · S8 3 ·
+S11 1, **0 violations after validation**; the mocktail-only prompts (S13) returned only mocktails.
+
+## Summary against the targets (2026-11-16, tuned set)
 | Target | Result | Status |
 |---|---|---|
 | ≥ 85 % correct on recognisable labels | **82.7 %** (86/104, reviewed labels) · 74.3 % (81/109, original OFF labels) | ❌ close, see below |
