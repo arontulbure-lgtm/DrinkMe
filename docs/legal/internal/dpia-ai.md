@@ -17,7 +17,7 @@ Facts: `data-inventory.md` §8 (file:line, code re-read 2026-11-22). Decisions: 
 | Data subjects | Signed-in users who confirmed 18+ and accepted the AI notice; incidentally people or objects visible in a photo (bystanders) |
 | Personal data | Scan photo (in memory only); language; confirmed item; Smart Bar item names; basics; saved recipes; AI notice version + time; daily-limit events (uid, kind, time); hourly counters; AI reports (kind, reason, recipe id/name or scan category/status, uid, time) |
 | Special categories (Art. 9) | Not intended. Possible incidental: a photo could show a face, medicine or religious item; alcohol preferences may allow inferences about health or religion. Not processed for those purposes; the scanner refuses non-ingredients and does not identify people |
-| Scale | Beta: tens of users. Planned: 5k–10k MAU in Romania (CLAUDE.md roadmap). Not large-scale yet – re-assess at 10,000 MAU |
+| Scale | Beta: tens of users. Planned: 5k–10k MAU in Romania (product roadmap). Not large-scale yet – re-assess at 10,000 MAU |
 | Technology | Open-weights model `qwen3-vl:4b-instruct` (Apache-2.0) via Ollama + RapidOCR; optional second pass `qwen3-vl:8b-instruct` on the same host, **off by default**; Express server validates every answer |
 | Recipients | None outside DrinkMe for photos/ingredients except the **EU/EEA GPU host** as processor (D-23); Open Food Facts receives only the EAN (no personal data). **No outside AI company** (OpenAI removed, D-24/D-26) |
 | Retention | Photo: request only (D-21). Saved recipes, basics, notice: account lifetime. Daily-limit events 24 h. AI reports 90 days, deleted with the account. Recipe-session names 2 h in memory. Backups ≤ 30 days |
@@ -73,7 +73,7 @@ Likelihood × severity before measures (L = low, M = medium, H = high).
 | R5 | User confirms the scan; disclaimers on every recipe; server recomputes ABV/standard drinks; warnings (raw egg, energy + alcohol); max 2 standard drinks (S1); language-error warning; in-app report with 24 h/72 h targets (D-25) | Admin review routine (LC-54); keep `docs/ai/EVAL_REPORT.md` and red-team set current |
 | R6 | Safety rules S1–S13 on every recipe before it is streamed; user text only in the user message (never system prompt); report button; one request at a time; daily and hourly limits | Use reports to extend S1–S13 |
 | R7 | Server-side 18+ gate; mocktails only without confirmation; AI notice | Per-country age and neutral age screen (LC-01, LC-02) |
-| R8 | Saved recipes and Smart Bar private; no ads/analytics; deletion cascade | Any future aggregate use needs a new assessment (CLAUDE.md exit plan mentions data as an asset – only anonymised/aggregated, never photos) |
+| R8 | Saved recipes and Smart Bar private; no ads/analytics; deletion cascade | Any future aggregate use needs a new assessment (the business plan mentions data as an asset – only anonymised/aggregated, never photos) |
 | R9 | "AI-generated" label on every recipe and scan result, machine-readable marker; notice before first use (AI Act Art. 50) | Check against the final Code of Practice on marking/labelling (LC-35) |
 | R10 | Opt-in can no longer be switched on; ignored while the flag is off | **Delete all files in `AI_PHOTO_DIR` and clear `aiPhotoOptIn*` before launch (LC-49)** |
 | R11 | Provider layer accepts only `local`; OpenAI code and dependency removed | Any change: new decision, DPIA update, new notice version (LC-50) |

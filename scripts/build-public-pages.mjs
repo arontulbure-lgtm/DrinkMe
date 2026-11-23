@@ -119,7 +119,7 @@ function inline(text, locale) {
         const key = KEY_BY_SOURCE.get(doc[1]);
         return `<a href="${key}.html">${escapeHtml(titles[locale][key])}</a>`;
       }
-      if (/\.md$|^\.claude\/|^server\/|^src\//.test(code)) {
+      if (/\.md$|^\.[a-z]+\/|^server\/|^src\//.test(code)) {
         return `<span class="internal">${escapeHtml(UI[locale].internal)}</span>`;
       }
       if (/^\[.*\]$/.test(code)) return `<mark>${escapeHtml(code)}</mark>`;

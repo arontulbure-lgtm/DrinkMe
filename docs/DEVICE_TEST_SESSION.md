@@ -72,11 +72,11 @@ To remove the rules later: `Remove-NetFirewallRule -DisplayName "DrinkMe API (50
 - **If Expo Go hangs on launch** ("Opening project…", "Could not connect" or a white screen that never loads, while Safari reaches `/healthz`): the router's DNS is a known cause, and the usual fix on this network. iPhone Settings → Wi-Fi → (i) next to your network → Configure DNS → Manual → remove the entries, add `1.1.1.1` and `8.8.8.8` → Save, then reopen Expo Go. Switch back to Automatic after testing if you like.
 - The first time, iOS asks whether Expo Go may "find and connect to devices on your local network". Tap **Allow**. If you tapped "Don't Allow": iPhone Settings → Privacy & Security → Local Network → turn on Expo Go.
 
-### 1d. Config files (you, not Claude Code)
+### 1d. Config files (by hand)
 - `server/.env` must contain `NODE_ENV=development` and `FIREBASE_SERVICE_ACCOUNT_KEY=./serviceAccount.json`, with the key file at `server/serviceAccount.json`.
 - `.env` in the project root must have the six `EXPO_PUBLIC_FIREBASE_*` values.
 - You do not need to change `EXPO_PUBLIC_API_URL`: the session command sets it to the PC's current Wi-Fi address for this run only.
-- **Keep other secrets out of the root `.env`.** Expo loads every name in it into Metro, and only `EXPO_PUBLIC_` names reach the app. A key that belongs to something else (for example `ANTHROPIC_API_KEY`) should live in your user environment or a password manager instead. The session preflight shows a yellow **!** with the names (never values) when it finds one. Server secrets go in `server/.env`.
+- **Keep other secrets out of the root `.env`.** Expo loads every name in it into Metro, and only `EXPO_PUBLIC_` names reach the app. A key that belongs to something else (for example another service's API key) should live in your user environment or a password manager instead. The session preflight shows a yellow **!** with the names (never values) when it finds one. Server secrets go in `server/.env`.
 
 ## 2. Run an iPhone session
 
@@ -167,7 +167,7 @@ Adapted from `docs/JOHN_TODO.md` section 1. Write a 📝 note at each step whose
 Moderation as admin (`docs/JOHN_TODO.md` section 1c) uses curl from the PC and can run in the same session.
 
 ## F. Firebase project
-**The app's project is `drinkmeapp-a8fea`** (owner decision 2026-11-14). The older project `drinkme-b2269`, named in `CLAUDE.md` and older docs, is no longer used. Every session preflight prints a line `Firebase project: <id> (app and server)`, or a ✗ with both ids when the app and the server point to different projects.
+**The app's project is `drinkmeapp-a8fea`** (owner decision 2026-11-14). The older project `drinkme-b2269`, named in older docs, is no longer used. Every session preflight prints a line `Firebase project: <id> (app and server)`, or a ✗ with both ids when the app and the server point to different projects.
 
 **Users and UIDs:** <https://console.firebase.google.com/project/drinkmeapp-a8fea/authentication/users> (in general `console.firebase.google.com/project/<project-id>/authentication/users`). The "User UID" column is what `official:set` and `ADMIN_USER_IDS` need. Sign-in methods: `…/authentication/providers`. Project settings (web config, service accounts): `…/settings/general` and `…/settings/serviceaccounts/adminsdk`.
 
@@ -186,7 +186,7 @@ Moderation as admin (`docs/JOHN_TODO.md` section 1c) uses curl from the PC and c
 ### F2. Old development data
 `server/data/db.json` still holds users, posts and comments of `drinkme-b2269` accounts (on 2026-11-13: 2 users, 1 post). Those uids never sign in again, so that data is orphaned. Nothing reads it for the new accounts, apart from showing the old posts in feeds and search. Two options, both yours to run:
 - **Keep it** (default): old test posts stay visible under their old names. Harmless for development; it never reaches production, which gets its own database (`docs/JOHN_TODO.md` section 4).
-- **Start empty:** stop every session, then rename `server\data\db.json` to `db.json.old-project` in Explorer; the next server start creates an empty database. Renaming instead of deleting keeps it recoverable. Claude Code does not touch `server/data/`. Ask for a `dev:reset-db` command if you want this as one step with checks.
+- **Start empty:** stop every session, then rename `server\data\db.json` to `db.json.old-project` in Explorer; the next server start creates an empty database. Renaming instead of deleting keeps it recoverable. The tooling never touches `server/data/`. Ask for a `dev:reset-db` command if you want this as one step with checks.
 
 ## G. Google sign-in setup
 **State on 2026-11-14:** the Google provider is enabled in Firebase (`drinkmeapp-a8fea`). In Expo Go the button is disabled on purpose ("not available in Expo Go"), and that is correct: Expo Go cannot receive Google's answer for DrinkMe.
@@ -231,10 +231,9 @@ Do this during a session (the emulator is easiest), with the email/password flow
 8. No brand-partner post before the "Paid partnership" label exists (`docs/legal/CODE_GAPS_PLAN.md`, T-13/T-14).
 
 ## 6. After the session
-Ask Claude Code: **"Run the log-triage agent on the latest test session."**
-It reads the newest `logs/sessions/` folder and writes `reports/test-sessions/<date-time>.md`: a ranked table of problems (crash, error, warning, failed request, visual) with the screen, the steps before it and the source file, plus a fix list with one task per problem. Then ask Claude Code to fix the items you choose.
+Triage the session: read the newest `logs/sessions/` folder and write `reports/test-sessions/<date-time>.md`, a ranked table of problems (crash, error, warning, failed request, visual) with the screen, the steps before it and the source file, plus a fix list with one task per problem. Then fix the items you choose.
 
-## 7. Scripted tests on the emulator (for Claude Code)
+## 7. Scripted tests on the emulator (automation)
 Used for the automated retest of 2026-11-14; you can run the same pieces by hand.
 - `npm run testusers:create` makes test1..test3@drinkme.test in `drinkmeapp-a8fea`, with random passwords that are saved only in `logs/testusers.local.json` (git-ignored, never printed). `npm run testusers:reset` sets those passwords again. `npm run testusers:delete` deletes them, plus any `drinkmesocialapp+e2e…@gmail.com` account made by an automated sign-up, and never any other account. Their data on the development server stays until deleted in the app.
 - `node scripts/adb-ui.mjs dump | tap "<text>" | type "<text>" | typepw <email> | swipe up | wait "<text>" | shot <file>` drives the app over adb (uiautomator). In Git Bash set `MSYS_NO_PATHCONV=1` before passing `/regex/` patterns.

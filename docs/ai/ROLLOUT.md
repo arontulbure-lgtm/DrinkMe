@@ -1,7 +1,7 @@
 # Local AI – rollout and rollback
 
 Order is always **ai-service → server → app**, and switching off is always **server first**. Reviewed by the
-integration-manager agent on 2026-11-16. Contracts: `.claude/skills/drinkme-ai-service/SKILL.md`.
+integration review on 2026-11-16. Contracts: `.claude/skills/drinkme-ai-service/SKILL.md`.
 
 ## Flags
 | Flag | Where | Default | Role |

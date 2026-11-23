@@ -37,7 +37,7 @@ describe('app log entries across sessions (triage of 2026-11-14)', () => {
 
 describe('watcher helpers', () => {
   test('secret-looking .env names, by name only', () => {
-    for (const name of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'JWT_SECRET', 'GITHUB_TOKEN']) assert.equal(session.isSecretLookingName(name), true, name);
+    for (const name of ['THIRD_PARTY_API_KEY', 'OPENAI_API_KEY', 'JWT_SECRET', 'GITHUB_TOKEN']) assert.equal(session.isSecretLookingName(name), true, name);
     for (const name of ['EXPO_PUBLIC_FIREBASE_API_KEY', 'NODE_ENV', 'EXPO_PUBLIC_API_URL']) assert.equal(session.isSecretLookingName(name), false, name);
   });
 

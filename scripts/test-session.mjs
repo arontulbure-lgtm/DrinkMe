@@ -730,7 +730,7 @@ async function main() {
     await Promise.all([serverLog, metroLog, issuesLog].filter(Boolean).map((stream) => new Promise((resolve) => stream.end(resolve))));
     console.log(bold(`\nSession saved: ${sessionDir}`));
     console.log(`  ${seen.size} distinct issue(s), ${noteCount} note(s).`);
-    console.log('  Next: ask Claude Code to "run the log-triage agent on the latest test session".\n');
+    console.log('  Next: triage the session (ranked fix list in reports/test-sessions/, see docs/DEVICE_TEST_SESSION.md section 6).\n');
     // A killed Expo cannot hand the terminal back: leave it in normal mode.
     if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
     process.exit(exitCode);
