@@ -174,7 +174,7 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
             ListEmptyComponent={
               !loading && !error && query.length >= 2 ? (
                 <Text style={styles.emptyText}>{t('location.noMatches')}</Text>
-              ) : null
+              ) : undefined
             }
           />
           {/* Google Places terms: results from Places carry Google's attribution (legal T-04). */}

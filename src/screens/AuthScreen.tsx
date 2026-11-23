@@ -4,6 +4,7 @@ import {
   StyleSheet, Alert, Platform, ActivityIndicator, AccessibilityInfo,
   KeyboardAvoidingView, ScrollView, Keyboard, Dimensions,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -183,7 +184,8 @@ export default function AuthScreen() {
   // KeyboardAvoidingView a usable frame, so the form is padded by the keyboard's height and scrolled to
   // its end: the submit button stays just above the keyboard (device test 2026-11-14).
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  // React Native 0.88 strict API: refs hold the instance type.
+  const scrollRef = useRef<ScrollViewInstance>(null);
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
     const show = Keyboard.addListener('keyboardDidShow', (event) => {
