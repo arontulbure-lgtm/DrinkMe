@@ -600,3 +600,27 @@ Done and committed (all on the launch branch):
 Open from the reviews (for John or later steps): EXIF/GPS in post photos needs a device check (blocker if GPS survives); Sign in with Apple in Firebase; Google sign-in in a release build; Explore discount card (D-18); API URL and EAS env vars; new artwork; delete dev test users before launch.
 
 Part B waits: `D:\DrinkMeApp\_handoff\AI_DONE.md` does not exist yet.
+
+## Launch run, Part B and C – 2026-11-23
+- Step 6/7: `AI_DONE.md` present. PR #4 merged into the launch branch (81c24b6). Conflicts were resolved in three groups:
+  - server: the local-only provider; production needs `AI_PROVIDER` off or local; `AI_SERVICE_PRIVATE_HOSTS` covers the compose network
+  - legal and store docs: by the legal agent
+  - app.config: camera texts
+  - Also added `ai-service/Dockerfile` and Ollama in the compose `ai` profile.
+  - Integration review: no blocker. Suite 0 fail; ai-service 31/31.
+- Step 7b: Expo SDK 55 (ac3fc57) → 56 (09dda64) → 57 (9a5523c) → 58 (0b63f82). Each step: expo-doctor, typecheck, lint, production export, full server suite 0 fail. Fixes along the way:
+  - vector-icons and expo-font declared directly
+  - TS 6 / RN 0.88 type errors
+  - React Compiler lint rules set to warn
+  - Follow-ups (8aacb40): version rules, the iPhone preflight, docs.
+- Emulator e2e on SDK 58 with `AI_PROVIDER=local` (session 2026-11-23_13-32-35): no crash. Fixed (bfdde89): the high (Google button active in Expo Go 58) and the medium (text overflow), plus 2 lows. Open medium: Places, a key configuration item for John. Store screenshots are in `D:\DrinkMeApp\_release\store-assets`.
+- Step 8: final suite 1264 pass / 0 fail / 8 skipped; ai-service 31; check 0 errors; docker smoke 7/7. `docs/LAUNCH_READINESS.md`.
+- Step 9: PR #5 merged into main (67d174a); tag `v1.0.0-rc1` pushed.
+- Part C:
+  - `npm run release:export` (fed5472, 484b676) exported main to `D:\DrinkMeApp\_release\drinkme-clean`.
+  - 36 development files were left out. The zero-hit check and an independent grep both found 0 hits, with no AI SDK packages.
+  - In the export: npm ci, check, server suite 1259 pass / 0 fail, ai-service 31, Android export, prebuild check.
+  - gitleaks: only the reviewed synthetic test canaries.
+  - New private repo `arontulbure-lgtm/drinkme-release`, one commit "DrinkMe 1.0.0-rc1", author John (GitHub noreply), no trailers.
+- Incident (contained): during the e2e, the throwaway e2e account's password appeared in one UI dump in the agent's tool output. It was rotated immediately and is not in any log or file. That account is in JOHN_TODO §2.3 for deletion.
+- Not done: nothing from the brief, apart from the items that need John (JOHN_TODO).

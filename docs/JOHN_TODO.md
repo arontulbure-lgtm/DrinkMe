@@ -1,65 +1,70 @@
 # What only John can do
 
-Updated by the run of 2026-11-16. Everything that could be done without you is done (see the run log, `docs/DEVICE_CHECKS.md` for test results, and the git history for the earlier long checklists). Values in angle brackets are placeholders: never paste real keys into tracked files.
+Updated by the launch run of 2026-11-23 (release candidate `v1.0.0-rc1`). Everything that could be done without you is done: see `docs/LAUNCH_READINESS.md` (go/no-go), `docs/DEVICE_CHECKS.md` and the run log. Items are in the order to do them. Values in angle brackets are placeholders: never paste real keys into tracked files.
 
-## 0. First: iPhone Expo Go test (the app is on Expo SDK 58 now)
+## 1. iPhone Expo Go test (first; the app is on Expo SDK 58 now)
 1. iPhone: update **Expo Go** in the App Store (58.0.5 or later). Same Wi-Fi as the PC.
 2. Once, PowerShell **as administrator**: `New-NetFirewallRule -DisplayName "DrinkMe dev (Metro + API)" -Direction Inbound -Protocol TCP -LocalPort 5000,8081-8090 -Action Allow -Profile Private`
 3. `npm run test:ios` in `D:\DrinkMeApp\DrinkMeFinal`, scan the QR code with the Camera app. If Expo Go hangs: iPhone Settings → Wi-Fi → (i) → Configure DNS → Manual → `1.1.1.1`, `8.8.8.8`.
-4. Go through `docs/DEVICE_TEST_SESSION.md` section 4, plus the AI scanner (photo and barcode) and Smart Bar recipes, then tell Claude Code to run the log triage.
+4. Go through `docs/DEVICE_TEST_SESSION.md` section 4, plus the AI scanner (photo and barcode) and Smart Bar recipes (start with `AI_PROVIDER=local` in the shell; the session starts the AI service), then ask for the log triage.
+5. While on the phone: post a photo taken **with location on**, open it from the feed and check that no GPS data is left (download from `/media/...`). If location survives, it becomes a launch blocker.
 
-## 1. Now (10 minutes, PowerShell in `D:\DrinkMeApp\DrinkMeFinal`)
-1. Rename the active key and point the server at it (Claude Code may not edit `server/.env`):
-   ```powershell
-   Rename-Item server\serviceAccount.a8fea.json.json serviceAccount-drinkmeapp-a8fea.json
-   npm run firebase:use-key -- server\serviceAccount-drinkmeapp-a8fea.json   # prints MATCH
-   ```
-2. Move the old project's key out of the project folder (Claude Code's sandbox cannot write outside it):
-   ```powershell
-   New-Item -ItemType Directory -Force D:\DrinkMeApp\_old_secrets | Out-Null
-   Move-Item server\serviceAccount.json D:\DrinkMeApp\_old_secrets\serviceAccount.drinkme-b2269.json
-   npm run official:keys    # only the drinkmeapp-a8fea key, marked "in use"
-   ```
-3. `ANTHROPIC_API_KEY`: move it to your user environment variables (the `agents/` tool reads it), then `npm run env:remove -- ANTHROPIC_API_KEY`.
-4. Delete `.env.before-firebase-*` and `server\.env.before-firebase-*` once the app works with drinkmeapp-a8fea (old project values inside).
+## 2. Local cleanup (PowerShell in `D:\DrinkMeApp\DrinkMeFinal`)
+1. `ANTHROPIC_API_KEY`: move it to your user environment variables (the `agents/` tool reads it), then `npm run env:remove -- ANTHROPIC_API_KEY`.
+2. Delete `.env.before-firebase-*` (old project values inside); the app runs on drinkmeapp-a8fea.
+3. Test accounts: before launch run `npm run testusers:delete`, and delete the throwaway e2e accounts `drinkmesocialapp+e2e…@gmail.com` by hand in the Firebase console (Authentication → Users).
 
-## 2. Keys (consoles; full list with links: `docs/SECURITY_ROTATION.md`)
-1. Maps key: new key restricted to Places API with a daily quota (e.g. 1,000) and a budget alert; after the first EAS build add the Android restriction (package `com.aroncarola.drinkmefinal` + the build's SHA-1) and the iOS one (bundle ID), and set `EXPO_PUBLIC_ANDROID_CERT_SHA1=<SHA-1>` in `.env` (the app already sends the headers).
+## 3. Keys (consoles; links in `docs/SECURITY_ROTATION.md`)
+1. **Maps key (also fixes the location search, which fails for every query today):** new key restricted to the Places API with a daily quota (e.g. 1,000) and a budget alert. After the first EAS build, add the Android restriction (package `com.aroncarola.drinkmefinal` + the build's SHA-1) and the iOS one (bundle ID), and set `EXPO_PUBLIC_ANDROID_CERT_SHA1=<SHA-1>`.
 2. Old Firebase project drinkme-b2269: delete its service-account keys (or the whole project).
-3. Firebase web key of drinkmeapp-a8fea: restrict to the Identity Toolkit API and Token Service API.
-4. OpenAI key: rotate, set a monthly budget; AI stays off.
-5. `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`: replace with drinkmeapp-a8fea's Web client ID (Firebase → Authentication → Google → Web SDK configuration).
+3. Firebase web key of drinkmeapp-a8fea: restrict it to the Identity Toolkit API and the Token Service API.
+4. OpenAI key: revoke it. The app no longer uses OpenAI (decision D-24).
+5. `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`: replace it with drinkmeapp-a8fea's Web client ID (Firebase → Authentication → Google → Web SDK configuration).
 
-## 3. Decisions (each unlocks finished code)
+## 4. Decisions (each unlocks finished work)
 | Decision | Unlocks |
 |---|---|
-| D-06 where the legal pages are hosted (e.g. GitHub Pages of `docs/public`) | set `EXPO_PUBLIC_LEGAL_BASE_URL=https://…`: legal links, sign-in agreement line, policy link appear |
-| D-01 lawyer reviews `docs/legal` + `docs/public` + `docs/store` | `EXPO_PUBLIC_TERMS_STEP_ENABLED=true` (Terms step); remove the draft banner/noindex (`scripts/build-public-pages.mjs`) |
-| D-18 remove the Explore "partners offer discounts" card | T-03 (Claude Code) |
-| D-02/03/04, N-1, N-3, D-10 countries and age rules | per-country age gate T-08…T-12 (Claude Code) |
-| Google sign-in: OK to add `@react-native-google-signin/google-signin` | native Google sign-in (docs/DEVICE_TEST_SESSION.md section G) |
-| `REQUIRE_VERIFIED_EMAIL` on for the closed beta? | server side tested (DEVICE_CHECKS section 2); signs every app out once |
-| JSON or Postgres in production | DATA-1 code is ready (`DB_DRIVER`) |
+| D-01 lawyer reviews `docs/legal`, `docs/public`, `docs/store` | `EXPO_PUBLIC_TERMS_STEP_ENABLED=true` (Terms step); remove the draft banner and noindex (`scripts/build-public-pages.mjs`) |
+| D-06 where the legal pages are hosted (e.g. GitHub Pages of `docs/public`) | `EXPO_PUBLIC_LEGAL_BASE_URL=https://…`: the legal links, the sign-in agreement line and the AI transparency link appear |
+| D-17 CUI and Trade Register number | the imprint and the Terms |
+| D-02/03/04, N-1, N-3, D-10: launch countries and age rules | the 18+ market list in both consoles; per-country age gate T-08…T-12 later |
+| D-18 remove the Explore "partners offer discounts" card | T-03 (ready to do) |
+| AI: an all non-alcoholic Smart Bar can get a recipe labelled "~0.4 % ABV" (the server keeps the safer, higher value) | keep the label, or treat trace ABV as 0 |
+| Wording: Romanian "norocuri" for cheers | one string change |
+| JSON or Postgres in production | `DB_DRIVER` is ready either way |
+| `REQUIRE_VERIFIED_EMAIL` on at launch? | server side tested; signs every app out once |
+| Google sign-in: OK to add `@react-native-google-signin/google-signin` | native Google sign-in (Expo Go cannot do it) |
+| When to switch AI on: EU GPU host (LC-45) | `AI_PROVIDER=local` on the server, no new app build (`docs/deploy/EU_GPU.md`) |
 
-## 4. Firebase console
-1. Authentication → Settings → User account linking: confirm "Link accounts that use the same email".
-2. After a development build: App Check → register Android (Play Integrity) and iOS (App Attest) (`docs/APP_CHECK_PLAN.md`).
+## 5. Hosting (`docs/PRODUCTION_ENV.md`, guides in `docs/deploy/`)
+1. Choose the host and the EU region, and create the volume or the Postgres database. HTTPS is required.
+2. Set the variables. The server refuses to start without `AI_PROVIDER=off` (or `local` once the GPU host runs). Never set `NODE_ENV` in the env file.
+3. Deploy, then check `/healthz` and `/readyz`.
+4. Schedule `npm run backup` daily. Set host log retention and provider backup retention to 30 days or less.
 
-## 5. Real devices (results so far: `docs/DEVICE_CHECKS.md`)
-Google sign-in and the takeover test (1a 7, 8, 20; 2.8), Apple (1a 9), two phones (1a 23), backend-off screen (1a 11), airplane mode (1a 17), a geotagged phone photo (1b 4), posts older than 7 days (1b 14), Resend on the Verify Email screen (2.4), a TalkBack/VoiceOver pass, and an iPhone run (section 0).
+## 6. Build and stores (`docs/RELEASE_BUILD.md`, `docs/store/README.md`)
+1. Artwork:
+   - a 1024×1024 icon without transparency
+   - an adaptive-icon foreground with the glass inside the safe zone
+   - a transparent splash logo
+   - a 512×512 Play icon and a 1024×500 feature graphic
+   - confirm the licence of the current glass drawing
+2. `eas.json`: replace `https://api.example.invalid` with the real API URL. Create the EAS environment variables: Firebase, Google client ID, Maps key, and later the legal base URL and the Terms step.
+3. Apple Developer ($99/year) and Google Play ($25) accounts. Then the first `eas build --profile preview`, which gives the SHA-1 for step 3.1.
+4. Sign in with Apple: enable it in Firebase, then test it on the iPhone in a development or TestFlight build. Apple 4.8 requires it when Google sign-in ships on iOS.
+5. Paste the listing, privacy labels, Data safety, age rating and review notes (`docs/store/`). Create the review account by signing up in the release build.
+6. Screenshots: the drafts are in `D:\DrinkMeApp\_release\store-assets\`. Retake the Apple ones on the iPhone.
+7. Firebase: confirm "Link accounts that use the same email". After a development build, register App Check (`docs/APP_CHECK_PLAN.md`).
 
-## 5a. Launch run additions (2026-11-22)
-1. A post photo taken with location on (GPS EXIF): post it, download it from `/media/...` and check that no GPS data is left. If it is, tell Claude Code: it becomes a launch blocker.
-2. Sign in with Apple on an iPhone (the app now sends a nonce); enable Apple in Firebase first.
-3. Artwork (`docs/RELEASE_BUILD.md`): 1024×1024 icon without transparency, adaptive-icon foreground with the glass inside the safe zone, transparent splash logo, Play icon 512×512, feature graphic 1024×500; confirm the licence of the current glass drawing.
-4. `eas.json`: replace `https://api.example.invalid` with the real HTTPS API URL; create the EAS environment variables (Firebase, Google client ID, Maps key, and later the legal base URL and the Terms step).
-5. Before launch: `npm run testusers:delete`; create the App Review account by signing up in the release build (`docs/store/review-notes.md`).
+## 7. Release repository
+`arontulbure-lgtm/drinkme-release` (private) holds `DrinkMe 1.0.0-rc1` as one commit. Build store releases from it. To publish a new version: `npm run release:export`, then `docs/RELEASE_PROCESS.md`.
 
-## 6. Hosting (`docs/PRODUCTION_ENV.md`, guides in `docs/deploy/`)
-Set `AI_PROVIDER=off` (the server refuses to start without it). Choose the host, create the volume or the Postgres database, set the variables, deploy, check `/healthz` and `/readyz`, schedule `npm run backup` daily, set provider/host backup retention to 30 days or less, set `EXPO_PUBLIC_API_URL` in the EAS profile.
-
-## 7. Stores (`docs/store/README.md`)
-Apple Developer ($99/year) and Google Play ($25) accounts; first `eas build --profile preview` (gives the SHA-1 for step 2.1); Sign in with Apple once Google sign-in ships on iOS (Apple 4.8); paste the listing, privacy labels, Data safety and age-rating answers; host `docs/public` and use its account-deletion URL; Play target audience 18+ only.
-
-## 8. Lawyer
-`docs/legal` (all drafts), the in-app privacy notice and Terms step texts, `docs/store`, `docs/public`; questions listed in `docs/legal/OPEN_DECISIONS.md`.
+## 8. Still open on real devices (`docs/DEVICE_CHECKS.md`)
+- Google sign-in and the takeover test (1a 7, 8, 20; 2.8)
+- two phones (1a 23)
+- the backend-off screen (1a 11)
+- airplane mode (1a 17)
+- posts older than 7 days (1b 14)
+- Resend on the Verify Email screen (2.4)
+- a TalkBack/VoiceOver pass
+- a real barcode with the camera
