@@ -21,9 +21,8 @@ For every cross-part change check:
 4. **Feature flags**: the client follows `GET /api/ai/status`; client kill switches stay; no flag is deleted.
 5. **Env vars**: every new var is in `server/README.md`, `docs/ai/LOCAL_SETUP.md` and the drinkme-ai-service skill,
    with a safe default (`off`). No secret is committed or printed.
-6. **Expo compatibility**: new native packages must match Expo SDK 54 (`npx expo install --check`), work in Expo Go
-   when the feature must be testable there, and never move the pinned versions (reanimated ~4.1.1, worklets 0.5.1,
-   expo-auth-session ~7.0.x, expo-apple-authentication ~8.0.x).
+6. **Expo compatibility**: new native packages must match Expo SDK 58 (`npx expo install --check`), work in Expo Go
+   when the feature must be testable there, and Expo-managed versions move only through `npx expo install`.
 7. **Error codes**: every server error code the app can receive has a ro/en message in the app.
 8. **Route manifest**: new server routes are in `server/test/helpers/routes.js`.
 

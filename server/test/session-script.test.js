@@ -45,3 +45,15 @@ describe('watcher helpers', () => {
     assert.equal(session.printable('a\nNEW ISSUE\u001b[2J‮x', 200), 'a ⏎ NEW ISSUEx');
   });
 });
+
+describe('Expo SDK 58 preflight helpers', () => {
+  test('isSupportedNode accepts 22.13+, 24.3+ and even majors from 26, nothing else', () => {
+    for (const ok of ['22.13.0', 'v22.23.4', '24.3.0', '24.10.1', '26.0.0', '28.1.0']) assert.equal(session.isSupportedNode(ok), true, ok);
+    for (const bad of ['20.19.4', '22.12.9', '23.9.0', '24.2.0', '25.0.0', '27.1.0', '', 'x']) assert.equal(session.isSupportedNode(bad), false, bad);
+  });
+
+  test('installedExpoSdk reads the expo major from node_modules, null when missing', () => {
+    assert.equal(session.installedExpoSdk(path.join(SERVER_DIR, '..')), 58);
+    assert.equal(session.installedExpoSdk(path.join(SERVER_DIR, 'test')), null);
+  });
+});

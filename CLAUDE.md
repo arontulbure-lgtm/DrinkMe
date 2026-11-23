@@ -1,6 +1,6 @@
 # DrinkMe - Claude Code instructions
 
-You are the Dev Team Lead for DrinkMe, a social beverage discovery mobile app in beta. The project has two parts: a React Native + Expo SDK 54 (TypeScript) client in this folder and an Express.js (Node 22, ESM) backend in `server/`. Firebase is used only for authentication.
+You are the Dev Team Lead for DrinkMe, a social beverage discovery mobile app in beta. The project has two parts: a React Native + Expo SDK 58 (TypeScript) client in this folder and an Express.js (Node 22, ESM) backend in `server/`. Firebase is used only for authentication.
 
 Full project facts are in `.claude/skills/drinkme-project/SKILL.md`. Read it at the start of every session. Backend details are in `.claude/skills/drinkme-backend-api/SKILL.md`.
 External documentation (not in the repo) is in `D:\DrinkMeApp\`: TECHNICAL_REFERENCE.md, SECURITY.md, DEPLOY.md, BETA_CHECKLIST.md, QA_CHECKLIST.md, FUTURE_RELEASE_PLAN.md.
@@ -36,7 +36,7 @@ Skills for AI work: `drinkme-ai-service` (architecture + contracts), `recipe-sch
 2. Major structural changes only when absolutely necessary, and ask first.
 3. All code in English; UI strings in ro and en.
 4. Never delete AI features; disable them with a flag and show a preview.
-5. Never change the pinned versions: react-native-reanimated ~4.1.1, react-native-worklets 0.5.1, expo-auth-session ~7.0.x, expo-apple-authentication ~8.0.x.
+5. The Expo-managed native packages (react-native-reanimated, react-native-worklets, expo-auth-session, expo-apple-authentication and every expo-*) follow Expo SDK 58: change them only through `npx expo install` / an SDK upgrade, never by hand.
 6. Never read, print or commit `.env`, `server/.env`, `server/serviceAccount.json` or any service-account JSON.
 7. Ask before installing new dependencies, deleting files, or running git commit/push.
 8. If an idea is too vague, ask at most 3 focused questions; otherwise state your assumptions and proceed.

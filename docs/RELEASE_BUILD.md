@@ -1,7 +1,7 @@
 # Release build (v1.0.0)
 
 How the store builds of the DrinkMe app are configured. Config lives in `app.config.ts` and `eas.json`; a source-level guard is in `server/test/client-source.test.js` ("release config").
-Kept SDK-neutral: nothing here depends on Expo SDK 54 specifically, so it carries over to the later SDK upgrade.
+Updated for Expo SDK 58 (2026-11-23); nothing here depends on one SDK.
 
 ## 1. Version and build numbers
 | Field | Value | Where |
@@ -79,7 +79,7 @@ This list comes from the config and the npm packages' manifests; transitive Grad
 Possible later refinement: cap the two storage permissions with `android:maxSdkVersion="32"` through a small config plugin (they are ignored on Android 13+ anyway). Not done now to avoid a custom native mod before the first build.
 
 ### iOS App Transport Security
-The SDK 54 prebuild template sets `NSAllowsArbitraryLoads: false` with `NSAllowsLocalNetworking: true`, so release builds need the HTTPS API URL (SEC-D). (`expo config --type introspect` shows `NSAllowsArbitraryLoads: true`, but that is only its fallback template, not what prebuild writes.)
+The Expo prebuild template sets `NSAllowsArbitraryLoads: false` with `NSAllowsLocalNetworking: true`, so release builds need the HTTPS API URL (SEC-D). (`expo config --type introspect` shows `NSAllowsArbitraryLoads: true`, but that is only its fallback template, not what prebuild writes.)
 
 ## 6. Splash, icons and assets
 `splash.backgroundColor` and `android.adaptiveIcon.backgroundColor` are `#000000` (brand background).

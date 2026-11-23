@@ -40,3 +40,16 @@ Re-run `npm audit --omit=dev` in both packages after the SDK upgrade; the releas
 - One major per PR, with the full server suite or `npm run check` plus a device test.
 - Never upgrade Expo-managed packages outside `npx expo install`.
 - Install everything on D: (npm cache on D:).
+
+## After the Expo SDK 58 upgrade (2026-11-23)
+Done in four steps (55, 56, 57, 58), each with expo-doctor, typecheck, lint, a production export and the full server suite:
+expo 58.0.x, React Native 0.88.1 (New Architecture only), React 19.3, TypeScript 6.0, reanimated 4.7.1, worklets 0.13.0,
+gesture-handler 3.3, all expo-* on 58.x. `@expo/vector-icons` and `expo-font` are now declared directly (SDK 56 dropped
+them from `expo`). The old version pins (reanimated ~4.1.1, worklets 0.5.1, expo-auth-session ~7.0, expo-apple-authentication
+~8.0) are replaced by "Expo-managed versions move only through `npx expo install`".
+
+Post-launch from the upgrade:
+- React Compiler lint rules (`react-hooks/refs`, `set-state-in-effect`, `purity`) are warnings, 16 spots in 9 files
+  (`eslint.config.mjs`). Refactor them, then turn the rules back to errors.
+- firebase 12 → 13 (still open; re-test email and Google sign-in).
+- Re-run `npm audit --omit=dev` and update the table above.

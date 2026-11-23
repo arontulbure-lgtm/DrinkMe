@@ -40,7 +40,29 @@ const METRO_PORT = 8081;
 // When 8081 is taken, the next free port up to 8081 + this is used.
 const METRO_PORT_TRIES = 9;
 const HEALTH_TIMEOUT_MS = 30_000;
-const MIN_NODE_MAJOR = 20;
+// Expo SDK 58 supports Node 22.13+, 24.3+ and 26+ (even majors only).
+const NODE_MINIMUMS = { 22: 13, 24: 3 };
+// The App Store / Play Store Expo Go runs only the newest SDK; Expo Go 58.x needs SDK 58.
+const EXPO_GO_SDK = 58;
+const IPHONE_FIREWALL_COMMAND = 'New-NetFirewallRule -DisplayName "DrinkMe dev (Metro + API)" -Direction Inbound -Protocol TCP -LocalPort 5000,8081-8090 -Action Allow -Profile Private';
+
+/** True for a Node version Expo SDK 58 supports. */
+export function isSupportedNode(version) {
+  const [major, minor] = String(version).replace(/^v/, '').split('.').map(Number);
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) return false;
+  if (major >= 26) return major % 2 === 0;
+  return major in NODE_MINIMUMS && minor >= NODE_MINIMUMS[major];
+}
+
+/** The Expo SDK major of the installed expo package, or null. */
+export function installedExpoSdk(root = ROOT) {
+  try {
+    const version = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', 'expo', 'package.json'), 'utf8')).version;
+    return Number(String(version).split('.')[0]) || null;
+  } catch {
+    return null;
+  }
+}
 const FIREBASE_CLIENT_NAMES = ['API_KEY', 'AUTH_DOMAIN', 'PROJECT_ID', 'STORAGE_BUCKET', 'MESSAGING_SENDER_ID', 'APP_ID']
   .map((suffix) => `EXPO_PUBLIC_FIREBASE_${suffix}`);
 // Expo reads these, in this order; a later file never overrides a name set earlier or in the shell.
@@ -227,8 +249,11 @@ export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
   // Shown with a yellow "!", never blocks the session.
   const warn = (label, hint) => results.push({ ok: true, warn: true, label, hint });
 
-  const nodeMajor = Number(process.versions.node.split('.')[0]);
-  check(nodeMajor >= MIN_NODE_MAJOR, `Node ${process.versions.node} (need ${MIN_NODE_MAJOR}+)`, 'Install Node 22 LTS from nodejs.org.');
+  check(isSupportedNode(process.versions.node), `Node ${process.versions.node} (Expo SDK 58 needs 22.13+, 24.3+ or 26+)`, 'Install Node 22 LTS (22.13 or later) from nodejs.org.');
+
+  const sdk = installedExpoSdk();
+  check(sdk === EXPO_GO_SDK, `Expo SDK ${sdk ?? 'not installed'}${sdk === EXPO_GO_SDK ? dim(`  (matches the store Expo Go ${EXPO_GO_SDK}.x)`) : ''}`,
+    `The store Expo Go ${EXPO_GO_SDK}.x runs only SDK ${EXPO_GO_SDK}: run npm install in the project root.`);
 
   check(await isPortFree(API_PORT), `Port ${API_PORT} free (API server)`,
     `Something already listens on ${API_PORT}: close the old server window, or find it with: Get-NetTCPConnection -LocalPort ${API_PORT} | Select OwningProcess`);
@@ -240,6 +265,13 @@ export async function runPreflight({ ipOverride, platform = 'ios' } = {}) {
     ? `Port ${METRO_PORT} free (Metro)`
     : `Metro port: ${metroPort ?? 'none free'}${metroPort ? dim(`  (${METRO_PORT} is used by another program, for example Docker)`) : ''}`,
   `Ports ${METRO_PORT} to ${METRO_PORT + METRO_PORT_TRIES} are all in use: close old Expo windows.`);
+
+  if (platform === 'ios') {
+    // Cannot be checked from the PC: shown as reminders with the exact fix.
+    warn(`iPhone: Expo Go ${EXPO_GO_SDK}.x from the App Store, on the same Wi-Fi as this PC`, 'Older Expo Go versions refuse the app; update it in the App Store.');
+    warn('Windows firewall: inbound TCP 5000 and 8081-8090 allowed on the private network', `Once, in an administrator PowerShell: ${IPHONE_FIREWALL_COMMAND}`);
+    warn('If the iPhone shows "Could not connect" or a blank screen: Wi-Fi DNS on the iPhone', 'Settings > Wi-Fi > (i) next to the network > Configure DNS > Manual: 1.1.1.1 and 8.8.8.8 (docs/DEVICE_TEST_SESSION.md, section 1c).');
+  }
 
   if (platform === 'android') {
     check(Boolean(adbPath()), 'adb found (Android platform-tools)', 'Install the Android SDK: docs/DEVICE_TEST_SESSION.md, section Android setup.');
@@ -415,7 +447,8 @@ const printQrCode = (url) => {
   } catch {
     console.log(yellow('  (No QR code printer found. In Expo Go, tap "Enter URL manually" and type the address below.)'));
   }
-  console.log(`  ${bold(url)}  ${dim('scan with the iPhone Camera app')}\n`);
+  console.log(`  ${bold(url)}  ${dim(`scan with the iPhone Camera app (opens Expo Go ${EXPO_GO_SDK}.x)`)}`);
+  console.log(dim('  Not loading? iPhone Wi-Fi DNS: Manual 1.1.1.1, 8.8.8.8 · firewall: TCP 5000 and 8081-8090 (docs/DEVICE_TEST_SESSION.md)\n'));
 };
 
 async function main() {

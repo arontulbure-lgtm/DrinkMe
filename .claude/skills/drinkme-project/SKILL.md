@@ -23,21 +23,20 @@ Long-term goal: grow to a size where the app can be acquired. Code must stay cle
 Firebase is used ONLY for authentication (client Firebase Auth + server-side firebase-admin token verification). Firestore and Firebase Storage are NOT used.
 
 ## Client stack (from package.json)
-- expo ~54.0.0, react-native 0.81.5, react 19.1.0, typescript ~5.9.2
+- expo ~58.0.0 (SDK 58, upgraded 2026-11-23), react-native 0.88.1 (New Architecture only), react 19.3.0, typescript ~6.0.3
 - @react-navigation/native ^7.1 + stack ^7.4 + bottom-tabs ^7.4
 - @tanstack/react-query ^5.87 (server state / fetching)
 - firebase ^12.2.1 (Auth only, web SDK)
-- expo-auth-session ~7.0.11 (Google OAuth, PKCE), expo-apple-authentication ~8.0.4 (iOS)
-- expo-secure-store (API token), expo-image-picker, @react-native-async-storage/async-storage
-- react-native-reanimated ~4.1.1, react-native-worklets ^0.5.1, gesture-handler ~2.28
+- expo-auth-session ~58.0 (Google OAuth, PKCE), expo-apple-authentication ~58.0 (iOS, with a SHA-256 nonce)
+- expo-secure-store (API token), expo-image-picker, expo-camera (scanner + barcode), expo-image, @expo/vector-icons (declared explicitly since SDK 56), @react-native-async-storage/async-storage
+- react-native-reanimated 4.7.1, react-native-worklets 0.13.0, gesture-handler ~3.3
 - Styling: React Native **StyleSheet**. nativewind/tailwind are installed but NOT used - do not introduce NativeWind classes.
-- Google Places via REST fetch (no native maps SDK). OpenAI GPT-4o-mini via the server (disabled for beta).
+- Google Places via REST fetch (no native maps SDK). AI: local ai-service only (AI_PROVIDER=local|off; OpenAI removed, D-24) - see the drinkme-ai-service skill.
 
 ### Critical versions - never change without explicit user approval and testing
-- react-native-reanimated must stay ~4.1.1 (not 4.2+)
-- react-native-worklets must stay 0.5.1 (not 0.9.x)
-- expo-auth-session must stay ~7.0.x
-- expo-apple-authentication must stay ~8.0.x
+- The Expo-managed native packages (react-native-reanimated, react-native-worklets, expo-auth-session, expo-apple-authentication and every expo-*) follow Expo SDK 58: change them only through `npx expo install` / an SDK upgrade, never by hand.
+- RN 0.88 strict TypeScript API: refs use instance types (e.g. `useRef<ScrollViewInstance>`), no deep imports from `react-native/Libraries`.
+- Expo Go: the App Store / Play Store Expo Go runs only the newest SDK (58).
 
 ## Folder structure
 ```

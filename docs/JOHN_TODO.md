@@ -2,6 +2,12 @@
 
 Updated by the run of 2026-11-16. Everything that could be done without you is done (see the run log, `docs/DEVICE_CHECKS.md` for test results, and the git history for the earlier long checklists). Values in angle brackets are placeholders: never paste real keys into tracked files.
 
+## 0. First: iPhone Expo Go test (the app is on Expo SDK 58 now)
+1. iPhone: update **Expo Go** in the App Store (58.0.5 or later). Same Wi-Fi as the PC.
+2. Once, PowerShell **as administrator**: `New-NetFirewallRule -DisplayName "DrinkMe dev (Metro + API)" -Direction Inbound -Protocol TCP -LocalPort 5000,8081-8090 -Action Allow -Profile Private`
+3. `npm run test:ios` in `D:\DrinkMeApp\DrinkMeFinal`, scan the QR code with the Camera app. If Expo Go hangs: iPhone Settings → Wi-Fi → (i) → Configure DNS → Manual → `1.1.1.1`, `8.8.8.8`.
+4. Go through `docs/DEVICE_TEST_SESSION.md` section 4, plus the AI scanner (photo and barcode) and Smart Bar recipes, then tell Claude Code to run the log triage.
+
 ## 1. Now (10 minutes, PowerShell in `D:\DrinkMeApp\DrinkMeFinal`)
 1. Rename the active key and point the server at it (Claude Code may not edit `server/.env`):
    ```powershell
@@ -40,7 +46,7 @@ Updated by the run of 2026-11-16. Everything that could be done without you is d
 2. After a development build: App Check → register Android (Play Integrity) and iOS (App Attest) (`docs/APP_CHECK_PLAN.md`).
 
 ## 5. Real devices (results so far: `docs/DEVICE_CHECKS.md`)
-Google sign-in and the takeover test (1a 7, 8, 20; 2.8), Apple (1a 9), two phones (1a 23), backend-off screen (1a 11), airplane mode (1a 17), a geotagged phone photo (1b 4), posts older than 7 days (1b 14), Resend on the Verify Email screen (2.4), a TalkBack/VoiceOver pass, and an iPhone run (needs a development build: App Store Expo Go no longer runs SDK 54).
+Google sign-in and the takeover test (1a 7, 8, 20; 2.8), Apple (1a 9), two phones (1a 23), backend-off screen (1a 11), airplane mode (1a 17), a geotagged phone photo (1b 4), posts older than 7 days (1b 14), Resend on the Verify Email screen (2.4), a TalkBack/VoiceOver pass, and an iPhone run (section 0).
 
 ## 5a. Launch run additions (2026-11-22)
 1. A post photo taken with location on (GPS EXIF): post it, download it from `/media/...` and check that no GPS data is left. If it is, tell Claude Code: it becomes a launch blocker.
