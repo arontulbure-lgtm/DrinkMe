@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "RecipeInputIngredient": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "enum": [
+                "spirit",
+                "liqueur",
+                "wine",
+                "sparkling_wine",
+                "beer",
+                "cider",
+                "vermouth_aperitif",
+                "bitters",
+                "syrup",
+                "juice",
+                "soda_mixer",
+                "energy_drink",
+                "dairy_cream",
+                "fresh_fruit",
+                "herb_spice",
+                "water"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "RecipeInputIngredient",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "basics": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Basics",
+      "type": "array"
+    },
+    "count": {
+      "default": 4,
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Count",
+      "type": "integer"
+    },
+    "excludeNames": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 60,
+      "title": "Excludenames",
+      "type": "array"
+    },
+    "ingredients": {
+      "items": {
+        "$ref": "#/$defs/RecipeInputIngredient"
+      },
+      "maxItems": 60,
+      "minItems": 1,
+      "title": "Ingredients",
+      "type": "array"
+    },
+    "language": {
+      "default": "en",
+      "enum": [
+        "en",
+        "ro"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "mocktailsOnly": {
+      "default": false,
+      "title": "Mocktailsonly",
+      "type": "boolean"
+    },
+    "mode": {
+      "enum": [
+        "scan",
+        "smart_bar"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1",
+      "default": "1",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "styleHint": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stylehint"
+    }
+  },
+  "required": [
+    "mode",
+    "ingredients"
+  ],
+  "title": "RecipeRequest",
+  "type": "object"
+}

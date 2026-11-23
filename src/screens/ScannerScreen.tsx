@@ -1,106 +1,123 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useLocalization } from '../context/LocalizationContext';
+import { useAiStatus } from '../lib/ai';
+import AiScannerFlow from '../components/AiScannerFlow';
+import { TabScreenProps } from '../navigation/types';
 
-// ── Beta flag — set to true to re-enable AI features ────────────────────────
-const AI_ENABLED = false;
+// ── Kill switch: the real scanner shows only while this is true AND the server says AI is available
+// (GET /api/ai/status). Otherwise the "coming soon" preview below stays. Never delete the preview.
+const AI_ENABLED = true;
 
-export default function ScannerScreen() {
+export default function ScannerScreen({ navigation }: TabScreenProps<'Scanner'>) {
+  const { locale } = useLocalization();
+  const status = useAiStatus(locale, AI_ENABLED);
+
+  if (AI_ENABLED && status.isLoading) {
+    return (
+      <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={[styles.container, { justifyContent: 'center' }]}>
+        <ActivityIndicator color="#8B5FBF" />
+      </SafeAreaView>
+    );
+  }
+  if (AI_ENABLED && status.data?.available) {
+    return <AiScannerFlow status={status.data} navigation={navigation} />;
+  }
+  // AI on in the app but the ai-service is down: the preview with "taking a break". Provider deliberately off (or a
+  // server without AI v1): the plain "coming soon" preview.
+  const isDown = AI_ENABLED && status.data?.available === false && status.data.provider !== 'off';
+  return <ScannerPreview unavailable={isDown} />;
+}
+
+function ScannerPreview({ unavailable }: { unavailable: boolean }) {
   const { t } = useLocalization();
   const { profile } = useAuth();
   const isAgeConfirmed = profile?.ageConfirmed === true;
 
-  if (!AI_ENABLED) {
-    return (
-      <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={{ width: 32 }} />
-          <Text style={styles.headerTitle}>{t('scanner.title')}</Text>
-          <View style={{ width: 32 }} />
+  return (
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={{ width: 32 }} />
+        <Text style={styles.headerTitle}>{t('scanner.title')}</Text>
+        <View style={{ width: 32 }} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.betaContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Coming soon badge */}
+        <View style={styles.betaBadge}>
+          <Ionicons name="flask" size={14} color="#8B5FBF" />
+          <Text style={styles.betaBadgeText}>{t('common.betaComingSoon')}</Text>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.betaContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Coming soon badge */}
-          <View style={styles.betaBadge}>
-            <Ionicons name="flask" size={14} color="#8B5FBF" />
-            <Text style={styles.betaBadgeText}>{t('common.betaComingSoon')}</Text>
+        {/* Hero icon */}
+        <View style={styles.heroIconWrapper}>
+          <View style={styles.heroIconCircle}>
+            <Ionicons name="scan" size={56} color="#8B5FBF" />
           </View>
-
-          {/* Hero icon */}
-          <View style={styles.heroIconWrapper}>
-            <View style={styles.heroIconCircle}>
-              <Ionicons name="scan" size={56} color="#8B5FBF" />
-            </View>
-            <View style={styles.lockBadge}>
-              <Ionicons name="lock-closed" size={14} color="#FFFFFF" />
-            </View>
+          <View style={styles.lockBadge}>
+            <Ionicons name="lock-closed" size={14} color="#FFFFFF" />
           </View>
+        </View>
 
-          <Text style={styles.betaTitle}>{t('scanner.aiTitle')}</Text>
-          <Text style={styles.betaSubtitle}>
-            {isAgeConfirmed
-              ? t('scanner.intro')
-              : t('ageGate.scannerIntro')}
-          </Text>
+        <Text style={styles.betaTitle}>{t('scanner.aiTitle')}</Text>
+        <Text style={styles.betaSubtitle}>
+          {isAgeConfirmed
+            ? t('scanner.intro')
+            : t('ageGate.scannerIntro')}
+        </Text>
 
-          {/* Feature preview cards */}
-          <View style={styles.featureList}>
-            <View style={styles.featureCard}>
-              <View style={styles.featureIconBox}>
-                <Ionicons name="camera-outline" size={24} color="#8B5FBF" />
-              </View>
-              <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>{t('scanner.featureRecognitionTitle')}</Text>
-                <Text style={styles.featureDesc}>
-                  {isAgeConfirmed
-                    ? t('scanner.featureRecognition')
-                    : t('ageGate.scannerRecognition')}
-                </Text>
-              </View>
+        {/* Feature preview cards */}
+        <View style={styles.featureList}>
+          <View style={styles.featureCard}>
+            <View style={styles.featureIconBox}>
+              <Ionicons name="camera-outline" size={24} color="#8B5FBF" />
             </View>
-
-            <View style={styles.featureCard}>
-              <View style={styles.featureIconBox}>
-                <Ionicons name="flask-outline" size={24} color="#8B5FBF" />
-              </View>
-              <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>{t('scanner.featureRecipesTitle')}</Text>
-                <Text style={styles.featureDesc}>
-                  {isAgeConfirmed
-                    ? t('scanner.featureRecipes')
-                    : t('ageGate.scannerRecipes')}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.featureCard}>
-              <View style={styles.featureIconBox}>
-                <Ionicons name="star-outline" size={24} color="#8B5FBF" />
-              </View>
-              <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>{t('scanner.featureSaveTitle')}</Text>
-                <Text style={styles.featureDesc}>{t('scanner.featureSave')}</Text>
-              </View>
+            <View style={styles.featureText}>
+              <Text style={styles.featureTitle}>{t('scanner.featureRecognitionTitle')}</Text>
+              <Text style={styles.featureDesc}>
+                {isAgeConfirmed
+                  ? t('scanner.featureRecognition')
+                  : t('ageGate.scannerRecognition')}
+              </Text>
             </View>
           </View>
 
-          <Text style={styles.betaNote}>{t('scanner.betaNote')}</Text>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+          <View style={styles.featureCard}>
+            <View style={styles.featureIconBox}>
+              <Ionicons name="flask-outline" size={24} color="#8B5FBF" />
+            </View>
+            <View style={styles.featureText}>
+              <Text style={styles.featureTitle}>{t('scanner.featureRecipesTitle')}</Text>
+              <Text style={styles.featureDesc}>
+                {isAgeConfirmed
+                  ? t('scanner.featureRecipes')
+                  : t('ageGate.scannerRecipes')}
+              </Text>
+            </View>
+          </View>
 
-  // ── AI-enabled path (restored when AI_ENABLED = true) ────────────────────
-  // The original AI scanner implementation is preserved below and will be
-  // compiled but not reached while AI_ENABLED is false.
-  return null;
+          <View style={styles.featureCard}>
+            <View style={styles.featureIconBox}>
+              <Ionicons name="star-outline" size={24} color="#8B5FBF" />
+            </View>
+            <View style={styles.featureText}>
+              <Text style={styles.featureTitle}>{t('scanner.featureSaveTitle')}</Text>
+              <Text style={styles.featureDesc}>{t('scanner.featureSave')}</Text>
+            </View>
+          </View>
+        </View>
+
+        <Text style={styles.betaNote}>{unavailable ? t('ai.unavailable') : t('scanner.betaNote')}</Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({

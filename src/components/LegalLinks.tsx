@@ -16,6 +16,7 @@ const DOCS: { doc: LegalDoc; labelKey: string }[] = [
   { doc: 'content-moderation', labelKey: 'legal.moderation' },
   { doc: 'age-and-alcohol', labelKey: 'legal.responsibleDrinking' },
   { doc: 'account-deletion', labelKey: 'legal.accountDeletion' },
+  { doc: 'ai-transparency', labelKey: 'legal.aiTransparency' },
   { doc: 'imprint', labelKey: 'legal.imprint' },
 ];
 
@@ -53,6 +54,17 @@ export function PrivacyPolicyLink() {
   return (
     <Text style={styles.agreementLink} accessibilityRole="link" onPress={() => { void openLegalDoc('privacy', locale); }}>
       {t('legal.readFullPolicy')}
+    </Text>
+  );
+}
+
+/** "How the AI features work" under the AI notice (legal LC-43); nothing until the pages are hosted. */
+export function AiTransparencyLink() {
+  const { t, locale } = useLocalization();
+  if (!getLegalUrl('ai-transparency', locale)) return null;
+  return (
+    <Text style={styles.agreementLink} accessibilityRole="link" onPress={() => { void openLegalDoc('ai-transparency', locale); }}>
+      {t('legal.aiTransparency')}
     </Text>
   );
 }

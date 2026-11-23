@@ -58,50 +58,23 @@ export const formatJsonRequestLog = ({ ts, method, path, status, ms, size }) => 
 });
 
 // ── AI provider (AI_PROVIDER) ──────────────────────────────────────────────────
-// Same names as the AI track (server/ai/provider.js on auto/ai-2026-11-16): local | openai | off.
-export const AI_PROVIDERS = ['local', 'openai', 'off'];
+// Which provider runs is decided by server/ai/provider.js (resolveAiProviderName: local or off, with its own
+// warnings; the OpenAI provider was removed, decision D-24). This only adds the production startup rule.
+export const AI_PROVIDER_CHOICES = ['local', 'off'];
 
 /**
- * Reads AI_PROVIDER and the legacy AI_ENABLED.
- * - AI_PROVIDER unset: the legacy AI_ENABLED=true means 'openai', anything else 'off' (as before).
- *   Production refuses to start: the choice must be explicit there.
- * - AI_PROVIDER set: it wins over AI_ENABLED. An unknown value is 'off' (warned); production refuses it.
- * - 'local' needs the ai-service integration from the AI track, which this build does not have: AI stays
- *   off (warned), and production refuses it until that merge.
- * @returns {{ provider: 'local' | 'openai' | 'off', explicit: boolean, aiEnabled: boolean, problems: string[], warnings: string[] }}
- *   aiEnabled: the OpenAI routes may run (still only with OPENAI_API_KEY).
+ * Production must state AI_PROVIDER explicitly as local or off; unset, the removed "openai" or any other
+ * value stops the start (the value itself is never printed). Outside production nothing is required.
+ * The extra checks for local (token, service URL) live next to the provider in server.js.
+ * @returns {{ provider: 'local' | 'off', explicit: boolean, problems: string[] }}
  */
 export const readAiProviderConfig = (env, { production }) => {
   const raw = (env.AI_PROVIDER ?? '').trim().toLowerCase();
-  const legacyEnabled = env.AI_ENABLED === 'true';
   const problems = [];
-  const warnings = [];
-  let provider;
-
-  if (raw === '') {
-    provider = legacyEnabled ? 'openai' : 'off';
-    if (production) problems.push('AI_PROVIDER (set it explicitly: off, local or openai; off until the AI service is deployed)');
-  } else if (AI_PROVIDERS.includes(raw)) {
-    provider = raw;
-    if (legacyEnabled && provider !== 'openai') {
-      warnings.push('AI_ENABLED=true is ignored because AI_PROVIDER is set.');
-    }
-  } else {
-    provider = 'off';
-    if (production) problems.push('AI_PROVIDER (off, local or openai)');
-    else warnings.push('AI_PROVIDER must be local, openai or off - AI stays off.');
+  if (production && raw === '') {
+    problems.push('AI_PROVIDER (set it explicitly: off, or local with the AI service)');
+  } else if (production && !AI_PROVIDER_CHOICES.includes(raw)) {
+    problems.push('AI_PROVIDER (off or local; the OpenAI provider was removed)');
   }
-
-  if (provider === 'local') {
-    if (production) problems.push('AI_PROVIDER (local needs the AI service integration, which this build does not include; use off)');
-    else warnings.push('AI_PROVIDER=local needs the AI service integration, which this build does not include - AI stays off.');
-  }
-
-  // The privacy policy (§5a) says photos and ingredients never go to an outside AI company, so production
-  // runs OpenAI only after an explicit acknowledgement that the notice and subprocessor list were updated.
-  if (provider === 'openai' && production && env.AI_OPENAI_PRODUCTION_ACK !== 'true') {
-    problems.push('AI_PROVIDER (openai in production needs AI_OPENAI_PRODUCTION_ACK=true after the privacy policy names OpenAI; use off)');
-  }
-
-  return { provider, explicit: raw !== '', aiEnabled: provider === 'openai', problems, warnings };
+  return { provider: raw === 'local' ? 'local' : 'off', explicit: raw !== '', problems };
 };

@@ -85,18 +85,18 @@ Terms acceptance (version and date) and App Check: the Terms record is part of t
 | Photo and video permissions declaration (if the console asks, because of `READ_MEDIA_IMAGES`) | The app uses the system photo picker / camera only when the user adds a photo. VERIFY after the first EAS build which media permissions `expo-image-picker` adds to the Android manifest; if only the Android Photo Picker is used, no declaration is needed |
 
 ## 8. Keep in sync
-These answers match `docs/legal/privacy-policy.md` v0.4 §2, §5 and §8 and `apple-privacy-labels.md`. Turning on AI (§9), analytics, crash reporting, push notifications or ads changes this form and the policy **before** release.
+These answers match `docs/legal/privacy-policy.md` v0.4 §2, §5 and §8 and `apple-privacy-labels.md`. Turning on AI (§9: local models on DrinkMe's own EU/EEA AI server, photos processed in memory only and never kept, OpenAI never used), analytics, crash reporting, push notifications or ads changes this form and the policy **before** release.
 
-## 9. When AI is enabled (separate release – not v1.0.0)
-Applies only to the release that switches on the scanner and AI recipes (PR #4, `AI_PROVIDER=local`). Privacy Policy §5a describes the processing. Changes to the answers above:
+## 9. When AI is enabled (applies once the AI features are switched on)
+Applies to the first build in which the scanner and AI recipes are switched on (`AI_PROVIDER=local` on DrinkMe's own EU/EEA GPU host, LC-45). Privacy Policy §5a describes the processing; the internal record is `docs/legal/internal/store-disclosures.md` "AI features". Decisions of 2026-11-22: photos processed in memory only and **never kept** (no opt-in at launch, `AI_PHOTO_OPT_IN_ENABLED` off), OpenAI and any outside AI company never used. Changes to the answers above:
 
 | Item | Change | Notes |
 |---|---|---|
-| Photos and videos → **Photos** | Add the scanner as a source. Default flow: photo processed in memory on our own AI server and discarded → **processed ephemerally** for that flow. If "Help improve the scanner" is offered (D-22), photos of opted-in users are stored up to 90 days → Photos stays **Collected, not ephemeral**; purposes **App functionality** and **Analytics** (closest Play purpose for testing and improving the scanner – VERIFY the definitions in the console) | Optional: Yes. Shared: No (our own AI service; the GPU host is a service provider). If D-22 (a) hides the opt-in, the existing "Photos – App functionality" entry already covers it |
+| Photos and videos → **Photos** | Add the scanner as a source: the photo is processed in memory on our own AI server and deleted after the answer → **processed ephemerally** for the scanner. The existing "Photos – App functionality" entry (post and profile photos) stays | Optional: Yes. Shared: No (our own AI service; the GPU host is a service provider). If the opt-in is ever offered, photos are stored → redo this row first |
 | App activity → **Other user-generated content** | Add saved AI recipes, AI basics, reports about AI answers | App functionality; reports also Fraud prevention, security and compliance |
+| App activity → **Other actions** (or App info and performance – VERIFY) | Daily AI usage counters (20 scans, 10 recipe batches per user per day), deleted after one day | App functionality; Fraud prevention, security and compliance |
 | Barcode lookup | Nothing new: only the barcode number goes to Open Food Facts, from our server, without any user data | Not "sharing" of user data |
-| Deletion | Account deletion also deletes saved recipes, AI settings and kept photos; turning the opt-in off deletes kept photos | Mention on the deletion page (already drafted) |
-| **AI-Generated Content policy** | In-app reporting of offensive AI output is required: built in PR #4 (Report on recipe detail and scan result → `POST /api/ai/report`) | John reviews these reports (LC-39) |
+| Deletion | Account deletion also deletes saved recipes, AI settings and the user's AI reports; no scan photos exist to delete | Already on the deletion page |
+| **AI-Generated Content policy** | In-app reporting of offensive AI output is required: built (Report on recipe detail and scan result → `POST /api/ai/report`) | John reviews these reports (24 h unsafe/offensive, 72 h wrong – D-25) |
 | Content rating | Re-answer IARC questions about AI-generated content if asked (`age-rating.md` §4) | — |
-| Camera permission | `expo-camera` added by PR #4 (no audio) | Photo and video permissions declaration only if the console asks |
-If `AI_PROVIDER=openai` were ever used (not planned, D-26), photos would be **shared** with OpenAI → Shared: Yes, plus a new consent step – do not ship without redoing this form.
+| Camera permission | `expo-camera` (no audio) | Photo and video permissions declaration only if the console asks |

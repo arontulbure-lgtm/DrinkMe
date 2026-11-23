@@ -30,6 +30,7 @@ const META_KEYS = {
   'admin.report_resolved': ['action', 'reportId', 'resolvedCount'],
   'admin.user_suspended': ['permanent'],
   'admin.user_unsuspended': ['void'],
+  'ai.output_reported': ['category', 'kind', 'reason', 'recipeId', 'recipeName', 'status'],
 };
 // Distinctive, so a search of the saved file cannot match anything by accident.
 const SECRET_REASON = 'AuditSecretReason9Kq';

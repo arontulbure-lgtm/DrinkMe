@@ -31,6 +31,8 @@ const DOCS = [
   { key: 'account-deletion', source: 'account-deletion' },
   { key: 'age-and-alcohol', source: 'age-and-alcohol' },
   { key: 'imprint', source: 'imprint' },
+  // AI Transparency Notice ("How AI works in DrinkMe"); applies once the AI features are switched on (LC-43).
+  { key: 'ai-transparency', source: 'ai-transparency' },
   { key: 'copyright', source: 'copyright' },
   { key: 'device-storage-notice', source: 'device-storage-notice' },
   { key: 'privacy-eu-uk', source: 'privacy-eu-uk' },

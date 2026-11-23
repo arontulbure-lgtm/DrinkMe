@@ -34,7 +34,7 @@ export default {
         CFBundleLocalizations: ["en", "ro"],
         // Lets system strings follow the device language even where the app has no translation.
         CFBundleAllowMixedLocalizations: true,
-        NSCameraUsageDescription: "DrinkMe needs the camera to photograph your drinks.",
+        NSCameraUsageDescription: "DrinkMe uses the camera to photograph your drinks and to scan bottle labels and barcodes.",
         // No NSPhotoLibraryAddUsageDescription: the app never saves photos to the library (Apple 5.1.1).
         NSPhotoLibraryUsageDescription: "DrinkMe needs access to your photos to add drink images."
       }
@@ -67,9 +67,14 @@ export default {
       "expo-apple-authentication",
       ["expo-image-picker", {
         "photosPermission": "DrinkMe needs access to your photos to add drink images.",
-        "cameraPermission": "DrinkMe needs the camera to photograph your drinks.",
+        "cameraPermission": "DrinkMe uses the camera to photograph your drinks and to scan bottle labels and barcodes.",
         // Photos only: no NSMicrophoneUsageDescription and no Android RECORD_AUDIO.
         "microphonePermission": false
+      }],
+      // Scanner (AI track): same camera text, no audio.
+      ["expo-camera", {
+        "cameraPermission": "DrinkMe uses the camera to photograph your drinks and to scan bottle labels and barcodes.",
+        "recordAudioAndroid": false
       }]
     ],
     extra: {

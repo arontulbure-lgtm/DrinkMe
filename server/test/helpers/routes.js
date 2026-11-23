@@ -155,9 +155,17 @@ export const ROUTE_MANIFEST = {
   'POST /api/admin/users/:id/unsuspend': { gate: 'adult', admin: true, files: ['moderation-decisions.test.js', 'audit-log.test.js', 'route-gates.test.js'] },
   'GET /api/admin/audit': { gate: 'adult', admin: true, files: ['audit-log.test.js', 'route-gates.test.js'] },
 
-  'POST /api/smart-bar/generate-recipes': { gate: 'adult', files: ['ai-routes.test.js', 'age-gate.test.js', 'route-gates.test.js'] },
-  'POST /api/detect-product': { gate: 'adult', files: ['ai-routes.test.js', 'route-gates.test.js'] },
-  'POST /api/generate-recipes': { gate: 'adult', files: ['ai-routes.test.js', 'age-gate.test.js', 'route-gates.test.js'] },
+
+  'GET /api/ai/status': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/ai/notice': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'PUT /api/ai/settings': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/ai/scan': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/ai/barcode': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/ai/recipes': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'GET /api/recipes/saved': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/recipes/saved': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'DELETE /api/recipes/saved/:recipeId': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
+  'POST /api/ai/report': { gate: 'adult', files: ['ai-v1.test.js', 'route-gates.test.js'] },
 
   'POST /__dev/client-log': { gate: 'dev-only', files: ['dev-log-bridge.test.js', 'route-gates.test.js'] },
 };

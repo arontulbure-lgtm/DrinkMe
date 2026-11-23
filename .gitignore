@@ -41,3 +41,10 @@ _old_secrets/
 
 # docker-compose env file for the server (secrets)
 server/.env.production
+# Local AI: venv, caches and datasets live on D:\AI (never in git); Python bytecode
+__pycache__/
+*.pyc
+.pytest_cache/
+ai-service/eval/**/*.jpg
+ai-service/eval/**/*.png
+ai-service/eval/**/*.webp

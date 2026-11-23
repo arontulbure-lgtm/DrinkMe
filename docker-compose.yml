@@ -3,9 +3,8 @@
 #
 #   docker compose up -d                       # server only (JSON database on the named volume)
 #   docker compose --profile postgres up -d    # + a local Postgres for tests (not for production data)
-#   docker compose --profile ai up -d          # + the local AI service: works only after the AI track
-#                                              #   (auto/ai-2026-11-16) is merged, which adds ./ai-service
-#                                              #   and its Dockerfile, and needs the NVIDIA Container Toolkit.
+#   docker compose --profile ai up -d          # + the local AI service (./ai-service); needs the NVIDIA
+#                                              #   Container Toolkit and Ollama with the model (docs/deploy/EU_GPU.md).
 services:
   server:
     build: .
@@ -33,24 +32,19 @@ services:
       retries: 3
       start_period: 30s
 
-  ai-service:
+  ollama:
     profiles: ["ai"]
-    # Present only after the AI merge (the AI track's docs/ai/PRODUCTION_PLAN.md describes its Dockerfile).
-    build: ./ai-service
+    # Pin the version tested locally (docs/ai/PRODUCTION_PLAN.md §4). Pull the model once:
+    #   docker compose --profile ai exec ollama ollama pull qwen3-vl:4b-instruct
+    image: ollama/ollama:0.40.16
     restart: unless-stopped
     environment:
-      AI_SERVICE_HOST: "0.0.0.0"
-      AI_SERVICE_PORT: "8088"
-      # Same secret as the server's AI_SERVICE_TOKEN (32+ characters), from the shell or an untracked .env.
-      # Empty: the ai-service refuses to start on a non-loopback host, so it fails closed.
-      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
-      OLLAMA_HOST: ${OLLAMA_HOST:-host.docker.internal:11434}
-    # No published port: the server reaches it on the compose network as http://ai-service:8088
-    # (AI_PROVIDER=local, AI_SERVICE_URL=http://ai-service:8088 in server/.env.production). Note: the AI track's
-    # production guard accepts only a loopback or https AI_SERVICE_URL, so a production server on this network
-    # needs that rule widened for a private compose network at the merge (see docs/deploy/EU_GPU.md).
-    expose:
-      - "8088"
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "24h"   # keep the model in VRAM
+      OLLAMA_NUM_PARALLEL: "2"   # match the server's AI_RECIPE_CONCURRENCY
+    # No published port: only the ai-service talks to it.
+    volumes:
+      - ollama-models:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -58,6 +52,33 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+  ai-service:
+    profiles: ["ai"]
+    build: ./ai-service   # ai-service/Dockerfile: python:3.12-slim, non-root, CPU only
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      AI_SERVICE_HOST: "0.0.0.0"
+      AI_SERVICE_PORT: "8088"
+      # Same secret as the server's AI_SERVICE_TOKEN (32+ characters), from the shell or an untracked .env.
+      # Empty: the ai-service refuses to start on a non-loopback host, so it fails closed.
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+      OLLAMA_HOST: "ollama:11434"
+      DRINKME_VISION_MODEL: "qwen3-vl:4b-instruct"
+      DRINKME_TEXT_MODEL: "qwen3-vl:4b-instruct"
+      DRINKME_MAX_IMAGE_SIDE: "768"
+      OLLAMA_KEEP_ALIVE: "24h"
+    read_only: true
+    tmpfs:
+      - /tmp
+    # No published port: the server reaches it on the compose network as http://ai-service:8088. In
+    # server/.env.production: AI_PROVIDER=local, AI_SERVICE_URL=http://ai-service:8088, AI_SERVICE_TOKEN (32+
+    # characters, same value) and AI_SERVICE_PRIVATE_HOSTS=ai-service (production accepts plain http only for
+    # hosts listed there; otherwise loopback or https).
+    expose:
+      - "8088"
 
   postgres:
     profiles: ["postgres"]
@@ -83,3 +104,4 @@ services:
 volumes:
   drinkme-data:
   drinkme-postgres:
+  ollama-models:

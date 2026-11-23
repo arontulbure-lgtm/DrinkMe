@@ -30,7 +30,7 @@ Covers `docs/JOHN_TODO.md` §5. Files in this folder:
 3. App Privacy: `apple-privacy-labels.md` step by step.
 4. Version page (per localization en + ro): promo text, description, keywords, support URL, screenshots, "What's new".
 5. Pricing and Availability: Free; countries per D-02.
-6. App Review Information: test account + notes from `review-notes.md` (choose AI paragraph (a) for v1.0.0 – AI is off).
+6. App Review Information: test account + notes from `review-notes.md`. Choose AI paragraph (a) if the production server runs `AI_PROVIDER=off` at submission, (b) if it runs `AI_PROVIDER=local` (the app follows the server: it shows the real scanner and recipes only when `GET /api/ai/status` says available, otherwise the "Coming soon" previews).
 7. Submit.
 
 ## 3. Google Play – Play Console, in order
@@ -44,19 +44,19 @@ Covers `docs/JOHN_TODO.md` §5. Files in this folder:
 - **Unfinished features on screen:** the Scanner tab ("AI Scanner – Coming soon") and the Smart Bar "Recipes" tab ("Coming soon") are visible in the app. Apple 2.1 (app completeness) can reject placeholder screens. Ask the planner whether to hide them in store builds (rule: never delete AI features – a flag that hides the tab keeps them).
 - **Home-screen name:** fixed – `app.config.ts` `name: "DrinkMe"` (slug stays `DrinkMeFinal`, not shown to users).
 - **Permission texts:** fixed – `NSPhotoLibraryAddUsageDescription` removed, no microphone permission, `RECORD_AUDIO` blocked (`app.config.ts`, working tree 2026-11-22).
-- **In-app legal links and contact (LC-04, LC-05, T-01/T-02):** built. "Contact us" always shows; the document links show only when `EXPO_PUBLIC_LEGAL_BASE_URL` is set (https) in the **production** build – `eas.json` does not set it (LC-50). Check on the release build.
-- **Terms acceptance (LC-03, T-06/T-07):** built; the server records version and date. The app step shows only with `EXPO_PUBLIC_TERMS_STEP_ENABLED=true` in the production build (LC-50) – turn it on after the lawyer review (D-01). Play's UGC policy expects it.
+- **In-app legal links and contact (LC-04, LC-05, T-01/T-02):** built. "Contact us" always shows; the document links show only when `EXPO_PUBLIC_LEGAL_BASE_URL` is set (https) in the **production** build – `eas.json` does not set it (LC-56). Check on the release build.
+- **Terms acceptance (LC-03, T-06/T-07):** built; the server records version and date. The app step shows only with `EXPO_PUBLIC_TERMS_STEP_ENABLED=true` in the production build (LC-56) – turn it on after the lawyer review (D-01). Play's UGC policy expects it.
 - **Misleading Explore card (LC-18, D-18):** "DrinkMe partners … offer discounts to beta testers" is still shown – remove before submission (Apple 2.3, consumer law).
-- **"Beta" wording (D-28):** the listing "What's new" and the Terms still say beta; decide and keep them consistent.
+- **"Beta" wording (D-29):** the listing "What's new" and the Terms still say beta; decide and keep them consistent.
 - **Objectionable-content filter (LC-19, Apple 1.2):** not built.
 - Per-country age (LC-01): only 18+ today; keep launch countries to 18+ markets until it ships.
 - Apple/Play age-assurance laws in some US states (LC-26) if the US is in scope.
 
-## 5. When AI is enabled (not v1.0.0 – AI is off in this release)
-Only for the release that turns on the scanner and AI recipes (PR #4, `AI_PROVIDER=local`). Do all of this in the same release:
-1. `review-notes.md`: use AI paragraph (b). Its sentence "processed by our own server in the EU and not used to train models" is true only once the GPU host is an EU provider (D-23) and training stays off (D-24) – VERIFY then.
+## 5. When AI is enabled (applies once the AI features are switched on)
+Whether AI is on at launch depends on the GPU host (LC-45). The app already contains the AI screens; they appear only when the server runs `AI_PROVIDER=local` and the AI service is healthy. Decisions of 2026-11-22: local open-weights models on DrinkMe's own EU/EEA GPU host only (`AI_PROVIDER=local`; production accepts only `off` or `local`), scan photos processed in memory and never kept (no opt-in), OpenAI and any outside AI company never used, daily limits 20 scans / 10 recipe batches per user. Before switching it on (server first), do all of this:
+1. `review-notes.md`: use AI paragraph (b). "Processed by our own server in the EU and not used to train models" is true with D-23 (EU/EEA host, provider still to be named) and D-21/D-24 (no photo kept, nothing used for training).
 2. `play-data-safety.md` §9 and `apple-privacy-labels.md` "When AI is enabled": update the console answers.
 3. `age-rating.md` §4: re-answer the AI-generated content questions.
-4. Camera purpose string mentions scanning labels and barcodes (PR #4 adds `expo-camera` with "DrinkMe uses the camera to scan bottle labels and barcodes.").
+4. Camera purpose string mentions scanning labels and barcodes (`expo-camera`: "DrinkMe uses the camera to scan bottle labels and barcodes.").
 5. Listing: describe AI features only once they work in the store build (Apple 2.3); label them as AI; no promise of "personalised" or "instant" results (LC-44).
-6. Publish the AI transparency page with the legal pages (LC-43) and make sure the privacy policy §5a names the GPU host.
+6. The AI transparency page is part of `docs/public` (`ai-transparency.html`); the AI notice must link to it and to the privacy policy (LC-43). Name the GPU host in privacy policy §5 and `internal/subprocessors.md` (LC-45).

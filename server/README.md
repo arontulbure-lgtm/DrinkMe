@@ -83,9 +83,14 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | POST | `/api/notifications/read` | signed in | Marks all read |
 | GET, POST | `/api/smart-bar` | signed in | |
 | DELETE | `/api/smart-bar/:itemId` | signed in | |
-| POST | `/api/smart-bar/generate-recipes` | signed in | AI, 503 `ai_disabled` unless `AI_ENABLED=true` |
-| POST | `/api/detect-product` | signed in | AI, upload field `image` |
-| POST | `/api/generate-recipes` | signed in | AI |
+| GET | `/api/ai/status` | signed in | `?language=en\|ro`. The app's AI flag: `available`, `provider`, `noticeAccepted`, `settings` (basics, photo opt-in) |
+| POST | `/api/ai/notice` | signed in | `{ version: 1 }` accepts the AI notice; scan and recipes need it (403 `ai_notice_required`) |
+| PUT | `/api/ai/settings` | signed in | `{ basics?: string[] \| null, photoOptIn?: boolean }`; turning the opt-in off deletes kept photos |
+| POST | `/api/ai/scan` | signed in, AI notice | JSON `{ imageBase64, language }` (JPEG/PNG/WebP, 7 MB). See Local AI |
+| POST | `/api/ai/barcode` | signed in | `{ ean, language }`, Open Food Facts lookup; works with AI off |
+| POST | `/api/ai/recipes` | signed in, AI notice | `{ mode: 'scan'\|'smart_bar', item?, language, newSession?, stream? }` → `{ recipes, exhausted }`; with `stream: true`, NDJSON lines (start / recipe / done / error), one recipe as soon as it passes validation |
+| GET, POST | `/api/recipes/saved` | signed in | Saved AI recipes (max 200); POST `{ recipe }` re-validates it |
+| DELETE | `/api/recipes/saved/:recipeId` | signed in | |
 | GET | `/api/admin/reports` | admin | `?status=open\|resolved`, see Moderation |
 | POST | `/api/admin/reports/:id/resolve` | admin | See Moderation |
 | POST | `/api/admin/users/:id/suspend` | admin | See Moderation |
@@ -112,10 +117,19 @@ Access: `signed in` = signed in and 18+ confirmed. `owner` = `:id` must be the c
 | `OFFICIAL_USER_IDS` | empty | server | Comma-separated Firebase uids of the official DrinkMe account, parsed like `ADMIN_USER_IDS`. Gives `official: true` (the app's "Official" badge), the right to use the brand name in the profile name, and no auto-hide by reports. Not an admin, and must never also be in `ADMIN_USER_IDS` (it could not be suspended; startup warns). Ids are logged as counts only; startup also warns while `ALLOW_INSECURE_DEV_AUTH=true`. See Official account below |
 | `PARTNER_CONSENT_REQUIRED` | on | server | Off only for exactly `false`, an emergency rollback that makes partner lists effectively public (see below) |
 | `REQUIRE_VERIFIED_EMAIL` | off | server | On only for exactly `true`; needs Firebase. See the rollout note |
-| `AI_PROVIDER` | unset | server | `off`, `local` or `openai` (case and spaces ignored; names shared with the AI track). **Required in production**: unset or unknown stops the start. `openai` runs the AI routes with OpenAI (needs `OPENAI_API_KEY`; in production also `AI_OPENAI_PRODUCTION_ACK=true`, only after the privacy policy and subprocessor list name OpenAI). `local` needs the ai-service integration from the AI track, not in this build: production refuses it, elsewhere AI stays off with a warning. Use `off` until the AI merge. When set, it wins over `AI_ENABLED` (a warning if `AI_ENABLED=true` is then ignored) |
-| `AI_ENABLED` | off | server | Legacy. Read only when `AI_PROVIDER` is unset (outside production): exactly `true` means `openai` |
+| `AI_PROVIDER` | off | server | AI runs only with exactly `local` (ai-service + Ollama). Anything else is off; the OpenAI provider and `AI_ENABLED` were removed (D-24, 2026-11-22). **Required in production**: `off` or `local`; unset, `openai` or unknown stops the start |
+| `AI_SERVICE_URL` | `http://127.0.0.1:8088` | server | ai-service base URL (`AI_PROVIDER=local`) |
+| `AI_SERVICE_TOKEN` | none | server + ai-service | Shared secret sent as `X-AI-Service-Token`. Required whenever the ai-service is not on the same machine; production with `local`: 32+ characters |
+| `AI_SERVICE_PRIVATE_HOSTS` | none | server | Production only: comma-separated exact host names on a private network you control (e.g. `ai-service` in docker-compose) for which a plain `http` `AI_SERVICE_URL` is accepted. Otherwise production needs loopback or https |
+| `AI_SERVICE_TIMEOUT_MS` | `60000` | server | Recipe timeout; scans use at most 20 s |
+| `AI_RATE_LIMIT_PER_HOUR` | `30` | server | Scans + recipe batches per user per hour on `/api/ai/*` |
+| `AI_PHOTO_OPT_IN_ENABLED` | off | server | `true` offers the photo opt-in. Off at launch (D-21/D-22): no scan photo is ever kept |
+| `AI_PHOTO_DIR` | `server/data/ai-scans` | server | Only used while the opt-in is offered and a user turned it on |
+| `AI_DAILY_SCAN_LIMIT` | `20` | server | Scans per user per rolling 24 h (429 `ai_daily_limit`); outages and timeouts give the unit back |
+| `AI_DAILY_RECIPE_LIMIT` | `10` | server | Recipe batches per user per rolling 24 h |
+| `AI_RECIPE_CONCURRENCY` | `2` | server | Recipe slots generated in parallel (1-4); match Ollama `OLLAMA_NUM_PARALLEL` |
+| `AI_PHOTO_RETENTION_DAYS` | `90` | server | Kept photos are deleted after this, on opt-out and with the account |
 | `LOG_FORMAT` | `text` | server | `text`: the request log as before (production `<iso time> <method> <path> <status> <size> - <ms> ms`, `dev` format outside production). `json`: one JSON object per request, `{"ts","method","path","status","ms","size"}`, in any environment. Same privacy rules either way: no IP address, user agent, referrer or query string, and the account deletion uid masked. Anything else warns and uses `text`. Production keeps `text` as the default so existing log alerts keep matching; use `json` where the host indexes JSON (Railway, Render, Grafana/Loki) |
-| `OPENAI_API_KEY` | none | server | Required for AI, not enough on its own |
 | `ALLOW_INSECURE_DEV_AUTH` | off | server | `true` makes sign-in trust the client uid when no Firebase key is set. Ignored in production |
 | `BACKUP_DIR` | `server/backups` | backup script | Where `npm run backup` writes. Use separate storage in production |
 | `BACKUP_SOURCE` | `postgres` when `DB_DRIVER=postgres`, else `json-file` | backup script | Backup adapter: `json-file` copies `DB_FILE`; `postgres` exports the Postgres state as a JSON database file |
@@ -141,7 +155,7 @@ Every sign-in (Firebase mode) makes one `getUser(uid)` call and reads `tokensVal
 With production rules, the server exits at startup and names the setting to fix, never its value, when any of these fail:
 - `JWT_SECRET` meets the rules above. The old hardcoded default is refused in every environment.
 - `FIREBASE_SERVICE_ACCOUNT_KEY` gives a working service account.
-- `AI_PROVIDER` is set explicitly to `off` or `openai` (`local` is refused until the AI service merge; `openai` needs `AI_OPENAI_PRODUCTION_ACK=true`).
+- `AI_PROVIDER` is set explicitly to `off` or `local` (`openai` was removed and is refused); `local` also needs `AI_SERVICE_TOKEN` (32+ characters) and an `AI_SERVICE_URL` that is loopback, https or listed in `AI_SERVICE_PRIVATE_HOSTS`.
 - `DB_FILE`, if set, is absolute.
 - `DB_DRIVER` is `json` or `postgres`, and with `postgres`, `DATABASE_URL` is a `postgres://` URL and `DATABASE_SSL` is empty, `require` or `disable` and agrees with the URL's `sslmode` (outside production these stop the server too).
 - With `postgres`, the connection is TLS with a verified certificate (`DATABASE_SSL=require`, or `sslmode=verify-full`, `verify-ca` or `require` in the URL), unless `DATABASE_SSL=disable` is set on purpose (a warning; private networks only).
@@ -159,7 +173,9 @@ Reviewed 2026-11-22 (launch run). All in memory (`express-rate-limit`), per proc
 | `/api/*` writes (POST, PUT, PATCH, DELETE) | 1 min | 30 | user (valid API token), else IP |
 | `GET /api/users/search` | 15 min | 60 | user |
 | `POST /api/users/:id/delete-account`, `POST /api/account/delete-unverified` | 15 min | 5 | user |
-| AI: `POST /api/smart-bar/generate-recipes`, `/api/detect-product`, `/api/generate-recipes` (one budget) | 1 hour | 20 | user |
+| AI: `/api/ai/*` scans and recipe batches (`AI_RATE_LIMIT_PER_HOUR`) | 1 hour | 30 | user |
+| AI: daily caps stored per user (`AI_DAILY_SCAN_LIMIT`, `AI_DAILY_RECIPE_LIMIT`) | 24 h rolling | 20 scans, 10 recipe batches | user |
+| AI: barcode lookups | 1 hour | 60 | user |
 | `POST /__dev/client-log` (development device sessions only) | 1 min | 60 | IP |
 | `GET /healthz`, `GET /readyz` | none | none | Read-only, constant answer, no data |
 
@@ -336,13 +352,15 @@ curl -s -X POST "$API/api/admin/users/<uid>/unsuspend" -H "Authorization: Bearer
 ```
 All four answer `{ userId, suspended, suspendedUntil, suspendedPermanently, suspensionCount }`. The uid of a reported profile is the report's `targetId`; for a post or comment it is `target.userId`.
 
-## Enabling AI
-AI needs `AI_ENABLED=true`, `OPENAI_API_KEY`, and the client flags in `ScannerScreen.tsx` and `SmartBarScreen.tsx`. Only users who confirmed 18+ reach the AI routes, and the server still gives mocktail recipes to anyone unconfirmed as defence in depth. Do not enable AI where real users can reach it until all of these are done:
-- A global daily AI cap and a hard monthly budget in the OpenAI dashboard.
-- A privacy disclosure and data agreement for photos sent to OpenAI.
-- One real OpenAI call; only a local mock has been used so far.
-- A rebuilt scanner screen, since its AI path currently returns null.
-- `SmartBarScreen.tsx` sending `nonAlcoholicOnly`.
+## Local AI (AI_PROVIDER=local)
+Scanner and recipes run on a local model through the ai-service (`ai-service/`, Python FastAPI + Ollama). Setup, paths
+and models: `docs/ai/LOCAL_SETUP.md`; contracts: `.claude/skills/drinkme-ai-service/SKILL.md`. Start it with
+`npm run ai:start` (repo root) and set `AI_PROVIDER=local` in `server/.env`; `npm run test:android` starts it for you.
+Every recipe passes the safety rules S1-S13 in `server/ai/recipeSafety.js` whichever provider made it. Photos are
+processed in memory and never stored or logged unless the user opted in.
+
+## OpenAI (removed)
+The OpenAI provider and its routes (`/api/detect-product`, `/api/generate-recipes`, `/api/smart-bar/generate-recipes`) were removed on 2026-11-22 (decision D-24: never an outside AI company for AI flows). `AI_ENABLED` and `OPENAI_API_KEY` have no effect.
 
 ## Privacy notice
 `PRIVACY_NOTICE_VERSION` (currently 2) in `server.js` and `src/screens/OnboardingScreen.tsx` must match. The notice text is under `onboarding.privacy*` in `src/context/LocalizationContext.tsx` and describes what this server lets others read, moderation and the 30-day backup rule. Change the text whenever those rules change, and raise both version numbers when it changes in substance. Deploy the server before releasing the client.
@@ -372,4 +390,4 @@ Deploy variables:
 - Storage: Mount a volume writable by uid 1000 at `/app/server/data`, or set an absolute `DB_FILE` in a directory of its own. Without a volume, data is lost on redeploy.
 - Backups: schedule `npm run backup` daily in the same image (for example `docker run ... drinkme-api npm run backup` with the same volume and `-e BACKUP_DIR` pointing at separate storage), and keep host or volume snapshots 30 days or less.
 
-Leave `PARTNER_CONSENT_REQUIRED` unset and `REQUIRE_VERIFIED_EMAIL` off unless you have read the notes above. Never pass secrets with `--build-arg`. Do not set `DEBUG=true` in production, because the OpenAI SDK may log request bodies.
+Leave `PARTNER_CONSENT_REQUIRED` unset and `REQUIRE_VERIFIED_EMAIL` off unless you have read the notes above. Never pass secrets with `--build-arg`. Do not set `DEBUG=true` in production.

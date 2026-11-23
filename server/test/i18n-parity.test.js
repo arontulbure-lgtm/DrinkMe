@@ -59,7 +59,8 @@ test('no screen renders hard-coded text (except the brand name)', () => {
   const offenders = [];
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf8');
-    for (const match of text.matchAll(/<Text[^>]*>\s*([A-Za-zĂÂÎȘȚăâîșț][^<{]{2,})/g)) {
+    // <Text only (not <TextInput); an arrow function's => inside the props does not end the tag.
+    for (const match of text.matchAll(/<Text(?=[\s>])(?:[^>]|(?<==)>)*>\s*([A-Za-zĂÂÎȘȚăâîșț][^<{]{2,})/g)) {
       if (match[1].trim() !== 'DrinkMe') offenders.push(`${path.relative(ROOT, file)}: ${match[1].trim().slice(0, 40)}`);
     }
     for (const match of text.matchAll(/(Alert\.alert|accessibilityLabel=|placeholder=)\(?\s*['"]([A-Za-z][^'"]*)['"]/g)) {

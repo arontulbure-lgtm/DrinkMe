@@ -7,6 +7,7 @@ server/*
 !server/package.json
 !server/package-lock.json
 !server/server.js
+!server/ai/
 !server/app-check.js
 !server/operations.js
 !server/storage/

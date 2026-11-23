@@ -3,7 +3,7 @@ DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before public
 # App Store Connect – "App Privacy" answers
 
 Where: App Store Connect → your app → **App Privacy** → Get Started / Edit. Answer in the order below.
-Derived from the code on branch `auto/run-2026-11-14` and from `docs/legal/internal/data-inventory.md` (file and line for each fact there). Build checked: release build with `AI_ENABLED`, `AI_RECIPES_ENABLED` and `STORIES_ENABLED` all false (`src/screens/ScannerScreen.tsx:9`, `src/screens/SmartBarScreen.tsx:31`, `src/screens/HomeScreen.tsx:30`, `server/server.js:414`). The development log bridge (`src/lib/devLogBridge.ts`) is development-only and is not in release builds.
+Derived from the code on branch `auto/run-2026-11-14` and from `docs/legal/internal/data-inventory.md` (file and line for each fact there). Build checked: release build with `STORIES_ENABLED` false (`src/screens/HomeScreen.tsx:30`). Since the AI merge (2026-11-23) the app's AI switches are on and the AI screens follow the server (`AI_PROVIDER=off` → "Coming soon" previews); the answers below are for a server with AI off, and the section "When AI is enabled" lists the changes for `AI_PROVIDER=local`. The development log bridge (`src/lib/devLogBridge.ts`) is development-only and is not in release builds.
 
 Apple's definitions used (developer.apple.com/app-store/app-privacy-details – VERIFY at submission that wording has not changed): data is **collected** when it is sent off the device and kept longer than needed to answer the request in real time; **linked** when it is tied to the user's account or identity; **tracking** means linking with other companies' data for advertising or sharing with data brokers. Data handled by a **service provider** on our behalf (Google Firebase, hosting) counts as collected by us, not as tracking.
 
@@ -67,11 +67,12 @@ No App Tracking Transparency prompt is needed (no `NSUserTrackingUsageDescriptio
 ## Step 6 – Check against the policy
 These answers match the Privacy Policy §2 ("What we collect") and the statement "We do not collect your precise location, contacts, birth date or payment details, and we do not use advertising or analytics trackers" (`docs/legal/privacy-policy.md`). Keep them in sync: a change to one needs a change to the other.
 
-## When AI is enabled (separate release – not v1.0.0)
-Applies only to the release that switches on the scanner and AI recipes (PR #4, `AI_PROVIDER=local`); facts in Privacy Policy §5a. Redo the label in that release:
-- **User Content → Photos or Videos:** already declared (App Functionality). Default scans are processed in real time and not kept – Apple lets such data be left out. If "Help improve the scanner" is offered (D-22), opted-in photos are kept up to 90 days, linked to the user through a pseudonymous key → keep the type **Linked**, add the purpose **Analytics** (closest Apple purpose for testing and improving the scanner – Apple has no "model improvement" purpose; VERIFY). Not tracking.
+## When AI is enabled (applies once the AI features are switched on)
+Applies when the server switches on the scanner and AI recipes (`AI_PROVIDER=local`); facts in Privacy Policy §5a. Decisions of 2026-11-22: local open-weights models on DrinkMe's own EU/EEA GPU host only (`AI_PROVIDER=local`; production accepts only `off` or `local`), scan photos processed in memory and never kept (no opt-in), OpenAI and any outside AI company never used, daily limits 20 scans / 10 recipe batches per user. Redo the label before switching it on:
+- **User Content → Photos or Videos:** already declared (App Functionality) for post and profile photos. Scan photos are processed in real time and never kept – Apple lets such data be left out, so nothing new. If a photo opt-in is ever offered, redo this item first.
+- **Usage counters:** daily AI counters (deleted after one day) are used only for limits – App Functionality; no new type expected (VERIFY whether Apple wants "Other Usage Data").
 - **User Content → Other User Content:** add saved AI recipes, AI basics and reports about AI answers (App Functionality).
 - **Barcode:** only the number goes to Open Food Facts from our server – nothing new to declare.
-- **Guideline 5.1.2(i)** (sharing personal data with third-party AI needs clear disclosure and explicit permission – VERIFY current text): with `AI_PROVIDER=local` the photo goes to our own model; the AI notice is still accepted before first use. `AI_PROVIDER=openai` would need a separate explicit permission naming OpenAI (D-26) – do not ship it.
-- **Camera purpose string:** must mention scanning labels and barcodes (PR #4: "DrinkMe uses the camera to scan bottle labels and barcodes.").
-- **Guideline 1.2 / 4.7-style AI output:** report action on AI answers is built in PR #4 (LC-39).
+- **Guideline 5.1.2(i)** (sharing personal data with third-party AI needs clear disclosure and explicit permission – VERIFY current text): the photo goes only to our own model on our own EU/EEA server – not third-party AI; the AI notice is still accepted before first use. OpenAI and any outside AI company are excluded (D-26); the code path is removed.
+- **Camera purpose string:** must mention scanning labels and barcodes (`expo-camera`: "DrinkMe uses the camera to scan bottle labels and barcodes.").
+- **Guideline 1.2 / 4.7-style AI output:** report action on AI answers is built (`POST /api/ai/report`, LC-39).

@@ -7,7 +7,7 @@ Paste-ready text. Each field shows its store limit and the measured length (Unic
 Rules this text follows (checked 2026-11-16):
 - **Apple App Review Guideline 1.4.3:** no encouragement of excessive alcohol consumption, nothing aimed at minors, no sales.
 - **Google Play "Tobacco and Alcohol" policy** (support.google.com/googleplay/android-developer/answer/9878810): no facilitation of sales, no depiction of alcohol to minors, no favourable portrayal of excessive, binge or competitive drinking.
-- **Apple 2.3 (accurate metadata):** only features that work today are described. The AI scanner, AI recipes and Stories are switched off (`src/screens/ScannerScreen.tsx:9`, `src/screens/SmartBarScreen.tsx:31`, `src/screens/HomeScreen.tsx:30`) and are **not** mentioned.
+- **Apple 2.3 (accurate metadata):** only features that work today are described. Stories is switched off (`src/screens/HomeScreen.tsx:30`) and is **not** mentioned. The AI scanner and AI recipes are shown only when the server runs `AI_PROVIDER=local`; they are not mentioned in the main texts below – add the line in §7 only when AI is on at submission.
 - 18+ is stated in the short and full descriptions; non-alcoholic drinks are presented as equal (Age and Alcohol Policy §4).
 
 ## 1. Short fields
@@ -92,5 +92,5 @@ Replace `[BASE_URL]`, `[PRIVACY_URL]` and `[TERMS_URL]` before pasting. Until th
 - Do not show the "AI Scanner – Coming soon" or "AI Recipe Generator – Coming soon" screens (Apple 2.1 / 2.3: unfinished features). VERIFY with the planner whether the Scanner tab should be hidden in the store build (see `README.md` §4).
 - Captions follow the same rules as the description ("Taste, not quantity").
 
-## 7. When AI is enabled (separate release – not v1.0.0)
-Do not mention the scanner or AI recipes in v1.0.0 (they are off). When a release turns them on, add at most one honest line, for example: "Scan a bottle or a barcode to add it to your Smart Bar, and get AI drink ideas – AI suggestions can be wrong; always check ingredients." Rules: call it AI; no "instant", "personalised" or "perfect" promises (LC-44); keep non-alcoholic options visible; screenshots only from a build where the feature works.
+## 7. When AI is enabled (applies once the AI features are switched on)
+Do not mention the scanner or AI recipes while the server runs `AI_PROVIDER=off`. When AI is on at submission (or later, in a listing update), add at most one honest line, for example: "Scan a bottle or a barcode to add it to your Smart Bar, and get AI drink ideas – AI suggestions can be wrong; always check ingredients." Rules: call it AI; no "instant", "personalised" or "perfect" promises (LC-44); keep non-alcoholic options visible; screenshots only from a build where the feature works.

@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "DrinkMe are nevoie de cameră pentru a fotografia băuturile tale.",
+    "NSCameraUsageDescription": "DrinkMe folosește camera pentru a fotografia băuturile tale și pentru a scana etichete și coduri de bare.",
     "NSPhotoLibraryUsageDescription": "DrinkMe are nevoie de acces la fotografiile tale pentru a adăuga imagini cu băuturi."
   }
 }

@@ -1,8 +1,8 @@
-DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.4 – 2026-11-23 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Privacy Policy – Addendum for the EU/EEA and the United Kingdom
 
-Version 0.2 · Effective date: [to be set at publication] · Applies in addition to the DrinkMe Privacy Policy.
+Version 0.4 · Effective date: [to be set at publication] · Applies in addition to the DrinkMe Privacy Policy.
 
 ## 1. Controller and representative
 Controller: Tulbure Aron PFA, Bucharest, Romania (see Privacy Policy §1). We have not appointed a Data Protection Officer because the legal conditions (GDPR Art. 37) are not met; contact us at drinkmesocialapp@gmail.com.
@@ -15,22 +15,22 @@ Controller: Tulbure Aron PFA, Bucharest, Romania (see Privacy Policy §1). We ha
 | Age confirmation and keeping minors out | Our legitimate interest in protecting minors and complying with app-store rules, and legal obligations under national alcohol and advertising laws where they apply (Art. 6(1)(f), (c)) |
 | Reports, automatic hiding after several reports, moderator review, suspensions, the reported version of an edited post, suspension history | Legitimate interest in a safe service and enforcing our Terms (Art. 6(1)(f)); obligations under the Digital Services Act (Art. 6(1)(c)) |
 | Security log, request logs (without IP address), rate limits, session security, app-integrity checks (App Check, once switched on) | Legitimate interest in security and accountability (Art. 6(1)(f), Recital 49) |
-| *Once the AI features are switched on:* AI scanner, barcode lookup, AI recipes, saved recipes, AI settings and the AI notice record (Privacy Policy §5a) | Performance of our contract with you (Art. 6(1)(b)) – you ask for the feature |
-| *Once the AI features are switched on:* keeping scan photos with "Help improve the scanner" | Your consent (Art. 6(1)(a), Art. 7), recorded with its date and the version of the text; withdraw at any time with the same switch, which deletes the kept photos |
-| *Once the AI features are switched on:* AI rate limits, safety checks of AI answers, reports about AI answers | Legitimate interest in a safe, working service (Art. 6(1)(f)) |
 | Backups | Legitimate interest in recovering from failures; security of processing (Art. 32) |
 | Keeping open reports anonymously after the reporter deletes the account | Legitimate interest in completing moderation |
+| *Once the AI features are switched on:* AI scanner, barcode lookup, AI recipes, saved recipes, AI settings and the AI notice record (Privacy Policy §5a) | Performance of our contract with you (Art. 6(1)(b)) – you ask for the feature |
+| *Once the AI features are switched on:* AI daily and hourly limits, safety checks of AI answers, and review of your reports about AI answers | Legitimate interest in a safe, fair and working service and in meeting app-store and AI transparency rules (Art. 6(1)(f)) |
 | Answering requests and authorities | Legal obligation (Art. 6(1)(c)) |
 You can ask us for details of our legitimate-interest assessments.
+(We do not keep scan photos, so no consent is asked for them.)
 
 ## 3. Automated decisions
-Content reported by three different eligible users (accounts at least 48 hours old that accepted the privacy notice) is automatically hidden from others until a moderator reviews it. This is temporary and reviewed by a person; it is not a decision with legal or similarly significant effects under Art. 22. Suspensions and removals are decided by people. The AI scanner and recipe suggestions (once switched on) make suggestions only and take no decisions about you.
+Content reported by three different eligible users (accounts at least 48 hours old that accepted the privacy notice) is automatically hidden from others until a moderator reviews it. This is temporary and reviewed by a person; it is not a decision with legal or similarly significant effects under Art. 22. Suspensions and removals are decided by people. The AI scanner and recipe generator (once switched on) make suggestions only and take no decisions about you; reaching a daily AI limit only pauses the AI features until the next day.
 
 ## 4. Your rights
 Access (Art. 15), rectification (16), erasure (17), restriction (18), portability (20), objection to processing based on legitimate interest (21), and not to be subject to solely automated decisions with legal or similar effect (22). Write to drinkmesocialapp@gmail.com. We reply within one month (extendable by two months for complex requests; we will tell you). Most data can be edited or deleted directly in the app. A copy of your data is prepared on request (an in-app export is planned).
 
 ## 5. Transfers outside the EEA/UK
-Google LLC (Firebase Authentication, Maps Platform) may process data in the United States. Safeguard: the EU-US Data Privacy Framework (and its UK Extension) where the recipient is certified, otherwise the European Commission's Standard Contractual Clauses (and the UK Addendum) – **VERIFY Google's current certification and terms**. Our hosting provider will be in the EU where possible. You can ask us for a copy of the safeguards.
+Google LLC (Firebase Authentication, Maps Platform) may process data in the United States. Safeguard: the EU-US Data Privacy Framework (and its UK Extension) where the recipient is certified, otherwise the European Commission's Standard Contractual Clauses (and the UK Addendum) – **VERIFY Google's current certification and terms**. Our hosting provider will be in the EU where possible. Our AI server (scan photos and recipe inputs) runs only in the EU/EEA, and no outside AI company receives your data, so the AI features involve no transfer outside the EEA. You can ask us for a copy of the safeguards.
 
 ## 6. Complaints
 - Romania (lead authority): **Autoritatea Națională de Supraveghere a Prelucrării Datelor cu Caracter Personal (ANSPDCP)**, B-dul G-ral. Gheorghe Magheru 28-30, Sector 1, Bucharest, www.dataprotection.ro (VERIFY address).
@@ -44,4 +44,5 @@ We store only what is strictly necessary for the service on your device (Directi
 We do not process national identification numbers. We do not use video surveillance or process employees' data in the app.
 
 ---
+2026-11-22: consent row for keeping scan photos removed (D-21/D-22: no photo is kept, opt-in not offered); AI reports and daily limits added; EU/EEA-only AI server (D-23). Matches the code re-read on 2026-11-22.
 Sources (checked 2026-11-12 from knowledge unless noted; VERIFY): Regulation (EU) 2016/679 Arts. 6, 12–22, 27, 37, 44–49; UK GDPR and Data Protection Act 2018; Commission Implementing Decision (EU) 2023/1795 (EU-US DPF); Romanian Law 190/2018; Law 506/2004.

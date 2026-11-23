@@ -18,6 +18,12 @@ External documentation (not in the repo) is in `D:\DrinkMeApp\`: TECHNICAL_REFER
 | deployment-prep | deployment/release prep, only when asked |
 | legal-compliance | legal documents (docs/legal), compliance matrix, store disclosures; never edits code |
 | log-triage | after a device test session (`npm run test:ios`): ranked fix list in reports/test-sessions/ from logs/sessions/; never edits code |
+| integration-manager | contracts between app, server and ai-service: schemas + versions, feature flags, env vars, Expo compatibility, rollout order; reviews every cross-part change (read-only) |
+| ml-engineer | local AI: models (Ollama), OCR + vision scan pipeline, prompts, latency/VRAM, `ai-service/` |
+| data-curator | AI test photo sets and barcode lists in `D:\AI\datasets` (never in git), licences and attribution |
+| ai-evaluator | scan accuracy, latency/VRAM, recipe schema/compliance/duplicates, safety red-team → `docs/ai/EVAL_REPORT.md` |
+
+Skills for AI work: `drinkme-ai-service` (architecture + contracts), `recipe-schema` (recipe JSON + safety rules S1-S13), `ingredient-taxonomy` (what counts as a drink ingredient). AI work follows the planner's AI phases; every app↔server↔ai-service change also gets an integration-manager review.
 
 ## Pipeline
 **Feature:** planner → show the spec to the user and wait for OK → developer (one task at a time) → code-reviewer + test-engineer + security-reviewer (+ legal-compliance when required, see below) (in parallel) → developer fixes BLOCKERs → re-review (max 3 loops, then stop and ask the user) → docs-writer → summary.

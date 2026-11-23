@@ -12,7 +12,8 @@ export type LegalDoc =
   | 'content-moderation'
   | 'imprint'
   | 'age-and-alcohol'
-  | 'account-deletion';
+  | 'account-deletion'
+  | 'ai-transparency';
 
 // Decision D-15 (default): one Gmail contact address for now, here only.
 export const CONTACT_EMAIL = 'drinkmesocialapp@gmail.com';

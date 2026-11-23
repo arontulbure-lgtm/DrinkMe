@@ -23,8 +23,9 @@ Host-independent: Railway, Render, Fly.io, a VPS with Docker, or any platform th
 | `DATABASE_URL`, `DATABASE_SSL` | Postgres mode only | `DATABASE_SSL=require` (verified TLS) unless the database is on a private network. |
 | `APP_CHECK_MODE` | `off` until the app sends tokens, then `monitor`, then `enforce` | docs/APP_CHECK_PLAN.md. A typo stops the start. |
 | `REQUIRE_VERIFIED_EMAIL` | unset until decided (docs/DEVICE_CHECKS.md section 2 passed on the server side) | Turning it on signs every app out once. |
-| `AI_PROVIDER` | `off` | **Required**: production refuses to start when it is unset or unknown. `off` until the AI service is merged and deployed (`local` is refused until then; `openai` is refused unless `AI_OPENAI_PRODUCTION_ACK=true`, which may be set only after the privacy policy names OpenAI: the current policy promises no outside AI company). |
-| `AI_ENABLED`, `OPENAI_API_KEY` | unset | Legacy; ignored once `AI_PROVIDER` is set. AI stays off for the beta. |
+| `AI_PROVIDER` | `off` | **Required**: `off` or `local`; production refuses to start when it is unset, `openai` (removed, D-24) or unknown. `off` until the EU GPU host runs the ai-service (`docs/deploy/EU_GPU.md`); `local` then also needs `AI_SERVICE_URL`, `AI_SERVICE_TOKEN` (32+ characters) and, for plain http on a private network, `AI_SERVICE_PRIVATE_HOSTS`. |
+| `AI_ENABLED`, `OPENAI_API_KEY` | unset | Removed (D-24): no effect. Delete them from the host. |
+| Other AI settings | see `docs/deploy/EU_GPU.md` | Limits, concurrency, timeout. `AI_PHOTO_OPT_IN_ENABLED` stays unset at launch (D-22). |
 | `LOG_FORMAT` | unset (`text`) or `json` | `json` writes one object per request `{ts, method, path, status, ms, size}` for hosts that index JSON; same privacy rules. Update log alerts if you switch. |
 | `CORRUPT_BACKUP_RETENTION_DAYS` | unset (21) | Never above 21: the app promises removal from backups within 30 days. |
 
