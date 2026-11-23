@@ -2,6 +2,29 @@
 
 Notable changes to DrinkMe (client and server). Newest first. Details: `server/README.md`, `.claude/skills/drinkme-backend-api/SKILL.md`, `AUTONOMOUS_RUN_LOG.md`.
 
+## 1.0.0-rc1 (2026-11-23)
+
+Release candidate for the official launch. Readiness, accepted issues and the owner checklist: `docs/LAUNCH_READINESS.md`.
+
+### Added
+- **Local AI** (PR #4): bottle scanner (photo + OCR, barcode fallback via Open Food Facts), AI recipes streamed from the Smart Bar and from a scan, saved recipes, AI notice and settings, AI reports, daily limits. Runs on DrinkMe's own ai-service (Ollama, open-weights model); no outside AI company. Switched on from the server (`AI_PROVIDER=local`), off by default.
+- **Production readiness:** `GET /readyz`, JSON request logs without personal data (`LOG_FORMAT=json`), docker-compose (server, `ai` profile with Ollama on the GPU, `postgres` profile), `ai-service/Dockerfile`, deploy guides for Railway, Render and an EU GPU host.
+- **Release config:** version 1.0.0, EAS development/preview/production profiles (Android App Bundle), iOS permission texts in en/ro.
+- AI transparency page in the public legal site, linked from the AI notice and Legal & help.
+
+### Changed
+- **Expo SDK 58** (from 54, one SDK at a time): React Native 0.88, React 19.3, TypeScript 6. Runs in the App Store / Play Store Expo Go 58.
+- `/api` rate limit counted per signed-in user (100 / 15 min) under a per-IP ceiling (1000 / 15 min), so users sharing one network do not block each other.
+- Production refuses to start without an explicit `AI_PROVIDER` (`off` or `local`).
+- Legal documents: AI sections, request logs without IP addresses, retention and App Check details (drafts until lawyer review).
+
+### Fixed
+- Sign in with Apple sends a nonce (replay protection); Android app data is excluded from cloud backup.
+- Google button correctly disabled in Expo Go 58; text overflow on the post detail; no retry button on the AI daily-limit message; notifications refresh when the drawer opens.
+
+### Removed
+- The OpenAI integration and its routes (decision D-24).
+
 ## 2026-11-12
 
 Tiers 3 to 6 of the autonomous run (commits 0c7b20b to d96bbd9, plus the docs below). None of the client changes has run on a device yet; see `docs/JOHN_TODO.md`.
