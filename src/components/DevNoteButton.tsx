@@ -11,8 +11,31 @@ import { addDevNote, getDevLogScreen, isDevLogBridgeActive } from '../lib/devLog
 const NOTE_MAX_LENGTH = 1000;
 const SAVED_MESSAGE_MS = 1500;
 
+// Kept here, not in LocalizationContext, so a release build (which drops this file) carries none of them.
+const DEV_NOTE_STRINGS = {
+  en: {
+    button: '📝 Note',
+    a11y: 'Add a test note',
+    title: 'Test note',
+    hint: 'Saved with the current screen and time. Do not type passwords or personal data.',
+    placeholder: 'What did you see?',
+    save: 'Save note',
+    saved: 'Note saved',
+  },
+  ro: {
+    button: '📝 Notă',
+    a11y: 'Adaugă o notă de test',
+    title: 'Notă de test',
+    hint: 'Se salvează cu ecranul curent și ora. Nu scrie parole sau date personale.',
+    placeholder: 'Ce ai observat?',
+    save: 'Salvează nota',
+    saved: 'Notă salvată',
+  },
+} as const;
+
 export default function DevNoteButton() {
-  const { t } = useLocalization();
+  const { t, locale } = useLocalization();
+  const strings = DEV_NOTE_STRINGS[locale === 'ro' ? 'ro' : 'en'];
   const insets = useSafeAreaInsets();
   const [isOpen, setIsOpen] = useState(false);
   const [text, setText] = useState('');
@@ -43,26 +66,26 @@ export default function DevNoteButton() {
         style={[styles.fab, { bottom: insets.bottom + 96 }]}
         onPress={() => setIsOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={t('devNote.a11y')}
+        accessibilityLabel={strings.a11y}
       >
-        <Text style={styles.fabText}>{showSaved ? t('devNote.saved') : t('devNote.button')}</Text>
+        <Text style={styles.fabText}>{showSaved ? strings.saved : strings.button}</Text>
       </TouchableOpacity>
 
       <Modal visible={isOpen} transparent animationType="fade" onRequestClose={close}>
         <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.sheet}>
-            <Text style={styles.title} accessibilityRole="header">{t('devNote.title')}</Text>
-            <Text style={styles.hint}>{`${t('devNote.hint')}${getDevLogScreen() ? ` (${getDevLogScreen()})` : ''}`}</Text>
+            <Text style={styles.title} accessibilityRole="header">{strings.title}</Text>
+            <Text style={styles.hint}>{`${strings.hint}${getDevLogScreen() ? ` (${getDevLogScreen()})` : ''}`}</Text>
             <TextInput
               style={styles.input}
               value={text}
               onChangeText={setText}
-              placeholder={t('devNote.placeholder')}
+              placeholder={strings.placeholder}
               placeholderTextColor="#6B7280"
               multiline
               autoFocus
               maxLength={NOTE_MAX_LENGTH}
-              accessibilityLabel={t('devNote.title')}
+              accessibilityLabel={strings.title}
             />
             <View style={styles.row}>
               <TouchableOpacity style={styles.secondary} onPress={close} accessibilityRole="button">
@@ -75,7 +98,7 @@ export default function DevNoteButton() {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !text.trim() }}
               >
-                <Text style={styles.primaryText}>{t('devNote.save')}</Text>
+                <Text style={styles.primaryText}>{strings.save}</Text>
               </TouchableOpacity>
             </View>
           </View>

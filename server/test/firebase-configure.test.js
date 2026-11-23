@@ -72,7 +72,7 @@ describe('npm run firebase:configure, end to end on a temp copy', () => {
     for (const name of ['firebase-configure.mjs', 'env-file.mjs', 'official.mjs']) {
       fs.copyFileSync(path.join(SCRIPTS_DIR, name), path.join(root, 'server', 'scripts', name));
     }
-    fs.writeFileSync(path.join(root, '.env'), `EXPO_PUBLIC_FIREBASE_PROJECT_ID=drinkme-b2269\r\nANTHROPIC_API_KEY=${SECRET}\r\n`);
+    fs.writeFileSync(path.join(root, '.env'), `EXPO_PUBLIC_FIREBASE_PROJECT_ID=drinkme-b2269\r\nTHIRD_PARTY_API_KEY=${SECRET}\r\n`);
     fs.writeFileSync(path.join(root, 'server', '.env'), `NODE_ENV=development\nJWT_SECRET=${SECRET}\nFIREBASE_SERVICE_ACCOUNT_KEY=./serviceAccount.json\n`);
     // Outside any git repository, so the git-ignore check does not apply to these files.
     const downloads = fs.mkdtempSync(path.join(os.tmpdir(), 'drinkme-fbdl-'));
@@ -96,7 +96,7 @@ describe('npm run firebase:configure, end to end on a temp copy', () => {
 
     const rootEnv = fs.readFileSync(path.join(root, '.env'), 'utf8');
     assert.match(rootEnv, /^EXPO_PUBLIC_FIREBASE_PROJECT_ID=drinkmeapp-a8fea\r$/m);
-    assert.match(rootEnv, new RegExp(`^ANTHROPIC_API_KEY=${SECRET}\\r$`, 'm'), 'other lines untouched');
+    assert.match(rootEnv, new RegExp(`^THIRD_PARTY_API_KEY=${SECRET}\\r$`, 'm'), 'other lines untouched');
     assert.match(rootEnv, /^EXPO_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abc\r$/m);
     assert.doesNotMatch(rootEnv, /G-IGNORED/);
     const serverEnv = fs.readFileSync(path.join(root, 'server', '.env'), 'utf8');
@@ -121,10 +121,10 @@ describe('npm run firebase:configure, end to end on a temp copy', () => {
 describe('env:remove (removeEnvLine and the command)', () => {
   test('removes every line for the name, keeps the rest byte for byte', async () => {
     const { removeEnvLine } = await import('../scripts/env-file.mjs');
-    const text = `A=1\r\nANTHROPIC_API_KEY=${SECRET}\r\n# ANTHROPIC_API_KEY=commented\r\nB=2\r\nANTHROPIC_API_KEY=again`;
-    const result = removeEnvLine(text, 'ANTHROPIC_API_KEY');
+    const text = `A=1\r\nTHIRD_PARTY_API_KEY=${SECRET}\r\n# THIRD_PARTY_API_KEY=commented\r\nB=2\r\nTHIRD_PARTY_API_KEY=again`;
+    const result = removeEnvLine(text, 'THIRD_PARTY_API_KEY');
     assert.equal(result.removed, 2);
-    assert.equal(result.text, 'A=1\r\n# ANTHROPIC_API_KEY=commented\r\nB=2\r\n');
+    assert.equal(result.text, 'A=1\r\n# THIRD_PARTY_API_KEY=commented\r\nB=2\r\n');
     assert.equal(removeEnvLine('A=1\n', 'X').removed, 0);
   });
 
@@ -132,9 +132,9 @@ describe('env:remove (removeEnvLine and the command)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drinkme-envrm-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = path.join(dir, '.env');
-    fs.writeFileSync(file, `KEEP=1\nANTHROPIC_API_KEY=${SECRET}\n`);
+    fs.writeFileSync(file, `KEEP=1\nTHIRD_PARTY_API_KEY=${SECRET}\n`);
     const run = (args) => spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'env-remove.mjs'), ...args], { encoding: 'utf8' });
-    const result = run(['ANTHROPIC_API_KEY', file]);
+    const result = run(['THIRD_PARTY_API_KEY', file]);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(!`${result.stdout}${result.stderr}`.includes(SECRET));
     assert.equal(fs.readFileSync(file, 'utf8'), 'KEEP=1\n');

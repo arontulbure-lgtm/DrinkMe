@@ -6,7 +6,7 @@ description: The DrinkMe Express backend - API endpoints, auth flow, data persis
 # DrinkMe backend (server/server.js)
 
 ## Runtime
-Node.js 22, Express, ESM (`"type": "module"`). Port 5000 by default (`PORT`), host `0.0.0.0` (`HOST`). Packages: express, cors, helmet, express-rate-limit, morgan, multer, jsonwebtoken, dotenv, openai, firebase-admin v14 (ESM imports `firebase-admin/app`, `firebase-admin/auth`), validator.
+Node.js 22, Express, ESM (`"type": "module"`). Port 5000 by default (`PORT`), host `0.0.0.0` (`HOST`). Packages: express, cors, helmet, express-rate-limit, morgan, multer, jsonwebtoken, dotenv, firebase-admin v14 (ESM imports `firebase-admin/app`, `firebase-admin/auth`), validator.
 Setup, every env var and Docker usage are in `server/README.md`.
 
 ## Environment and production rules
@@ -23,7 +23,7 @@ Production also enforces the `CORS_ALLOWED_ORIGINS` allowlist; other environment
 ### Feature switches (read once at start)
 | Variable | Default | On means | Warnings |
 |---|---|---|---|
-| `AI_ENABLED` | off; on only for exactly `true` | AI routes call OpenAI (also needs `OPENAI_API_KEY`) | See AI below before turning it on |
+| `AI_PROVIDER` | off; on only for exactly `local` | `/api/ai/*` call the local ai-service | See AI below and the drinkme-ai-service skill. `AI_ENABLED` and `openai` no longer do anything (D-24, logged as a warning) |
 | `PARTNER_CONSENT_REQUIRED` | on; off only for exactly `false` | A partnership needs a request and an accept | `false` is an emergency rollback only: `POST` links both sides at once, so anyone can add themselves and then read that person's partner list, which makes partner lists effectively public. Links made while off stay after turning it back on. The privacy notice's partner sentence is then untrue. Production logs a warning |
 | `REQUIRE_VERIFIED_EMAIL` | off; on only for exactly `true` | Accounts with an unconfirmed email get no JWT | Rollout note below. Do not turn on before a real Firebase test. Production logs a warning while it is off. The email takeover guard (session generation and auth floor, see Auth flow) works with it off |
 | `ADMIN_USER_IDS` | empty | Comma-separated uids that may use `/api/admin/*` | Empty means every admin route returns 403 and nobody can review reports (production logs a warning). Unknown ids are logged as a count only. Admins also need the 18+ confirmation, and cannot be suspended |
@@ -87,7 +87,7 @@ New accounts are stored with `noticePending` and `createdAt`, and look blank to 
 ## Sign-in and age gate (alcohol policy rule 1, enforced here)
 Owner decision: nothing is readable without signing in, and nothing but the first-run flow works before the 18+ confirmation.
 - `requireSignedInAdult` is mounted on `/api` (after the rate limiters, before every body parser and route) and on `/media` (after the media limiter). No valid JWT: 401. Signed in but not confirmed: 403 `age_required`. Refusals carry `Vary: Authorization` and `Cache-Control: no-store`.
-- Exempt for everyone: `POST /api/auth/mobile`, `POST /api/account/delete-unverified` (flag on only), and `/healthz` (outside `/api`).
+- Exempt for everyone: `POST /api/auth/mobile`, `POST /api/account/delete-unverified` (flag on only), `/healthz` and `/readyz` (outside `/api`).
 - Exempt before the confirmation, for the caller's own uid only (`:id` must equal the JWT's uid; the routes check ownership again): `GET /api/users/:id`, `PUT /api/users/:id`, `POST /api/users/:id/acknowledgements`, `POST /api/users/:id/delete-account`.
 - Paths match without case and with an optional trailing slash; `HEAD` counts as `GET`. A path the rules miss gets the full gate, never less.
 - `POST /api/users/:id/acknowledgements { type: 'age', confirmed: true }` stores only `ageConfirmedAt`, never a birth date. There is no decline: the app's age gate offers only Confirm, Log out and Delete account.
@@ -135,7 +135,7 @@ Every `/api` and `/media` route except sign-in and `delete-unverified` needs a s
 
 **Paged lists** take `?limit=` (1 to 50, default 20) and `?before=<id>` (exclusive; pass the previous `nextCursor`) and return `{ items, nextCursor }`, newest id first; `nextCursor` is null on the last page. Invalid values return 400. Every route that names a post or comment by id accepts only a plain positive integer.
 
-Health: `GET /healthz` (no sign-in)
+Health: `GET /healthz` (no sign-in, liveness) · `GET /readyz` (no sign-in, readiness: 200 once the database is loaded and, in production, firebase-admin is initialised; 503 `{status:'not_ready', reason}` with `db_not_loaded` | `auth_not_initialized` | `shutting_down`)
 Media (outside `/api`, 600 req / 15 min / IP, signed in and 18+ confirmed, `Cache-Control: private, max-age=86400`, ETag, 304; refusals and 404s are `no-store` with `Vary: Authorization`): `GET /media/drinks/:id` (blocks and the hide after reports as for the post; users in `ADMIN_USER_IDS` bypass both here, to review reports) · `GET /media/avatars/:userId` (404 while the owner's notice is pending or the profile is hidden after reports, except to its owner and admins). JSON responses carry `/media/...` paths, never image bytes. `avatar` is a `/media/avatars/:id?v=<hash>` path, a Google photo URL, or null.
 Auth: `POST /api/auth/mobile`
 Users:
@@ -245,13 +245,11 @@ Errors are `{ error, code? }`. Only the app's own messages reach clients; other 
 | 507 | `storage_full`, `image_storage_full`, `user_image_quota` | Storage limits above |
 
 ## AI
-AI runs only when `AI_ENABLED` is exactly `true` and `OPENAI_API_KEY` is set; a key alone does not enable it. The client flags (`AI_ENABLED`, `AI_RECIPES_ENABLED`) are separate. Upload field for scans: `image`. Requests use `store: false`.
-The server-side age gate now covers AI recipes. Do not set `AI_ENABLED=true` where real users can reach it until the rest are done:
-- a global daily AI cap and a hard monthly budget in the OpenAI dashboard
-- a privacy disclosure and data agreement for photos sent to OpenAI
-- one real OpenAI call (only a local mock has been used)
-- the scanner screen rebuilt (`ScannerScreen.tsx` returns null on the AI path)
-- `SmartBarScreen.tsx` sends `nonAlcoholicOnly`
+AI runs only with `AI_PROVIDER=local` (local ai-service + Ollama; no third-party AI, D-24). The OpenAI provider and the
+legacy routes `/api/detect-product`, `/api/generate-recipes`, `/api/smart-bar/generate-recipes` were removed on
+2026-11-22. Routes, limits (hourly + daily per user), photo rules and env vars: the drinkme-ai-service skill. The client
+flags (`AI_ENABLED`, `AI_RECIPES_ENABLED`) are separate kill switches; the app also follows `GET /api/ai/status`.
+Production startup: `AI_PROVIDER` must be set explicitly to `off` or `local` (unset, `openai` or unknown refuses the start, operations.js); `local` also needs `AI_SERVICE_TOKEN` (32+ characters) and an `AI_SERVICE_URL` that is loopback, https or a host listed in `AI_SERVICE_PRIVATE_HOSTS` (e.g. `ai-service` on the compose network). `LOG_FORMAT=json` makes the request log one JSON object per line `{ts, method, path, status, ms, size}`, same privacy rules as the text format (default).
 
 ## Privacy notice
 `PRIVACY_NOTICE_VERSION` is 2 in `server.js` and in `src/screens/OnboardingScreen.tsx`; they must match. Version 2 covers: nothing visible without signing in, the hide after reports, suspensions and their history, kept anonymised open reports, and the 30-day backup rule. The notice text (`onboarding.privacy*` in `LocalizationContext.tsx`) describes the read rules in this file: change it whenever who-can-see-what changes, and raise both numbers when it changes in substance. Deploy the server first; it accepts any version from 1 up to its own. The text has not had a legal review.

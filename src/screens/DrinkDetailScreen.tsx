@@ -556,6 +556,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   tipText: {
+    // Shares the row with the icon: without flex the text runs past the card's right edge (RN 0.88).
+    flex: 1,
     color: '#D1D5DB',
     fontSize: 14,
     lineHeight: 20,

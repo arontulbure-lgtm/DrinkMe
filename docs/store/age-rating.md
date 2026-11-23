@@ -1,4 +1,4 @@
-DRAFT v0.1 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Age rating questionnaires – answers
 
@@ -58,3 +58,8 @@ Where: Play Console → Policy → App content → Content rating → Start ques
 - Listing text (`listing.en.md`, `listing.ro.md`) states 18+.
 - In-app: the age gate appears before any content; Terms §3; Age and Alcohol Policy §1.
 - If brand-partner posts start (LC-11/LC-13), re-check both questionnaires (Apple "Advertising" may become relevant for paid partnerships – VERIFY).
+
+## 4. When AI is enabled (applies once the AI features are switched on)
+- Apple: no change to the alcohol answer (already Frequent → 18+). If the questionnaire asks about AI-generated content or a chatbot, answer **Yes** for AI-generated recipes (text, no free chat) – VERIFY the wording; the result stays 18+.
+- Google Play / IARC: if asked whether the app generates content with AI, answer **Yes**; the content is drink recipes with alcohol references (already declared). Generated content never encourages excessive drinking (server safety rules S1–S13) and can be reported in the app (LC-39).
+- Both: recipes with alcohol are only for users who confirmed 18+; AI results are labelled "AI-generated".

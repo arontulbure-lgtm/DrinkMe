@@ -1,0 +1,203 @@
+{
+  "$defs": {
+    "ScanItem": {
+      "additionalProperties": false,
+      "properties": {
+        "abv": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Abv"
+        },
+        "brand": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brand"
+        },
+        "category": {
+          "enum": [
+            "spirit",
+            "liqueur",
+            "wine",
+            "sparkling_wine",
+            "beer",
+            "cider",
+            "vermouth_aperitif",
+            "bitters",
+            "syrup",
+            "juice",
+            "soda_mixer",
+            "energy_drink",
+            "dairy_cream",
+            "fresh_fruit",
+            "herb_spice",
+            "water"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "flags": {
+          "items": {
+            "enum": [
+              "energy_drink",
+              "contains_caffeine"
+            ],
+            "type": "string"
+          },
+          "title": "Flags",
+          "type": "array"
+        },
+        "isAlcoholic": {
+          "title": "Isalcoholic",
+          "type": "boolean"
+        },
+        "product": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Style"
+        },
+        "volumeMl": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10000,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Volumeml"
+        }
+      },
+      "required": [
+        "category",
+        "isAlcoholic",
+        "confidence"
+      ],
+      "title": "ScanItem",
+      "type": "object"
+    },
+    "ScanTimings": {
+      "additionalProperties": false,
+      "properties": {
+        "ocrMs": {
+          "default": 0,
+          "title": "Ocrms",
+          "type": "integer"
+        },
+        "secondPassMs": {
+          "default": 0,
+          "title": "Secondpassms",
+          "type": "integer"
+        },
+        "totalMs": {
+          "default": 0,
+          "title": "Totalms",
+          "type": "integer"
+        },
+        "visionMs": {
+          "default": 0,
+          "title": "Visionms",
+          "type": "integer"
+        }
+      },
+      "title": "ScanTimings",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "item": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScanItem"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1",
+      "default": "1",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "recognized",
+        "low_confidence",
+        "water",
+        "not_ingredient",
+        "unclear"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "suggestBarcode": {
+      "title": "Suggestbarcode",
+      "type": "boolean"
+    },
+    "timings": {
+      "$ref": "#/$defs/ScanTimings"
+    }
+  },
+  "required": [
+    "status",
+    "item",
+    "suggestBarcode",
+    "model",
+    "timings"
+  ],
+  "title": "ScanResult",
+  "type": "object"
+}

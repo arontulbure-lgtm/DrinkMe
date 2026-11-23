@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.1 – 2026-11-16 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `listing.en.md`.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.2 – 2026-11-22 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `listing.en.md`.
 
 # Prezentarea în magazine – română (App Store + Google Play)
 
-Text gata de lipit în localizarea **Romanian (ro)** din App Store Connect și Play Console. Aceleași reguli ca în `listing.en.md` (Apple 1.4.3, politica Google Play „Tobacco and Alcohol”, Apple 2.3 – doar funcții active; scannerul AI, rețetele AI și Stories sunt dezactivate și nu sunt menționate). Lungimile sunt numărate cu Node, 2026-11-16.
+Text gata de lipit în localizarea **Romanian (ro)** din App Store Connect și Play Console. Aceleași reguli ca în `listing.en.md` (Apple 1.4.3, politica Google Play „Tobacco and Alcohol”, Apple 2.3 – doar funcții active; Stories este dezactivat și nu este menționat; scanerul AI și rețetele AI apar doar când serverul rulează `AI_PROVIDER=local` și se menționează doar conform §7). Lungimile sunt numărate cu Node, 2026-11-16.
 
 ## 1. Câmpuri scurte
 
@@ -77,3 +77,6 @@ Consumă cu responsabilitate.
 
 ## 6. Capturi de ecran
 Aceleași reguli ca în `listing.en.md` §6. Folosește capturi cu aplicația în limba română pentru localizarea ro.
+
+## 7. Când AI este activat (se aplică după activarea funcțiilor AI)
+Nu menționa scanerul sau rețetele AI cât timp serverul rulează `AI_PROVIDER=off`. Când AI este activat la trimitere (sau mai târziu, la o actualizare a prezentării), adaugă cel mult un rând corect, de exemplu: „Scanează o sticlă sau un cod de bare ca să o adaugi în Smart Bar și primește idei de băuturi de la AI – sugestiile AI pot fi greșite; verifică mereu ingredientele.” Reguli: spune că este AI; fără promisiuni „instant”, „personalizat” sau „perfect” (LC-44); opțiunile fără alcool rămân vizibile; capturi doar dintr-o versiune în care funcția merge.

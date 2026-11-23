@@ -11,4 +11,11 @@ description: Responsible-drinking and app-store policy rules for DrinkMe content
 4. **User-generated content.** Posts and comments need a report/flag option and a way to remove content.
 5. **Store rules.** Before release features, check the current Apple App Store and Google Play policies for alcohol-related apps (age rating, restricted regions, no in-app alcohol sales without licensing).
 6. **GDPR.** Drink preferences, locations and social connections are personal data. Collect only what a feature needs and plan for account deletion (SEC-G).
-7. **Reviews.** The Code Reviewer and Security Reviewer flag any violation of these rules as a BLOCKER.
+7. **AI-generated recipes.** Every generated recipe passes the server-side safety rules S1-S13 in
+   `.claude/skills/recipe-schema/SKILL.md` before anyone sees it: at most 2 standard drinks per serving; no shots
+   challenge, drinking game or binge framing; no flaming, dry ice or inhalation; raw egg only with a warning; a
+   warning when energy drinks are mixed with alcohol; no medicines or non-food ingredients; a responsible-drinking
+   line on every alcoholic recipe; never a hint of drinking and driving. Every batch offers at least one mocktail
+   when the ingredients allow it. Users not confirmed 18+ get mocktails only. Every recipe is labelled "AI-generated".
+   Prompts never ask for "strong", "party" or "get the night going" drinks.
+8. **Reviews.** The Code Reviewer and Security Reviewer flag any violation of these rules as a BLOCKER.

@@ -12,7 +12,8 @@ import { ROUTE_MANIFEST, TEST_DIR, parseRoutes, readServerRoutes, staticParts } 
 const GATES = new Set(['public', 'own-before-age', 'adult', 'dev-only']);
 // The only routes requireSignedInAdult lets through without a JWT, or before the 18+ confirmation.
 // Changing either list needs the owner's OK (drinkme-backend-api, "Rules for every backend change").
-const EXPECTED_PUBLIC = ['GET /healthz', 'POST /api/account/delete-unverified', 'POST /api/auth/mobile'];
+// GET /readyz: agreed for the launch run (2026-11-17), readiness for host health checks.
+const EXPECTED_PUBLIC = ['GET /healthz', 'GET /readyz', 'POST /api/account/delete-unverified', 'POST /api/auth/mobile'];
 const EXPECTED_OWN_BEFORE_AGE = [
   'GET /api/users/:id', 'POST /api/users/:id/acknowledgements', 'POST /api/users/:id/delete-account', 'PUT /api/users/:id',
 ];

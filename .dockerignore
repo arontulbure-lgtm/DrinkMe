@@ -7,7 +7,9 @@ server/*
 !server/package.json
 !server/package-lock.json
 !server/server.js
+!server/ai/
 !server/app-check.js
+!server/operations.js
 !server/storage/
 # Only the scripts the server needs in production (backups, Postgres migration and export). Owner and
 # developer tools (testapi, testusers, firebase-configure, official, env-remove, test-postgres,

@@ -4,9 +4,11 @@ import {
   StyleSheet, Alert, Platform, ActivityIndicator, AccessibilityInfo,
   KeyboardAvoidingView, ScrollView, Keyboard, Dimensions,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import { GoogleAuthProvider, OAuthProvider, AuthCredential } from 'firebase/auth';
@@ -21,6 +23,7 @@ import {
   normalizeEmail,
 } from '../lib/passwordReset';
 import Constants from 'expo-constants';
+import { isRunningInExpoGo } from 'expo';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -75,7 +78,8 @@ let passwordResetCooldownUntil = 0;
 // Google OAuth via browser redirect does not work in Expo Go because the
 // exp:// redirect URI cannot be registered in Google Cloud Console
 // (it only accepts HTTPS URIs for web clients). Works fine in standalone builds.
-const IS_EXPO_GO = Constants.appOwnership === 'expo';
+// Expo Go 58 reports appOwnership null and executionEnvironment 'bare'; isRunningInExpoGo() is Expo's own check.
+const IS_EXPO_GO = isRunningInExpoGo();
 
 // ── Google auth button ────────────────────────────────────────────────────────
 function GoogleAuthButton({ onCredential, disabled }: {
@@ -182,7 +186,8 @@ export default function AuthScreen() {
   // KeyboardAvoidingView a usable frame, so the form is padded by the keyboard's height and scrolled to
   // its end: the submit button stays just above the keyboard (device test 2026-11-14).
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  // React Native 0.88 strict API: refs hold the instance type.
+  const scrollRef = useRef<ScrollViewInstance>(null);
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
     const show = Keyboard.addListener('keyboardDidShow', (event) => {
@@ -243,16 +248,20 @@ export default function AuthScreen() {
   const handleAppleSignIn = async () => {
     setIsSocialLoading(true);
     try {
+      // Replay protection: Apple gets the SHA-256 of a one-time nonce, Firebase checks it against the raw value.
+      const rawNonce = `${Crypto.randomUUID()}${Crypto.randomUUID()}`;
+      const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, rawNonce);
       const result = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
       const { identityToken } = result;
       if (!identityToken) throw new Error('No identity token from Apple');
       const provider = new OAuthProvider('apple.com');
-      const credential = provider.credential({ idToken: identityToken });
+      const credential = provider.credential({ idToken: identityToken, rawNonce });
       await signInWithSocial(credential);
     } catch (e: unknown) {
       if (!isAuthCancellation(e)) {

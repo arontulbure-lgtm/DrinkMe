@@ -1,0 +1,6 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "DrinkMe uses the camera to photograph your drinks and to scan bottle labels and barcodes.",
+    "NSPhotoLibraryUsageDescription": "DrinkMe needs access to your photos to add drink images."
+  }
+}

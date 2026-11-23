@@ -1,0 +1,107 @@
+# DrinkMe server stack. Secrets live in ./server/.env.production (git-ignored, never committed); see
+# docs/PRODUCTION_ENV.md for every variable. Nothing here holds a real value.
+#
+#   docker compose up -d                       # server only (JSON database on the named volume)
+#   docker compose --profile postgres up -d    # + a local Postgres for tests (not for production data)
+#   docker compose --profile ai up -d          # + the local AI service (./ai-service); needs the NVIDIA
+#                                              #   Container Toolkit and Ollama with the model (docs/deploy/EU_GPU.md).
+services:
+  server:
+    build: .
+    image: drinkme-api
+    restart: unless-stopped
+    env_file:
+      - ./server/.env.production
+    environment:
+      # Pinned here (environment wins over env_file): an env file copied from a dev server/.env must not
+      # switch the production guards off.
+      NODE_ENV: production
+      # The JSON database lives on the volume below (absolute path, its own folder; backups go next to it).
+      DB_FILE: /app/server/data/db.json
+    ports:
+      # Loopback only: put a TLS reverse proxy (e.g. Caddy) in front on a VPS and set TRUST_PROXY_HOPS to the
+      # number of proxies. A port published on all interfaces bypasses ufw and allows forged X-Forwarded-For.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - drinkme-data:/app/server/data
+    healthcheck:
+      # 200 only when the database is loaded and firebase-admin is initialised (GET /readyz).
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  ollama:
+    profiles: ["ai"]
+    # Pin the version tested locally (docs/ai/PRODUCTION_PLAN.md §4). Pull the model once:
+    #   docker compose --profile ai exec ollama ollama pull qwen3-vl:4b-instruct
+    image: ollama/ollama:0.40.16
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "24h"   # keep the model in VRAM
+      OLLAMA_NUM_PARALLEL: "2"   # match the server's AI_RECIPE_CONCURRENCY
+    # No published port: only the ai-service talks to it.
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  ai-service:
+    profiles: ["ai"]
+    build: ./ai-service   # ai-service/Dockerfile: python:3.12-slim, non-root, CPU only
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      AI_SERVICE_HOST: "0.0.0.0"
+      AI_SERVICE_PORT: "8088"
+      # Same secret as the server's AI_SERVICE_TOKEN (32+ characters), from the shell or an untracked .env.
+      # Empty: the ai-service refuses to start on a non-loopback host, so it fails closed.
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+      OLLAMA_HOST: "ollama:11434"
+      DRINKME_VISION_MODEL: "qwen3-vl:4b-instruct"
+      DRINKME_TEXT_MODEL: "qwen3-vl:4b-instruct"
+      DRINKME_MAX_IMAGE_SIDE: "768"
+      OLLAMA_KEEP_ALIVE: "24h"
+    read_only: true
+    tmpfs:
+      - /tmp
+    # No published port: the server reaches it on the compose network as http://ai-service:8088. In
+    # server/.env.production: AI_PROVIDER=local, AI_SERVICE_URL=http://ai-service:8088, AI_SERVICE_TOKEN (32+
+    # characters, same value) and AI_SERVICE_PRIVATE_HOSTS=ai-service (production accepts plain http only for
+    # hosts listed there; otherwise loopback or https).
+    expose:
+      - "8088"
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: drinkme
+      POSTGRES_USER: drinkme
+      # No password is committed: set POSTGRES_PASSWORD in the shell or an untracked .env (empty: the image refuses to start).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    # Local tests only; bound to loopback. Server settings: DB_DRIVER=postgres,
+    # DATABASE_URL=postgres://drinkme:<password>@postgres:5432/drinkme, DATABASE_SSL=disable (private network).
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - drinkme-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drinkme -d drinkme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  drinkme-data:
+  drinkme-postgres:
+  ollama-models:

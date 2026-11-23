@@ -383,6 +383,7 @@ describe('request logs', () => {
       'the production format (no IP, user agent or referrer)',
       {
         NODE_ENV: 'production',
+        AI_PROVIDER: 'off', // production requires an explicit choice
         ALLOW_INSECURE_DEV_AUTH: undefined,
         JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz012345',
         ALLOW_EMPTY_DB: 'true',
@@ -411,6 +412,88 @@ describe('request logs', () => {
       }
     });
   }
+
+  // LOG_FORMAT=json: one JSON object per request line, the same fields and the same privacy rules.
+  const UA_CANARY = 'Mozilla/5.0 uacanary';
+  const REFERER_CANARY = 'https://referercanary.example.test/page';
+  const UID_CANARY = 'uidcanary123';
+  const jsonEnv = (overrides = {}) => ({
+    NODE_ENV: 'production',
+    AI_PROVIDER: 'off', // production requires an explicit choice
+    ALLOW_INSECURE_DEV_AUTH: undefined,
+    JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz012345',
+    ALLOW_EMPTY_DB: 'true',
+    FIREBASE_SERVICE_ACCOUNT_KEY: JSON.stringify({
+      type: 'service_account',
+      project_id: 'drinkme-log-test',
+      private_key: privateKey,
+      client_email: 'log-test@drinkme-log-test.example.test',
+    }),
+    LOG_FORMAT: 'json',
+    ...overrides,
+  });
+  const jsonRequestLines = (server) => server.getOutput().split(/\r?\n/)
+    .filter((line) => line.startsWith('{"ts":'))
+    .map((line) => JSON.parse(line));
+
+  for (const [label, env] of [
+    ['production', jsonEnv()],
+    ['test mode', { LOG_FORMAT: ' JSON ' }],
+  ]) {
+    test(`LOG_FORMAT=json (${label}) logs {ts, method, path, status, ms, size} only, with no query, IP, user agent or referrer`, async (t) => {
+      const server = await startServer(env);
+      t.after(() => server.stop());
+      const res = await fetch(`${server.baseUrl}/api/drinks?city=${CANARY}`, {
+        headers: { 'User-Agent': UA_CANARY, Referer: REFERER_CANARY },
+        signal: AbortSignal.timeout(LOG_TIMEOUT_MS),
+      });
+      assert.equal(res.status, 401);
+      await res.arrayBuffer();
+      await waitForLogLine(server, /"path":"\/api\/drinks","status":401/);
+
+      const output = server.getOutput();
+      for (const canary of [CANARY, 'uacanary', 'referercanary']) assert.ok(!output.includes(canary), canary);
+      const lines = jsonRequestLines(server).filter((line) => line.path === '/api/drinks');
+      assert.equal(lines.length, 1);
+      const [line] = lines;
+      assert.deepEqual(Object.keys(line), ['ts', 'method', 'path', 'status', 'ms', 'size']);
+      assert.match(line.ts, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+      assert.equal(line.method, 'GET');
+      assert.equal(line.status, 401);
+      assert.equal(typeof line.ms, 'number');
+      assert.ok(Number.isInteger(line.size) && line.size > 0);
+      assert.doesNotMatch(JSON.stringify(line), /127\.0\.0\.1|::ffff:|::1|undici|Mozilla/i);
+    });
+  }
+
+  test('LOG_FORMAT=json masks the uid in the account deletion path and escapes a crafted path', async (t) => {
+    const server = await startServer(jsonEnv());
+    t.after(() => server.stop());
+    const deletion = await fetch(`${server.baseUrl}/api/users/${UID_CANARY}/delete-account`, {
+      method: 'POST', signal: AbortSignal.timeout(LOG_TIMEOUT_MS),
+    });
+    assert.equal(deletion.status, 401);
+    await deletion.arrayBuffer();
+    const crafted = await fetch(`${server.baseUrl}/x%0A%7B%22ts%22:%22forged%22%7D`, { signal: AbortSignal.timeout(LOG_TIMEOUT_MS) });
+    await crafted.arrayBuffer();
+    await waitForLogLine(server, /"path":"\/api\/users\/:id\/delete-account"/);
+    await waitForLogLine(server, /"path":"\/x%0A/);
+
+    assert.ok(!server.getOutput().includes(UID_CANARY));
+    // Every request line is one complete JSON object; nothing forged a line of its own.
+    const lines = jsonRequestLines(server);
+    assert.ok(lines.length >= 2);
+    assert.ok(lines.every((line) => line.ts !== 'forged'));
+  });
+
+  test('an unknown LOG_FORMAT warns and keeps the text format', async (t) => {
+    const server = await startServer(jsonEnv({ LOG_FORMAT: 'xml' }));
+    t.after(() => server.stop());
+    assert.equal((await get(server.baseUrl, '/api/drinks')).status, 401);
+    await waitForLogLine(server, /\d{4}-\d\d-\d\dT[\d:.]+Z GET \/api\/drinks 401 /);
+    assert.match(server.getOutput(), /\[config\] LOG_FORMAT must be text or json - using text\./);
+    assert.deepEqual(jsonRequestLines(server), []);
+  });
 });
 
 describe('client source', () => {

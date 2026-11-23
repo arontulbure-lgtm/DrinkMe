@@ -1,9 +1,9 @@
-DRAFT v0.3 – 2026-11-13 – to be reviewed by a qualified lawyer before publication. Not legal advice.
-CIORNĂ v0.3 – 2026-11-13 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `terms.md` (versiunea în engleză prevalează până la revizuire).
+DRAFT v0.4 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+CIORNĂ v0.4 – 2026-11-22 – trebuie revizuită de un avocat calificat înainte de publicare. Nu reprezintă consultanță juridică. Traducere a `terms.md` (versiunea în engleză prevalează până la revizuire).
 
-# Termeni și condiții DrinkMe
+# Termeni de utilizare DrinkMe
 
-Versiunea 0.3 · Data intrării în vigoare: [se stabilește la publicare] · Versiunea termenilor pentru acceptarea în aplicație: `TERMS_VERSION = 1` (planificat, LC-03)
+Versiunea 0.4 · Data intrării în vigoare: [se stabilește la publicare] · Versiunea termenilor pentru acceptarea în aplicație: `TERMS_VERSION = 1`. Aplicația îți cere să accepți acești Termeni („Sunt de acord cu Termenii de utilizare”) și înregistrează versiunea și data acceptării. Acești Termeni sunt numiți și Termeni și condiții.
 
 ## 1. Cine suntem
 DrinkMe este operat de **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, Ap. 5, Sector 1, București, România, CUI `[DE COMPLETAT DE JOHN]`, nr. Registrul Comerțului `[DE COMPLETAT DE JOHN]` („noi”). Contact: **drinkmesocialapp@gmail.com**. Vezi și pagina Informații legale.
@@ -11,7 +11,7 @@ DrinkMe este operat de **Tulbure Aron PFA**, B-dul Bucureștii Noi 136, Parter, 
 Acești Termeni, împreună cu **Regulile comunității**, **Politica privind vârsta și alcoolul**, **Politica de moderare a conținutului** și **Politica privind drepturile de autor**, formează contractul dintre tine și noi. **Politica de confidențialitate** explică modul în care folosim datele personale; ea nu face parte din contract.
 
 ## 2. Serviciul
-DrinkMe este o aplicație socială gratuită pentru descoperirea băuturilor, alcoolice și nealcoolice. Poți crea un profil, publica băuturi cu fotografie, notă, descriere și loc, comenta, da „noroc”, salva postări, te poți conecta cu parteneri de băuturi (doar dacă amândoi sunteți de acord), primi notificări în aplicație, păstra o listă privată Smart Bar și explora și căuta. DrinkMe nu vinde și nu livrează alcool. Serviciul este în **beta**: funcțiile se pot schimba, iar unele (de exemplu funcțiile AI și Stories) sunt dezactivate.
+DrinkMe este o aplicație socială gratuită pentru descoperirea băuturilor, alcoolice și nealcoolice. Poți crea un profil, publica băuturi cu fotografie, notă, descriere și loc, comenta, da „noroc”, salva postări, te poți conecta cu parteneri de băuturi (doar dacă amândoi sunteți de acord), primi notificări în aplicație, păstra o listă privată Smart Bar și explora și căuta. Funcțiile AI opționale (un scaner de băuturi și rețete AI) sunt descrise la §7a. DrinkMe nu vinde și nu livrează alcool. Serviciul este în **beta**: funcțiile se pot schimba, unele (de exemplu Stories) sunt dezactivate, iar funcțiile AI pot să nu fie disponibile în orice versiune sau în orice moment (§7a se aplică doar după activarea lor).
 
 ## 3. Cine poate folosi DrinkMe
 - Trebuie să ai cel puțin **18 ani** și cel puțin **vârsta legală pentru cumpărarea alcoolului în țara în care locuiești** (de exemplu 21 în Statele Unite, 20 în Japonia, 19 în Coreea de Sud – vezi Politica privind vârsta și alcoolul). Aplicația îți cere să îți confirmi vârsta înainte de a afișa orice conținut. Confirmarea unei vârste pe care nu ai împlinit-o încalcă acești Termeni.
@@ -33,6 +33,38 @@ Trebuie să respecți Regulile comunității. Pe scurt: fără conținut cu mino
 
 ## 7. Avertisment privind alcoolul
 Conținutul de pe DrinkMe este publicat de utilizatori și de contul oficial DrinkMe, cu scop informativ și de divertisment. Nu reprezintă un sfat. Noi răspundem pentru ce publică contul oficial; utilizatorii răspund pentru ce publică ei. Consumă întotdeauna responsabil și legal, nu conduce niciodată după ce ai băut și nu presa pe nimeni să bea. Rețetele și notele sunt opinii; verifică ingredientele pentru alergii. Ești responsabil pentru propriul consum.
+
+## 7a. Funcțiile AI (scanerul de băuturi și rețetele AI) – se aplică după activarea funcțiilor AI
+*Această secțiune se aplică doar după activarea în aplicație a scanerului de băuturi și a rețetelor AI (ele necesită ca serverul AI al DrinkMe să fie în funcțiune).*
+
+**La ce folosesc.** **Scanerul de băuturi** recunoaște un ingredient pentru băuturi dintr-o fotografie a etichetei (sticlă, doză, cutie) sau a unui ingredient proaspăt ori după codul de bare, ca să îl poți adăuga în Smart Bar. **Rețetele AI** sugerează idei de băuturi construite în jurul produsului scanat sau folosind doar ce ai în Smart Bar, plus câteva ingrediente de bază alese de tine. Rețetele apar una câte una, pe măsură ce sunt create. Ambele funcții sunt opționale, gratuite și pentru uzul tău personal, necomercial. Sunt disponibile doar utilizatorilor conectați care au confirmat că au cel puțin 18 ani (și, pentru rețetele cu alcool, cel puțin vârsta legală pentru consumul de alcool din țara lor – §3) și care au citit notificarea AI din aplicație.
+
+**Cum funcționează.** AI rulează pe propriul server AI al DrinkMe, cu modele cu ponderi deschise („open-weights”) pe care le operăm noi (putem folosi un al doilea model, mai mare, de pe același server, pentru a reciti o etichetă de care primul model nu este sigur). Nicio companie AI externă nu primește fotografiile sau ingredientele tale. Dacă scanezi un cod de bare, doar numărul acestuia este căutat în Open Food Facts. Fotografia este folosită doar pentru a-ți răspunde și nu este păstrată. Detalii: Politica de confidențialitate §5a și „Cum funcționează AI în DrinkMe” (Notificarea de transparență AI).
+
+**Fără garanția exactității.** AI poate greși. Scanerul poate citi greșit o etichetă, poate confunda produse sau poate greși procentul de alcool ori volumul – verifică rezultatul și corectează-l înainte să îl salvezi. Rețetele sunt sugestii generate automat, nu rețete testate: pot conține greșeli de ingrediente, cantități sau pași, precum și greșeli de limbă (mai ales în română). Tăria afișată (% alcool și băuturi standard) este o estimare. Folosește-ți propria judecată.
+
+**Alergii și siguranță.** AI nu îți cunoaște alergiile sau intoleranțele. Verifică singur fiecare ingredient și etichetele produselor pe care le folosești. Ține cont de avertismentele pe care le adăugăm (de exemplu ou crud sau băuturi energizante amestecate cu alcool, combinație pe care nu o recomandăm).
+
+**Consumă responsabil – doar 18+.** Rețetele cu alcool sunt doar pentru adulții care au vârsta legală pentru consumul de alcool. Nu conduce niciodată după ce ai băut, nu presa pe nimeni să bea și evită alcoolul dacă ești însărcinată, iei medicamente sau nu ai vârsta legală. Regulile noastre de siguranță elimină rețetele prea tari sau care încurajează consumul excesiv, dar rămâi responsabil pentru propriul consum. Tăria și băuturile standard afișate sunt estimări pe baza unor valori tipice; conținutul real de alcool depinde de produsele și cantitățile pe care le folosești efectiv, iar noi nu ne asumăm răspunderea pentru conținutul de alcool al unei băuturi pe care o prepari sau pentru cât bei (sub rezerva §12).
+
+**Nu este un sfat.** Răspunsurile AI nu sunt sfaturi medicale, de sănătate, de nutriție sau de siguranță. Nu te baza pe ele pentru a decide dacă poți conduce, lucra, lua medicamente sau bea în siguranță.
+
+**Răspunsurile AI nu sunt conținutul tău și nici sfaturi ale DrinkMe.** Rezultatele scanării și rețetele sunt generate automat pentru tine. Nu sunt conținut publicat de tine (deci §5 nu li se aplică decât dacă le publici tu) și nu sunt declarații, recomandări sau sfaturi ale DrinkMe. Fiecare răspuns AI este marcat „Generat de AI”. Poți folosi rețetele primite în scop personal. Dacă publici o rețetă AI pe DrinkMe, ea devine postarea ta și se aplică Regulile comunității; te rugăm să menționezi că a fost generată de AI. Acest paragraf nu reduce obligațiile noastre de la §12 și nici drepturile tale din legislația imperativă privind protecția consumatorilor.
+
+**Utilizarea acceptabilă a AI.** Nu ai voie:
+- să încerci să faci AI să producă conținut ilegal, care incită la ură, sexual, periculos sau care încurajează consumul excesiv, jocurile cu băutură, condusul după consum sau consumul de alcool de către minori;
+- să fotografiezi intenționat persoane, fețe, acte de identitate sau informații private ale altora – fotografiază doar produsul;
+- să încarci fotografii pe care nu ai dreptul să le folosești;
+- să ocolești confirmarea vârstei, notificarea AI, verificările de siguranță sau limitele de utilizare, de exemplu cu mai multe conturi sau cu instrumente automate;
+- să folosești funcțiile AI automat sau în masă (scripturi, boți, extragere automată de date), în scop comercial, ori să colectezi răspunsurile pentru a construi un set de date sau pentru a antrena alt model AI;
+- să încerci să extragi instrucțiunile pe care le dăm AI-ului sau să ataci ori să supraîncarci serviciul AI.
+Putem refuza, limita sau suspenda accesul la funcțiile AI (iar pentru încălcări grave sau repetate, accesul la DrinkMe, conform §8) dacă încalci aceste reguli.
+
+**Limite de utilizare.** Pentru ca serviciul să rămână disponibil pentru toți, serverul nostru limitează cât poate folosi AI fiecare cont: cel mult **20 de scanări foto și 10 seturi de rețete pe zi**, o limită pe oră și o singură cerere AI în același timp. Căutările după codul de bare au propria limită. Aplicația îți spune când atingi o limită. Putem modifica limitele, de exemplu când cererea sau capacitatea noastră se schimbă; limitele actuale sunt afișate în „Cum funcționează AI în DrinkMe”.
+
+**Raportarea răspunsurilor AI.** Fiecare rețetă și fiecare rezultat al scanării are un buton **Raportează**. Alege un motiv (ofensator sau nepotrivit; nesigur sau încurajează consumul excesiv; ingredient, cantitate sau produs greșit; altceva). Ne propunem să verificăm raportările despre răspunsuri **nesigure sau ofensatoare** în **24 de ore**, iar pe cele despre răspunsuri **greșite** (și „altceva”) în **72 de ore**. Folosim raportările pentru a corecta problemele și pentru a ne îmbunătăți regulile de siguranță. Nu trimitem un răspuns individual pentru fiecare raportare AI; dacă vrei un răspuns, scrie-ne la drinkmesocialapp@gmail.com. Cât timp păstrăm raportările: Politica de confidențialitate §7.
+
+**Disponibilitate.** Funcțiile AI sunt oferite gratuit și pot fi limitate, întrerupte, modificate sau retrase oricând – de exemplu în perioada beta, când serverul nostru AI este ocupat sau în mentenanță, din motive de siguranță sau când schimbăm modelul. Nu ai dreptul la o anumită funcție AI sau la un anumit model. Dacă o schimbare afectează modul în care sunt folosite datele tale, vom actualiza notificarea AI și Politica de confidențialitate și te vom anunța în aplicație înainte ca schimbarea să se aplice.
 
 ## 8. Moderare, suspendare și încetare
 - Oricine este conectat poate raporta o postare, un comentariu sau un profil (motive: spam, hărțuire, minori, consum periculos, alcool etichetat greșit, altul) și poate bloca alți utilizatori.
@@ -56,7 +88,7 @@ Ne străduim să menținem DrinkMe disponibil, dar nu putem garanta că va func�
 - Suntem un serviciu de găzduire pentru conținutul utilizatorilor: acționăm asupra conținutului ilegal când aflăm de el (Regulamentul (UE) 2022/2065, art. 6).
 
 ## 13. Modificarea Termenilor
-Putem actualiza acești Termeni, de exemplu pentru funcții noi sau schimbări legislative. Pentru modificări importante te vom anunța în aplicație cu cel puțin 15 zile înainte de aplicare (cu excepția modificărilor urgente din motive legale sau de siguranță) și îți vom cere să le accepți. Dacă nu ești de acord, îți poți șterge contul înainte ca modificarea să se aplice.
+Putem actualiza acești Termeni, de exemplu pentru funcții noi sau schimbări legislative. Pentru modificări importante te vom anunța în aplicație cu cel puțin 15 zile înainte de aplicare (cu excepția modificărilor urgente din motive legale sau de siguranță) și îți vom cere să le accepți: aplicația îți arată din nou pasul Termenilor, cu noul număr de versiune. Dacă nu ești de acord, îți poți șterge contul înainte ca modificarea să se aplice.
 
 ## 14. Legea aplicabilă și litigii
 - Acești Termeni sunt guvernați de **legea română**. Dacă ești consumator și locuiești în altă țară, păstrezi protecția legilor imperative din țara ta de reședință și poți introduce acțiuni la instanțele din țara ta.
@@ -69,3 +101,5 @@ Tulbure Aron PFA · drinkmesocialapp@gmail.com · B-dul Bucureștii Noi 136, Par
 
 ---
 Surse verificate la 2026-11-12: Regulamentul (UE) 2022/2065 (DSA) art. 6, 14, 16, 17, 19; Regulamentul (UE) 2024/3228 (abrogarea SOL, EUR-Lex); Regulamentul (CE) 593/2008 (Roma I) art. 6; Regulamentul (UE) 1215/2012 art. 17–18; Directiva 93/13/CEE (clauze abuzive) – DE VERIFICAT cu avocatul.
+Verificat la 2026-11-22 față de cod (ramura de lansare `auto/launch-2026-11-17`): acceptarea Termenilor cu versiune (`TERMS_VERSION = 1` pe server; pasul Termenilor din aplicație există în spatele `EXPO_PUBLIC_TERMS_STEP_ENABLED` și trebuie activat în versiunea pentru magazine). §7a provine din ramura `auto/ai-2026-11-16` (PR #4, unificat la 2026-11-23, deciziile D-21–D-28); face parte din versiunea 1, astfel încât activarea ulterioară a AI să nu necesite o nouă acceptare, dar se aplică doar după activarea AI.
+§7a (adăugat la 2026-11-22, deciziile D-21–D-27): Regulamentul (UE) 2024/1689 (AI Act) art. 50 – se aplică de la 2 august 2026, neamânat (verificat la 2026-11-22, DE VERIFICAT pe EUR-Lex); Directiva (UE) 2019/770 art. 3 alin. (1), art. 7–8; Directiva 93/13/CEE, anexa 1 lit. (b); Directiva (UE) 2024/2853 (răspunderea pentru produse, inclusiv software și AI, pentru produsele introduse pe piață după 9 decembrie 2026 – DE VERIFICAT transpunerea în România); politica Google Play privind conținutul generat de AI. §7a descrie starea de lansare decisă la 2026-11-22 și corespunde codului reverificat în aceeași zi (`internal/data-inventory.md` §8.0).

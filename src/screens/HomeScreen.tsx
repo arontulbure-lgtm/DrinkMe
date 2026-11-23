@@ -84,7 +84,7 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
     queryFn: () => apiFetch<Story[]>('/api/stories'),
   });
 
-  const { data: notificationData } = useQuery<{ notifications: NotificationItem[]; unreadCount: number }>({
+  const { data: notificationData, refetch: refetchNotifications } = useQuery<{ notifications: NotificationItem[]; unreadCount: number }>({
     queryKey: ['notifications'],
     enabled: !!serverUserId,
     queryFn: () => apiFetch<{ notifications: NotificationItem[]; unreadCount: number }>('/api/notifications'),
@@ -148,6 +148,8 @@ export default function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
 
   const openNotifications = () => {
     setNotificationsVisible(true);
+    // The 60 s poll can be behind: opening the drawer fetches the latest list.
+    void refetchNotifications();
     if (unreadCount > 0) {
       markNotificationsRead.mutate();
     }

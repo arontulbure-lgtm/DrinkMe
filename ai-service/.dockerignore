@@ -1,0 +1,5 @@
+# Allowlist: the image needs only the app and the pinned requirements.
+*
+!requirements.txt
+!app/
+app/**/__pycache__

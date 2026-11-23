@@ -28,6 +28,7 @@ const FULL_DB = {
   cheersByUser: { 'round-trip-1': [7] },
   savedByUser: { 'round-trip-1': [7], 'round-trip-2': [] },
   smartBarByUser: { 'round-trip-1': [{ id: 1, name: 'Tonic', quantity: '1', unit: 'bottle' }] },
+  savedRecipesByUser: { 'round-trip-1': [{ id: 'r_0123456789abcdef', name: 'Cucumber Tonic', savedAt: '2026-01-01T00:00:00.000Z' }] },
   partnersByUser: { 'round-trip-1': ['round-trip-2'], 'round-trip-2': ['round-trip-1'] },
   notificationsByUser: {
     'round-trip-1': [{ id: 3, type: 'partner', message: 'Synthetic', read: false, createdAt: '2026-01-01T00:00:00.000Z' }],

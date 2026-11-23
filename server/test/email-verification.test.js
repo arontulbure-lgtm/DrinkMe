@@ -728,6 +728,7 @@ test('delete-unverified: the sixth attempt in the window gets 429', async (t) =>
 
 const productionEnv = (overrides = {}) => ({
   NODE_ENV: 'production',
+  AI_PROVIDER: 'off', // production requires an explicit choice
   JWT_SECRET: 'abcdefghijklmnopqrstuvwxyz012345',
   FIREBASE_SERVICE_ACCOUNT_KEY: TEST_SERVICE_ACCOUNT,
   ALLOW_INSECURE_DEV_AUTH: undefined,

@@ -1,0 +1,162 @@
+{
+  "$defs": {
+    "RecipeIngredient": {
+      "additionalProperties": false,
+      "properties": {
+        "abv": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Abv",
+          "type": "number"
+        },
+        "amount": {
+          "exclusiveMinimum": 0,
+          "maximum": 1000,
+          "title": "Amount",
+          "type": "number"
+        },
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "unit": {
+          "enum": [
+            "ml",
+            "g",
+            "piece"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "amount",
+        "unit"
+      ],
+      "title": "RecipeIngredient",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "aiGenerated": {
+      "const": true,
+      "default": true,
+      "title": "Aigenerated",
+      "type": "boolean"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Description",
+      "type": "string"
+    },
+    "estimatedAbv": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Estimatedabv",
+      "type": "number"
+    },
+    "garnish": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Garnish"
+    },
+    "glass": {
+      "maxLength": 60,
+      "minLength": 1,
+      "title": "Glass",
+      "type": "string"
+    },
+    "ingredients": {
+      "items": {
+        "$ref": "#/$defs/RecipeIngredient"
+      },
+      "maxItems": 12,
+      "minItems": 1,
+      "title": "Ingredients",
+      "type": "array"
+    },
+    "isAlcoholic": {
+      "title": "Isalcoholic",
+      "type": "boolean"
+    },
+    "language": {
+      "enum": [
+        "en",
+        "ro"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "method": {
+      "enum": [
+        "build",
+        "stir",
+        "shake",
+        "blend",
+        "muddle"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "standardDrinks": {
+      "minimum": 0,
+      "title": "Standarddrinks",
+      "type": "number"
+    },
+    "steps": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 6,
+      "title": "Tags",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "ingredients",
+    "steps",
+    "glass",
+    "method",
+    "estimatedAbv",
+    "standardDrinks",
+    "isAlcoholic",
+    "language"
+  ],
+  "title": "Recipe",
+  "type": "object"
+}

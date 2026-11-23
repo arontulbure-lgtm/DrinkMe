@@ -51,9 +51,9 @@ footer.site .wrap{padding-top:16px;padding-bottom:28px}
 <header class="site"><div class="wrap"><a class="brand" href="../index.html">Drink<span>Me</span></a><nav class="site"><a href="index.html">All documents</a><a href="../ro/device-storage-notice.html" hreflang="ro" lang="ro">Română</a></nav></div></header>
 <main class="wrap">
 <div class="banner" role="note"><strong>Draft – pending legal review</strong><p>This text is a draft that a qualified lawyer has not yet reviewed. It is not legal advice and may change before DrinkMe is published.</p></div>
-<p class="meta">Last updated: <time datetime="2026-11-12">2026-11-12</time> · Draft version: v0.1</p>
+<p class="meta">Last updated: <time datetime="2026-11-22">2026-11-22</time> · Draft version: v0.2</p>
 <h1>Device Storage Notice</h1>
-<p>Version 0.1 · Effective date: <mark>[to be set at publication]</mark></p>
+<p>Version 0.2 · Effective date: <mark>[to be set at publication]</mark></p>
 <p>DrinkMe stores a few items on your phone. All of them are <strong>strictly necessary</strong> to provide the service you asked for, so no consent is required (Directive 2002/58/EC Art. 5(3); Romanian Law 506/2004 Art. 4(5)). <strong>We use no tracking, advertising or analytics technologies.</strong></p>
 <div class="table-wrap" role="region" tabindex="0" aria-label="table">
 <table><thead><tr><th scope="col">What</th><th scope="col">Where on the phone</th><th scope="col">Why</th><th scope="col">How long</th></tr></thead><tbody>
@@ -62,8 +62,9 @@ footer.site .wrap{padding-top:16px;padding-bottom:28px}
 <tr><td>Your language choice</td><td>App storage</td><td>Show the app in your language</td><td>Until you change it or uninstall</td></tr>
 <tr><td>When a verification email was last sent</td><td>App storage</td><td>Avoid sending repeated emails</td><td>Until you uninstall</td></tr>
 <tr><td>Images you viewed</td><td>App cache</td><td>Faster loading</td><td>About 1 day</td></tr>
+<tr><td>App-integrity token (only once we switch app-integrity checks on)</td><td>App storage, managed by the Firebase App Check library</td><td>Show our server that requests come from the genuine DrinkMe app (security)</td><td>Short-lived; renewed automatically – VERIFY the exact lifetime when the library is added</td></tr>
 </tbody></table></div>
-<p><strong>Permissions:</strong> camera and photo library, only when you choose to add a photo. DrinkMe does not ask for your location; the place search sends the text you type to Google Maps Platform.</p>
+<p><strong>Permissions:</strong> camera and photo library, only when you choose to add a photo (and, once the AI features are switched on, the camera when you scan a label or barcode; scan photos are not saved on your phone by DrinkMe). DrinkMe does not ask for your location; the place search sends the text you type to Google Maps Platform.</p>
 <p><strong>Push notifications:</strong> not used; notifications appear inside the app.</p>
 <p><strong>Third-party content:</strong> Google profile photos are loaded directly from Google's servers, which see your IP address.</p>
 <p>If we ever add analytics, advertising or crash reporting, we will update this notice and ask for consent where required.</p>

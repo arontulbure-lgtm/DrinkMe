@@ -7,7 +7,7 @@ Law: DSA Art. 9 (orders to act against illegal content) and Art. 10 (orders to p
 ## Procedure
 1. Accept requests only in writing at drinkmesocialapp@gmail.com (DSA Art. 11 single point of contact for authorities; languages: Romanian, English).
 2. Verify the authority and the legal basis; ask for a court order/prosecutor's order where the law requires one. Non-EU requests: require a mutual legal assistance route unless an emergency (imminent threat to life).
-3. Disclose the minimum data. What we have: see `data-inventory.md`. We do **not** keep IPs in the database; host request logs may hold IPs for a limited time (LC-15).
+3. Disclose the minimum data. What we have: see `data-inventory.md`. We do **not** keep IP addresses: not in the database and, since T-05, not in the production request logs (IPs exist only in memory for rate limits, ≤ 15 minutes).
 4. Preserve data on a valid preservation request (snapshot outside the normal 30-day backup cycle; document and delete when the request ends).
 5. Inform the affected user unless legally prohibited.
 6. Threat to life or safety (DSA Art. 18): notify the Romanian Police (Poliția Română) or the competent authority of the Member State where the person is, or Europol if unclear – same day.

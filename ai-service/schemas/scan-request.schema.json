@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "imageBase64": {
+      "maxLength": 10000000,
+      "minLength": 16,
+      "title": "Imagebase64",
+      "type": "string"
+    },
+    "language": {
+      "default": "en",
+      "enum": [
+        "en",
+        "ro"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "mimeType": {
+      "enum": [
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+      ],
+      "title": "Mimetype",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1",
+      "default": "1",
+      "title": "Schemaversion",
+      "type": "string"
+    }
+  },
+  "required": [
+    "imageBase64",
+    "mimeType"
+  ],
+  "title": "ScanRequest",
+  "type": "object"
+}

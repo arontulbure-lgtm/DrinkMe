@@ -1,9 +1,9 @@
-DRAFT v0.1 – 2026-11-16 – to be reviewed by a qualified lawyer before publication. Not legal advice.
+DRAFT v0.2 – 2026-11-22 – to be reviewed by a qualified lawyer before publication. Not legal advice.
 
 # Google Play Console – Data safety, Target audience, Content declarations
 
 Where: Play Console → your app → **Policy → App content**. Fill the sections in this order: Privacy policy → App access → Ads → Content rating (see `age-rating.md`) → Target audience and content → Data safety → Government apps (No) → Financial features (none) → Health (none).
-Facts come from the code on branch `auto/run-2026-11-14` via `docs/legal/internal/data-inventory.md`. Google Play policies were **not** fetched in full for this draft except the Tobacco and Alcohol policy (support.google.com/googleplay/android-developer/answer/9878810, read 2026-11-16) – VERIFY each question's wording in the console.
+Facts come from the code on branch `auto/run-2026-11-14` via `docs/legal/internal/data-inventory.md`, re-checked on `auto/launch-2026-11-17` on 2026-11-22 (AI off, App Check off, Terms acceptance recorded). Google Play policies were **not** fetched in full for this draft except the Tobacco and Alcohol policy (support.google.com/googleplay/android-developer/answer/9878810, read 2026-11-16) – VERIFY each question's wording in the console.
 
 ## 1. Privacy policy
 URL: `[BASE_URL]/en/privacy.html`
@@ -63,7 +63,9 @@ Purposes **not** ticked for any type: Analytics, Developer communications, Adver
 ### 6.3 Not collected (leave unticked)
 Location (approximate and precise – no location permission; place names are text), Financial info, Health and fitness, Messages (no direct messaging; comments are public user content), Audio, Files and docs, Calendar, Contacts, App info and performance (no crash logs or diagnostics SDK in release builds; `devLogBridge` is development-only), Device or other IDs (no advertising ID; VERIFY that no dependency adds `com.google.android.gms.permission.AD_ID` to the merged Android manifest after the first EAS build), Web browsing, Installed apps, Personal info → Address / Phone number / Race and ethnicity / Political or religious beliefs / Sexual orientation.
 
-Server request logs (IP address, user agent) are kept by the host for security; Play has no IP-address type and IP is not used for location. VERIFY with the lawyer once log retention is set (LC-15); if IP geolocation is ever added, declare Approximate location.
+Server request logs contain **no IP address, user agent or referrer** in production (T-05); IP addresses are used only in memory for rate limits (≤ 15 minutes) and never for location. Nothing to declare; if IP geolocation is ever added, declare Approximate location.
+
+Terms acceptance (version and date) and App Check: the Terms record is part of the account (covered by "User IDs"/"Other info" purposes Account management, App functionality). App Check is off at launch; if it is switched on with Play Integrity, VERIFY whether Google expects any Data safety entry for Play Integrity (Google's own SDK guidance) – recommended reading: no new data type, because our server receives only an app attestation token and keeps only counts.
 
 ### 6.4 Security practices shown on the listing
 - Data encrypted in transit: see 6.1 (only after HTTPS).
@@ -83,4 +85,18 @@ Server request logs (IP address, user agent) are kept by the host for security; 
 | Photo and video permissions declaration (if the console asks, because of `READ_MEDIA_IMAGES`) | The app uses the system photo picker / camera only when the user adds a photo. VERIFY after the first EAS build which media permissions `expo-image-picker` adds to the Android manifest; if only the Android Photo Picker is used, no declaration is needed |
 
 ## 8. Keep in sync
-These answers match `docs/legal/privacy-policy.md` §2, §5 and §8 and `apple-privacy-labels.md`. Turning on AI (OpenAI would receive photos and ingredient lists), analytics, crash reporting, push notifications or ads changes this form and the policy **before** release.
+These answers match `docs/legal/privacy-policy.md` v0.4 §2, §5 and §8 and `apple-privacy-labels.md`. Turning on AI (§9: local models on DrinkMe's own EU/EEA AI server, photos processed in memory only and never kept, OpenAI never used), analytics, crash reporting, push notifications or ads changes this form and the policy **before** release.
+
+## 9. When AI is enabled (applies once the AI features are switched on)
+Applies to the first build in which the scanner and AI recipes are switched on (`AI_PROVIDER=local` on DrinkMe's own EU/EEA GPU host, LC-45). Privacy Policy §5a describes the processing; the internal record is `docs/legal/internal/store-disclosures.md` "AI features". Decisions of 2026-11-22: photos processed in memory only and **never kept** (no opt-in at launch, `AI_PHOTO_OPT_IN_ENABLED` off), OpenAI and any outside AI company never used. Changes to the answers above:
+
+| Item | Change | Notes |
+|---|---|---|
+| Photos and videos → **Photos** | Add the scanner as a source: the photo is processed in memory on our own AI server and deleted after the answer → **processed ephemerally** for the scanner. The existing "Photos – App functionality" entry (post and profile photos) stays | Optional: Yes. Shared: No (our own AI service; the GPU host is a service provider). If the opt-in is ever offered, photos are stored → redo this row first |
+| App activity → **Other user-generated content** | Add saved AI recipes, AI basics, reports about AI answers | App functionality; reports also Fraud prevention, security and compliance |
+| App activity → **Other actions** (or App info and performance – VERIFY) | Daily AI usage counters (20 scans, 10 recipe batches per user per day), deleted after one day | App functionality; Fraud prevention, security and compliance |
+| Barcode lookup | Nothing new: only the barcode number goes to Open Food Facts, from our server, without any user data | Not "sharing" of user data |
+| Deletion | Account deletion also deletes saved recipes, AI settings and the user's AI reports; no scan photos exist to delete | Already on the deletion page |
+| **AI-Generated Content policy** | In-app reporting of offensive AI output is required: built (Report on recipe detail and scan result → `POST /api/ai/report`) | John reviews these reports (24 h unsafe/offensive, 72 h wrong – D-25) |
+| Content rating | Re-answer IARC questions about AI-generated content if asked (`age-rating.md` §4) | — |
+| Camera permission | `expo-camera` (no audio) | Photo and video permissions declaration only if the console asks |

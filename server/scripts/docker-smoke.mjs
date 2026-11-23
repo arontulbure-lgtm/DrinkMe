@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // npm run docker:smoke: builds the production image, starts it with a throwaway key and secret (never real
-// ones), checks /healthz, that /api answers 401 without a session, that the dev-only route is absent, and
-// that the container runs as a non-root user, then removes it. Needs Docker.
+// ones), checks /healthz and /readyz, that /api answers 401 without a session, that the dev-only route is
+// absent, and that the container runs as a non-root user, then removes it. Needs Docker.
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import net from 'node:net';
@@ -42,6 +42,7 @@ async function main() {
     '-e', `JWT_SECRET=${crypto.randomBytes(48).toString('base64')}`,
     '-e', `FIREBASE_SERVICE_ACCOUNT_KEY=${serviceAccount}`,
     '-e', 'ALLOW_EMPTY_DB=true',
+    '-e', 'AI_PROVIDER=off', // production refuses to start without an explicit choice
     IMAGE,
   ]);
   if (run.status !== 0) throw new Error(`docker run failed:\n${run.stderr}`);
@@ -53,6 +54,8 @@ async function main() {
       if (!healthy) await sleep(500);
     }
     results.push(['/healthz answers 200', healthy]);
+    const ready = await fetch(`http://127.0.0.1:${port}/readyz`).catch(() => null);
+    results.push(['/readyz answers 200 (database loaded, firebase-admin initialised)', ready?.status === 200]);
     const api = await fetch(`http://127.0.0.1:${port}/api/drinks`).catch(() => null);
     results.push(['/api without a session answers 401', api?.status === 401]);
     const dev = await fetch(`http://127.0.0.1:${port}/__dev/client-log`, { method: 'POST' }).catch(() => null);
