@@ -51,7 +51,7 @@ export function flattenPages<T>(data: InfiniteData<Page<T>, unknown> | undefined
 // A refetch makes one request per loaded page, and the API allows 100 per 15 minutes per IP.
 // Trimming first makes it one request; the rest load again through Load more.
 export function trimToFirstPage(queryClient: QueryClient, filters: QueryFilters): void {
-  queryClient.setQueriesData<unknown>(filters, (existing) => {
+  queryClient.setQueriesData<unknown>(filters, (existing: unknown) => {
     const isInfinite = !!existing && typeof existing === 'object' && 'pages' in existing && 'pageParams' in existing;
     if (!isInfinite) return existing;
     const { pages, pageParams } = existing as InfiniteData<unknown, unknown>;

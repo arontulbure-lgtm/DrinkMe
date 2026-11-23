@@ -371,7 +371,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
               style={[styles.statItemTouchable, !canOpenPartners && styles.statItemDisabled]}
               onPress={() =>
                 navigation.navigate('PartnersList', {
-                  userId: viewedUserId,
+                  userId: viewedUserId ?? undefined,
                 })
               }
               disabled={!canOpenPartners}

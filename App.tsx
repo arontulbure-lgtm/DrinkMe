@@ -68,7 +68,7 @@ export default function App() {
                   onStateChange={reportScreen}
                 >
                   <AppNavigator />
-                  <StatusBar style="light" backgroundColor="#000000" />
+                  <StatusBar style="light" />
                 </NavigationContainer>
               </AuthProvider>
             </ErrorBoundary>
