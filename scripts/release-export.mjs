@@ -84,7 +84,7 @@ export function stripFrontMatter(text) {
 }
 
 export function cleanPackageJson(pkg) {
-  const out = structuredClone(pkg);
+  const out = JSON.parse(JSON.stringify(pkg));
   for (const name of DROP_DEV_DEPENDENCIES) {
     if (out.devDependencies) delete out.devDependencies[name];
     if (out.dependencies) delete out.dependencies[name];

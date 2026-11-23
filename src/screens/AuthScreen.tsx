@@ -23,6 +23,7 @@ import {
   normalizeEmail,
 } from '../lib/passwordReset';
 import Constants from 'expo-constants';
+import { isRunningInExpoGo } from 'expo';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -77,7 +78,8 @@ let passwordResetCooldownUntil = 0;
 // Google OAuth via browser redirect does not work in Expo Go because the
 // exp:// redirect URI cannot be registered in Google Cloud Console
 // (it only accepts HTTPS URIs for web clients). Works fine in standalone builds.
-const IS_EXPO_GO = Constants.appOwnership === 'expo';
+// Expo Go 58 reports appOwnership null and executionEnvironment 'bare'; isRunningInExpoGo() is Expo's own check.
+const IS_EXPO_GO = isRunningInExpoGo();
 
 // ── Google auth button ────────────────────────────────────────────────────────
 function GoogleAuthButton({ onCredential, disabled }: {

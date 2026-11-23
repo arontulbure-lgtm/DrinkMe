@@ -141,9 +141,12 @@ export default function AiRecipesScreen({ navigation, route }: RootStackScreenPr
         {errorKey && !isLoading && (
           <View style={styles.errorBox} accessibilityLiveRegion="polite">
             <Text style={styles.errorText}>{t(errorKey)}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => load(recipes.length === 0)} accessibilityRole="button">
-              <Text style={styles.retryText}>{t('common.retry')}</Text>
-            </TouchableOpacity>
+            {/* A daily limit lasts until tomorrow: no retry button that can only fail again. */}
+            {errorKey !== 'ai.errors.ai_daily_limit' && (
+              <TouchableOpacity style={styles.retryButton} onPress={() => load(recipes.length === 0)} accessibilityRole="button">
+                <Text style={styles.retryText}>{t('common.retry')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
