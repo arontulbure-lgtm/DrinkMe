@@ -13,7 +13,6 @@ export default {
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
-    newArchEnabled: true,
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
@@ -46,7 +45,6 @@ export default {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#000000"
       },
-      edgeToEdgeEnabled: true,
       // No Google Drive backup of app data: the Firebase session must not be restored on another device.
       allowBackup: false,
       // Permissions the app never uses. RECORD_AUDIO: photos only, no video. SYSTEM_ALERT_WINDOW: comes from
@@ -64,6 +62,8 @@ export default {
     plugins: [
       // No Face ID prompt: the token is stored without requireAuthentication.
       ["expo-secure-store", { "faceIDPermission": false }],
+      "expo-image",
+      "expo-web-browser",
       "expo-apple-authentication",
       ["expo-image-picker", {
         "photosPermission": "DrinkMe needs access to your photos to add drink images.",
