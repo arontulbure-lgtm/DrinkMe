@@ -227,6 +227,15 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
             </TouchableOpacity>
           </View>
         ))}
+        {/* Under the list, where people look for it: the header "+" alone was easy to miss (iPhone test 2026-11-23). */}
+        <TouchableOpacity
+          style={[styles.addButton, styles.addAnotherButton]}
+          onPress={() => setIsAddingItem(true)}
+          accessibilityRole="button"
+        >
+          <Ionicons name="add" size={20} color="#FFFFFF" />
+          <Text style={styles.addButtonText}>{t('smartBar.addAnother')}</Text>
+        </TouchableOpacity>
       </View>
     );
   }, [handleDeleteItem, inventory, isLoading, t]);
@@ -540,10 +549,11 @@ export default function SmartBarScreen({ navigation }: TabScreenProps<'SmartBar'
         {activeTab === 'inventory' && (
           <View style={styles.suggestionsSection}>
             <Text style={styles.sectionTitle}>{t('explore.sections.discover')}</Text>
-            <Text style={styles.sectionSubtitle}>{t('smartBar.addItemTitle')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('smartBar.scanCardSubtitle')}</Text>
             <TouchableOpacity
               style={styles.suggestionCard}
               onPress={() => navigation.navigate('Scanner')}
+              accessibilityRole="button"
             >
               <Ionicons name="scan-outline" size={24} color="#8B5FBF" />
               <View style={styles.suggestionContent}>
@@ -708,6 +718,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  addAnotherButton: {
+    alignSelf: 'center',
+    marginTop: 4,
   },
   addButtonText: {
     color: '#FFFFFF',

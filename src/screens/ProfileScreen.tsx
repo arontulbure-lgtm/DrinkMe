@@ -220,7 +220,7 @@ export default function ProfileScreen({ navigation, route }: ProfileScreenProps)
       const code = error instanceof ApiError ? error.code : undefined;
       let message = t('profile.avatarUploadError');
       if (status === 413) message = t('profile.avatarTooLarge');
-      if (status === 400) message = t('profile.avatarInvalidFormat');
+      if (status === 400) message = t(code === 'image_metadata' ? 'common.imageMetadata' : 'profile.avatarInvalidFormat');
       if (status === 507) message = t(code === 'user_image_quota' ? 'common.imageQuotaReached' : 'common.serviceUnavailable');
       if (isAccountSuspendedError(error)) message = t(ACCOUNT_SUSPENDED_ERROR_KEY);
       refreshIfSuspended(error);

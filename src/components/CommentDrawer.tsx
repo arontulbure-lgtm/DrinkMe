@@ -146,145 +146,146 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
       statusBarTranslucent
       onRequestClose={() => (actionsComment ? actionsCloseRef.current() : handleClose())}
     >
-      <TouchableWithoutFeedback onPress={handleClose} accessibilityRole="button" accessibilityLabel={t('common.close')}>
-        <View style={styles.backdrop} />
-      </TouchableWithoutFeedback>
+      {/* The keyboard-avoiding view spans the whole screen and the drawer sits at its bottom, so on iOS the keyboard
+          pushes the whole drawer (and its input) up. Inside the drawer it measured from the drawer's top and moved
+          the input too little: the keyboard covered it. The drawer shrinks when the keyboard leaves less room. */}
+      <KeyboardAvoidingView style={styles.keyboardArea} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableWithoutFeedback onPress={handleClose} accessibilityRole="button" accessibilityLabel={t('common.close')}>
+          <View style={styles.backdrop} />
+        </TouchableWithoutFeedback>
 
-      <Animated.View style={[styles.drawer, { transform: [{ translateY }] }]}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={0}
-        >
-          {/* Handle */}
-          <View style={styles.handle} />
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>{t('drinkDetail.comments')}</Text>
-            <TouchableOpacity
-              onPress={handleClose}
-              hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
-              accessibilityRole="button"
-              accessibilityLabel={t('common.close')}
+        <Animated.View style={[styles.drawer, { transform: [{ translateY }] }]}>
+          <View style={styles.flex}>
+            {/* Handle */}
+            <View style={styles.handle} />
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>{t('drinkDetail.comments')}</Text>
+              <TouchableOpacity
+                onPress={handleClose}
+                hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.close')}
+              >
+                <Ionicons name="close" size={22} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.list}
+              contentContainerStyle={styles.listContent}
+              keyboardShouldPersistTaps="handled"
             >
-              <Ionicons name="close" size={22} color="#9CA3AF" />
-            </TouchableOpacity>
-          </View>
+              {isNotFoundError(commentsError) ? (
+                <View style={styles.centered}>
+                  <Ionicons name="alert-circle-outline" size={36} color="#374151" />
+                  <Text style={styles.emptyText}>{t('post.notFound')}</Text>
+                </View>
+              ) : isAgeRequiredError(commentsError) ? (
+                <View style={styles.centered}>
+                  <Ionicons name="lock-closed-outline" size={36} color="#374151" />
+                  <Text style={styles.emptyText}>{t('ageGate.required')}</Text>
+                </View>
+              ) : commentPages === undefined ? (
+                <ListLoadState
+                  isError={isError}
+                  isFetching={isFetching}
+                  message={t('drinkDetail.commentsLoadError')}
+                  onRetry={() => refetch()}
+                />
+              ) : comments.length === 0 ? (
+                <View style={styles.centered}>
+                  <Ionicons name="chatbubble-outline" size={36} color="#374151" />
+                  <Text style={styles.emptyText}>{t('drinkDetail.noComments')}</Text>
+                </View>
+              ) : (
+                comments.map((comment) => {
+                  const commentUser = comment.userId === serverUserId && profile ? profile : comment.user;
+                  const avatarUri = commentUser?.avatar ?? null;
+                  const displayName = commentUser?.firstName
+                    ? `${commentUser.firstName} ${commentUser.lastName || ''}`.trim()
+                    : t('common.unknownUser');
+                  const initial = displayName[0]?.toUpperCase() ?? '?';
 
-          <ScrollView
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            {isNotFoundError(commentsError) ? (
-              <View style={styles.centered}>
-                <Ionicons name="alert-circle-outline" size={36} color="#374151" />
-                <Text style={styles.emptyText}>{t('post.notFound')}</Text>
-              </View>
-            ) : isAgeRequiredError(commentsError) ? (
-              <View style={styles.centered}>
-                <Ionicons name="lock-closed-outline" size={36} color="#374151" />
-                <Text style={styles.emptyText}>{t('ageGate.required')}</Text>
-              </View>
-            ) : commentPages === undefined ? (
-              <ListLoadState
-                isError={isError}
-                isFetching={isFetching}
-                message={t('drinkDetail.commentsLoadError')}
-                onRetry={() => refetch()}
-              />
-            ) : comments.length === 0 ? (
-              <View style={styles.centered}>
-                <Ionicons name="chatbubble-outline" size={36} color="#374151" />
-                <Text style={styles.emptyText}>{t('drinkDetail.noComments')}</Text>
-              </View>
-            ) : (
-              comments.map((comment) => {
-                const commentUser = comment.userId === serverUserId && profile ? profile : comment.user;
-                const avatarUri = commentUser?.avatar ?? null;
-                const displayName = commentUser?.firstName
-                  ? `${commentUser.firstName} ${commentUser.lastName || ''}`.trim()
-                  : t('common.unknownUser');
-                const initial = displayName[0]?.toUpperCase() ?? '?';
-
-                return (
-                  <View key={comment.id} style={styles.commentRow}>
-                    <View style={styles.avatarWrap}>
-                      {avatarUri ? (
-                        <MediaImage uri={avatarUri} style={styles.avatarImg} />
-                      ) : (
-                        <View style={styles.avatarFallback}>
-                          <Text style={styles.avatarInitial}>{initial}</Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.commentBody}>
-                      <View style={styles.commentMeta}>
-                        <Text style={styles.commentAuthor} numberOfLines={1}>{displayName}</Text>
-                        <OfficialBadge official={commentUser?.official} style={styles.officialBadge} />
-                        <Text style={styles.commentTime}>{formatTimeAgo(comment.createdAt, t)}</Text>
-                        <TouchableOpacity
-                          style={styles.commentMoreButton}
-                          onPress={() => {
-                            Keyboard.dismiss();
-                            actionsPostOwnerRef.current = findCachedDrink(queryClient, comment.drinkId)?.userId;
-                            setActionsComment(comment);
-                          }}
-                          hitSlop={6}
-                          accessibilityRole="button"
-                          accessibilityLabel={t('comment.actions')}
-                        >
-                          <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
-                        </TouchableOpacity>
+                  return (
+                    <View key={comment.id} style={styles.commentRow}>
+                      <View style={styles.avatarWrap}>
+                        {avatarUri ? (
+                          <MediaImage uri={avatarUri} style={styles.avatarImg} />
+                        ) : (
+                          <View style={styles.avatarFallback}>
+                            <Text style={styles.avatarInitial}>{initial}</Text>
+                          </View>
+                        )}
                       </View>
-                      <Text style={styles.commentContent}>{comment.content}</Text>
-                      {/* Only the author and admins receive a comment hidden after reports. */}
-                      {comment.hiddenPendingReview && (
-                        <ModerationNotice messageKey="moderation.hiddenComment" style={styles.hiddenNotice} />
-                      )}
+                      <View style={styles.commentBody}>
+                        <View style={styles.commentMeta}>
+                          <Text style={styles.commentAuthor} numberOfLines={1}>{displayName}</Text>
+                          <OfficialBadge official={commentUser?.official} style={styles.officialBadge} />
+                          <Text style={styles.commentTime}>{formatTimeAgo(comment.createdAt, t)}</Text>
+                          <TouchableOpacity
+                            style={styles.commentMoreButton}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              actionsPostOwnerRef.current = findCachedDrink(queryClient, comment.drinkId)?.userId;
+                              setActionsComment(comment);
+                            }}
+                            hitSlop={6}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('comment.actions')}
+                          >
+                            <Ionicons name="ellipsis-horizontal" size={16} color="#9CA3AF" />
+                          </TouchableOpacity>
+                        </View>
+                        <Text style={styles.commentContent}>{comment.content}</Text>
+                        {/* Only the author and admins receive a comment hidden after reports. */}
+                        {comment.hiddenPendingReview && (
+                          <ModerationNotice messageKey="moderation.hiddenComment" style={styles.hiddenNotice} />
+                        )}
+                      </View>
                     </View>
-                  </View>
-                );
-              })
-            )}
-            {hasNextPage && <LoadMoreButton onPress={() => fetchNextPage()} isLoading={isFetchingNextPage} />}
-          </ScrollView>
+                  );
+                })
+              )}
+              {hasNextPage && <LoadMoreButton onPress={() => fetchNextPage()} isLoading={isFetchingNextPage} />}
+            </ScrollView>
 
-          {/* Input area */}
-          <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            {profile?.avatar ? (
-              <MediaImage uri={profile.avatar} style={styles.inputAvatar} />
-            ) : (
-              <View style={[styles.inputAvatar, styles.inputAvatarFallback]}>
-                <Text style={styles.inputAvatarInitial}>
-                  {(profile?.firstName ?? profile?.email ?? 'U')[0]?.toUpperCase() ?? 'U'}
-                </Text>
-              </View>
-            )}
-            <TextInput
-              style={styles.input}
-              placeholder={t('common.commentPlaceholder')}
-              placeholderTextColor="#6B7280"
-              value={text}
-              onChangeText={setText}
-              multiline
-              maxLength={500}
-              returnKeyType="send"
-              onSubmitEditing={handleSend}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, (!text.trim() || addCommentMutation.isPending) && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={!text.trim() || addCommentMutation.isPending}
-              hitSlop={4}
-              accessibilityRole="button"
-              accessibilityLabel={t('comment.send')}
-              accessibilityState={{ disabled: !text.trim() || addCommentMutation.isPending }}
-            >
-              <Ionicons name="send" size={18} color="#FFFFFF" />
-            </TouchableOpacity>
+            {/* Input area */}
+            <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              {profile?.avatar ? (
+                <MediaImage uri={profile.avatar} style={styles.inputAvatar} />
+              ) : (
+                <View style={[styles.inputAvatar, styles.inputAvatarFallback]}>
+                  <Text style={styles.inputAvatarInitial}>
+                    {(profile?.firstName ?? profile?.email ?? 'U')[0]?.toUpperCase() ?? 'U'}
+                  </Text>
+                </View>
+              )}
+              <TextInput
+                style={styles.input}
+                placeholder={t('common.commentPlaceholder')}
+                placeholderTextColor="#6B7280"
+                value={text}
+                onChangeText={setText}
+                multiline
+                maxLength={500}
+                returnKeyType="send"
+                onSubmitEditing={handleSend}
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, (!text.trim() || addCommentMutation.isPending) && styles.sendButtonDisabled]}
+                onPress={handleSend}
+                disabled={!text.trim() || addCommentMutation.isPending}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={t('comment.send')}
+                accessibilityState={{ disabled: !text.trim() || addCommentMutation.isPending }}
+              >
+                <Ionicons name="send" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
           </View>
-        </KeyboardAvoidingView>
-      </Animated.View>
+        </Animated.View>
+      </KeyboardAvoidingView>
 
       {/* Inside this Modal, not a second one: iOS shows only one at a time. */}
       {actionsComment && (
@@ -306,6 +307,7 @@ export default function CommentDrawer({ drinkId, onClose, onBlocked }: CommentDr
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  keyboardArea: { flex: 1, justifyContent: 'flex-end' },
   backdrop: {
     position: 'absolute',
     top: 0,
@@ -315,11 +317,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   drawer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     height: DRAWER_HEIGHT,
+    flexShrink: 1,
     backgroundColor: '#0F172A',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

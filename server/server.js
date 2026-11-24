@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 import { createLocalProvider } from './ai/localProvider.js';
 import { createBarcodeLookup, isValidEan } from './ai/openFoodFacts.js';
 import { createPhotoStore } from './ai/photoStore.js';
+import { removeImageMetadata } from './imageMetadata.js';
 import { AiProviderError, resolveAiProviderName } from './ai/provider.js';
 import { generateRecipeBatch, recipeId as recipeIdFor } from './ai/recipeEngine.js';
 import { checkRecipe, knownItemFor } from './ai/recipeSafety.js';
@@ -1522,11 +1523,14 @@ const POST_IMAGE_RULES = {
   allowedTypes: new Set(['jpeg', 'png', 'webp', 'heic']),
   maxBytes: POST_IMAGE_MAX_BYTES,
   typeError: 'Invalid image format. Use JPEG, PNG, WebP or HEIC.',
+  // Stored and shown to others: EXIF (GPS location), XMP and IPTC are removed first (imageMetadata.js).
+  stripMetadata: true,
 };
 const AVATAR_IMAGE_RULES = {
   allowedTypes: new Set(['jpeg', 'png', 'webp']),
   maxBytes: AVATAR_MAX_BYTES,
   typeError: 'Invalid image format. Use JPEG, PNG or WebP.',
+  stripMetadata: true,
 };
 
 // No HEIC for AI scans: the ai-service decodes JPEG, PNG and WebP only.
@@ -1560,11 +1564,16 @@ const detectImageType = (bytes) => {
  * Returns { dataUrl } with the type taken from the bytes, or { status, error }.
  * The type the client declared (MIME, prefix or filename) is never used.
  */
-const validateImageBytes = (bytes, { allowedTypes, maxBytes, typeError }) => {
+const validateImageBytes = (bytes, { allowedTypes, maxBytes, typeError, stripMetadata = false }) => {
   if (bytes.length > maxBytes) return { status: 413, error: 'Image too large' };
   const type = detectImageType(bytes);
   if (!allowedTypes.has(type)) return { status: 400, error: typeError };
-  return { dataUrl: toDataUrl(bytes, `image/${type}`) };
+  if (!stripMetadata) return { dataUrl: toDataUrl(bytes, `image/${type}`) };
+  const clean = removeImageMetadata(bytes, type);
+  if (!clean) {
+    return { status: 400, error: 'Photo metadata (such as the location) could not be removed. Use a JPEG, PNG or WebP photo.', code: 'image_metadata' };
+  }
+  return { dataUrl: toDataUrl(clean, `image/${type}`) };
 };
 
 // imageData is raw base64 (expo-image-picker) or a data:image/...;base64, URL.
@@ -3588,7 +3597,7 @@ app.post('/api/users/:id/avatar', requireAuth, requireAvatarOwner, refuseIfSuspe
     avatarData = validateImage(req.body.imageData, AVATAR_IMAGE_RULES);
   }
   if (!avatarData) return res.status(400).json({ error: 'Missing or invalid avatar payload' });
-  if (avatarData.error) return res.status(avatarData.status).json({ error: avatarData.error });
+  if (avatarData.error) return res.status(avatarData.status).json({ error: avatarData.error, ...(avatarData.code && { code: avatarData.code }) });
   if (wouldExceedUserImageQuota(user.id, avatarData.dataUrl, user.avatar)) return respondUserImageQuota(res);
   // A replacement that is no larger does not grow the database, so it stays allowed.
   if (avatarData.dataUrl.length > storedImageBytes(user.avatar) && isDbGrowthBlocked()) return respondDbGrowthBlocked(res);
@@ -4062,7 +4071,7 @@ app.post('/api/drinks', requireAuth, refuseIfSuspended, postBodyParser, (req, re
   // SEC-10: validate the image from its bytes
   const normalizedImage = validateImage(imageData, POST_IMAGE_RULES);
   if (normalizedImage.error) {
-    return res.status(normalizedImage.status).json({ error: normalizedImage.error });
+    return res.status(normalizedImage.status).json({ error: normalizedImage.error, ...(normalizedImage.code && { code: normalizedImage.code }) });
   }
 
   // SEC-A: sanitize text inputs

@@ -251,7 +251,7 @@ export default function CreatePostScreen({ navigation, route }: RootStackScreenP
       const code = error instanceof ApiError ? error.code : undefined;
       let message = t('createPost.error');
       if (status === 413) message = t('createPost.imageTooLarge');
-      if (status === 400) message = t('createPost.imageInvalidFormat');
+      if (status === 400) message = t(code === 'image_metadata' ? 'common.imageMetadata' : 'createPost.imageInvalidFormat');
       if (status === 429) message = t(code === 'daily_post_limit' ? 'createPost.dailyLimit' : 'common.tooManyRequests');
       if (status === 507) message = t(code === 'user_image_quota' ? 'common.imageQuotaReached' : 'common.serviceUnavailable');
       if (code === 'age_required') message = t('ageGate.required');
