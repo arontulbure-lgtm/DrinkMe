@@ -40,7 +40,7 @@ State on 2026-11-23, branch `auto/launch-2026-11-17` → `main`, tag `v1.0.0-rc1
 ## 3. Go / no-go: what only John can do (in this order)
 Blocking a **public** launch:
 1. **iPhone Expo Go test** (Expo Go 58 from the App Store): JOHN_TODO §0.
-2. **GPS in post photos:** post a geotagged photo and check that no location survives. If it does, this becomes a code blocker.
+2. **GPS in post photos:** the server now strips photo metadata (2026-11-23, `server/imageMetadata.js`). Confirm on the iPhone with a geotagged photo that no location survives.
 3. **Lawyer sign-off** of `docs/legal`, `docs/public` and `docs/store` (D-01). Then remove the draft banner and noindex.
 4. **Host the legal pages** (D-06). Set `EXPO_PUBLIC_LEGAL_BASE_URL` and, after D-01, `EXPO_PUBLIC_TERMS_STEP_ENABLED=true` in the EAS production environment.
 5. **Company data** in imprint and terms (CUI and Trade Register number, D-17). **Launch countries** limited to 18+ markets (D-02/D-03).

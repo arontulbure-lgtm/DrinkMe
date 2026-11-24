@@ -208,6 +208,7 @@ Route-coverage guard: `server/test/helpers/routes.js` holds `ROUTE_MANIFEST`: ev
 ## Limits
 - Body: 100 KB by default; JSON up to 10 MB on `POST /api/drinks` and 3 MB on the avatar route, parsed after auth. Rate limits run before body parsing. Malformed JSON or uploads return 400; too large returns 413.
 - Images: the type comes from the file signature, never from what the client declares. Base64 is strict. Posts take JPEG, PNG, WebP or HEIC up to 7 MB; avatars and AI scans take JPEG, PNG or WebP (avatars up to 2 MB, scans up to 7 MB). Only the signature is checked, not the full file (see SEC-E). Posts send JSON `imageData`; avatars send JSON `imageData` or a multipart `avatar` file.
+- Post and avatar photos are stored without metadata (EXIF with GPS, XMP, IPTC, comments, PNG text chunks; JPEG data after the first image's end is cut): `server/imageMetadata.js`. A HEIC or unreadable file that still holds a metadata marker is refused with 400 `image_metadata`. AI scans are not stored (opt-in photos use `ai/photoStore.js`).
 - Image storage: new images are refused above 200 MB in total or 100 MB per user for all time (507), and above 20 posts or 50 MB per user per rolling 24 hours (429). These count stored data-URL length, about 4/3 of the image bytes. Deleting a post frees the total and lifetime quotas, not the daily limit.
 - Text: post name 120, description 1000, location 180; profile names and city 120, bio 500; comment 500; report details 300; Smart Bar name 120, quantity and unit 60.
 - Per user: 20 posts and 200 comments per rolling 24 hours; 20 reports per 24 hours; 50 pending outgoing partner requests and 100 new requests per 24 hours (requests expire after 90 days); 200 blocks; 500 Smart Bar items (429 `smart_bar_limit`; larger existing lists keep their items and can delete); the newest 200 notifications, kept for 7 days.
@@ -274,7 +275,7 @@ Production startup: `AI_PROVIDER` must be set explicitly to `off` or `local` (un
 - INFRA-1 (blocker): backend on a public host (Railway/Render planned, see DEPLOY.md).
 - SEC-C: rotate the OpenAI key; restrict the Google Maps key (after the first EAS build, needs SHA-1).
 - SEC-D: HTTPS (comes with cloud hosting).
-- SEC-E: content security for images (only the signature is checked; re-encoding needed).
+- SEC-E: content security for images (only the signature is checked; metadata is stripped since 2026-11-23, pixels are not re-encoded).
 - Nobody reviews reports until `ADMIN_USER_IDS` is set and someone is assigned; there is no admin screen and nothing alerts on the 24-hour review target.
 - Ban evasion: a suspended user can delete the account and register again (closing it needs something like a stored email hash, a legal question).
 - The auth floor is password-only: check on the real Firebase project before enabling more sign-in providers.

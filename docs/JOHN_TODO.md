@@ -7,7 +7,8 @@ Updated by the launch run of 2026-11-23 (release candidate `v1.0.0-rc1`). Everyt
 2. Once, PowerShell **as administrator**: `New-NetFirewallRule -DisplayName "DrinkMe dev (Metro + API)" -Direction Inbound -Protocol TCP -LocalPort 5000,8081-8090 -Action Allow -Profile Private`
 3. `npm run test:ios` in `D:\DrinkMeApp\DrinkMeFinal`, scan the QR code with the Camera app. If Expo Go hangs: iPhone Settings → Wi-Fi → (i) → Configure DNS → Manual → `1.1.1.1`, `8.8.8.8`.
 4. Go through `docs/DEVICE_TEST_SESSION.md` section 4, plus the AI scanner (photo and barcode) and Smart Bar recipes (start with `AI_PROVIDER=local` in the shell; the session starts the AI service), then ask for the log triage.
-5. While on the phone: post a photo taken **with location on**, open it from the feed and check that no GPS data is left (download from `/media/...`). If location survives, it becomes a launch blocker.
+5. While on the phone: post a photo taken **with location on** and check that no GPS data is left (download it from `/media/...` on the PC and look at its properties). The server now removes photo metadata (2026-11-23), so this confirms the fix.
+6. Retest the three iPhone fixes of 2026-11-23: the comment input stays above the keyboard; the location picker stays above the keyboard; Smart Bar has an "Add another ingredient" button under the list.
 
 ## 2. Local cleanup (PowerShell in `D:\DrinkMeApp\DrinkMeFinal`)
 1. `ANTHROPIC_API_KEY`: move it to your user environment variables (the `agents/` tool reads it), then `npm run env:remove -- ANTHROPIC_API_KEY`.

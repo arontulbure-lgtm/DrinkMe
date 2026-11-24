@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -148,7 +150,8 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      {/* Full-screen and keyboard-aware: on iOS the sheet (its input focuses on open) moves above the keyboard. */}
+      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>{t('location.title')}</Text>
@@ -180,7 +183,7 @@ export function LocationPickerModal({ visible, onClose, onSelect, initialValue }
           {/* Google Places terms: results from Places carry Google's attribution (legal T-04). */}
           {results.length > 0 ? <Text style={styles.attribution}>{t('location.poweredByGoogle')}</Text> : null}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

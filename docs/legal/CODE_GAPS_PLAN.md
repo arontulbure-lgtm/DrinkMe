@@ -34,7 +34,7 @@ Planner output of 2026-11-12, from `compliance-matrix.md` (LC rows) and `OPEN_DE
 | T-18 | LC-07 | `report_outcome` notification to each live reporter at resolve (no target name). | server | S | D-14 |
 | T-19 | LC-06/07/08 | Client texts for decisions and outcomes, full statement sheet, "Ask for a review" mailto, banner rule label. | client | M | T-17, T-18, D-15 |
 | T-20 | LC-16 | Delete resolved reports after 12 months (load, resolve and the daily timer). | server | S | N-6 |
-| T-21 | LC-17 | Device check of EXIF/GPS in uploads first; then pure-JS strip for JPEG/PNG/WebP at upload, HEIC refused if the app never sends it, one-time migration behind `dbSchemaVersion` 3. | both | M/L | N-8 |
+| T-21 | LC-17 | **Done 2026-11-23** (server side): pure-JS strip for JPEG/PNG/WebP at upload (`server/imageMetadata.js`), HEIC with metadata refused. No migration: production starts empty. Device check still to do. | both | M/L | N-8 |
 | T-22 | LC-14 | `GET /api/users/:id/export` (owner, adult gate, allowed while suspended, 3 per 24 h, own data only, uid masked in logs). | server | M | N-12 |
 | T-23 | LC-14 | "Download my data" via the Share sheet (500 KB cap, email fallback). | client | S | T-22, N-5 |
 | T-24 | LC-20 | Log a count of reports past 24 h daily; warn when `ADMIN_USER_IDS` is empty with reports open. | server | S | none |
